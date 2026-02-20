@@ -71,7 +71,6 @@ footer { visibility: hidden; }
 </style>
 """, unsafe_allow_html=True)
 
-@st.cache_resource
 def get_conn():
     conn = connect()
     ensure_schema(conn)
