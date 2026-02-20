@@ -16,14 +16,6 @@ sidebar_logo()
 
 APP_DIR = Path(__file__).resolve().parent
 LOGO_PATH = APP_DIR / "assets" / "logo.png"
-
-try:
-    if LOGO_PATH.is_file():
-        st.sidebar.image(str(LOGO_PATH), use_container_width=True)
-    else:
-        st.sidebar.info(f"Logo missing: {LOGO_PATH}")
-except Exception as e:
-    st.sidebar.warning(f"Logo failed to load: {e}")
     
 ROOT = Path(__file__).resolve().parents[1]  # repo root (attendance-tracking/)
 if str(ROOT) not in sys.path:
