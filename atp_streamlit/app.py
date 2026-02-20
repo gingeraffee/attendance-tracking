@@ -3,6 +3,10 @@ import streamlit as st
 from datetime import date
 import sys
 from pathlib import Path
+import io
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
+from reportlab.lib.units import inch
 
 # MUST be the first Streamlit command
 st.set_page_config(
@@ -51,6 +55,108 @@ def load_employees():
     conn = get_conn()
     rows = repo.search_employees(conn, q="", limit=150)
     return [dict(r) for r in rows]
+
+def build_point_history_pdf(emp: dict, history_rows: list[dict]) -> bytes:
+    """
+    Returns PDF bytes for an employee's complete point history.
+    """
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=letter)
+    width, height = letter
+
+    left = 0.75 * inch
+    top = height - 0.75 * inch
+    y = top
+
+    # Header
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(left, y, "Attendance Point History")
+    y -= 0.28 * inch
+
+    c.setFont("Helvetica", 10)
+    name = f"{emp.get('last_name','')}, {emp.get('first_name','')}".strip(", ")
+    c.drawString(left, y, f"Employee: {name}")
+    y -= 0.18 * inch
+    c.drawString(left, y, f"Employee ID: {emp.get('employee_id','')}")
+    y -= 0.18 * inch
+    c.drawString(left, y, f"Location: {emp.get('location','—') or '—'}    Department: {emp.get('department','—') or '—'}")
+    y -= 0.18 * inch
+    c.drawString(left, y, f"Generated: {date.today().strftime('%m/%d/%Y')}")
+    y -= 0.30 * inch
+
+    # Summary line (optional)
+    total = float(emp.get("point_total") or 0.0)
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(left, y, f"Current Point Total: {total:.1f}")
+    y -= 0.25 * inch
+
+    # Table header
+    c.setFont("Helvetica-Bold", 9)
+    c.drawString(left, y, "Date")
+    c.drawString(left + 1.0*inch, y, "Points")
+    c.drawString(left + 1.7*inch, y, "Reason")
+    c.drawString(left + 3.7*inch, y, "Note")
+    y -= 0.12 * inch
+    c.line(left, y, width - left, y)
+    y -= 0.15 * inch
+
+    c.setFont("Helvetica", 9)
+
+    def new_page():
+        nonlocal y
+        c.showPage()
+        y = top
+        c.setFont("Helvetica-Bold", 9)
+        c.drawString(left, y, "Date")
+        c.drawString(left + 1.0*inch, y, "Points")
+        c.drawString(left + 1.7*inch, y, "Reason")
+        c.drawString(left + 3.7*inch, y, "Note")
+        y -= 0.12 * inch
+        c.line(left, y, width - left, y)
+        y -= 0.15 * inch
+        c.setFont("Helvetica", 9)
+
+    # Rows
+    for r in history_rows:
+        if y < 0.9 * inch:
+            new_page()
+
+        # Date
+        d = r.get("point_date")
+        if hasattr(d, "strftime"):
+            d_str = d.strftime("%m/%d/%Y")
+        else:
+            d_str = str(d or "")
+
+        pts = r.get("points", "")
+        reason = str(r.get("reason", "") or "")
+        note = str(r.get("note", "") or "")
+
+        c.drawString(left, y, d_str)
+        c.drawString(left + 1.0*inch, y, str(pts))
+        c.drawString(left + 1.7*inch, y, reason[:35])
+
+        # Wrap note a bit
+        note_max = 60
+        note_line = note[:note_max]
+        c.drawString(left + 3.7*inch, y, note_line)
+
+        y -= 0.18 * inch
+
+        # If note is longer, write continuation line(s)
+        remaining = note[note_max:]
+        while remaining:
+            if y < 0.9 * inch:
+                new_page()
+            cont = remaining[:note_max]
+            c.drawString(left + 3.7*inch, y, cont)
+            remaining = remaining[note_max:]
+            y -= 0.18 * inch
+
+    c.showPage()
+    c.save()
+    buf.seek(0)
+    return buf.getvalue()
 
 # --- Styling ------------------------------------------------------------------
 st.markdown(
@@ -320,106 +426,248 @@ with tab_add:
 with tab_reports:
     st.subheader("Reports")
 
-    cA, cB = st.columns(2)
+    # ------------------------------------------------------------
+    # 1) 30-Day Point History (CSV) — WITH running total
+    # ------------------------------------------------------------
+    st.markdown("### 30-Day Point History (CSV)")
 
-    with cA:
-        st.markdown("### Rolloff — Next 2 Months")
-        if st.button("Run Rolloff Report"):
-            rows_r = repo.report_rolloff_next_2_months(conn)
-            df_r = pd.DataFrame([dict(r) for r in rows_r])
-            if not df_r.empty:
-                df_r["employee_id"] = df_r["employee_id"].astype(str)
-                df_r["point_total"] = pd.to_numeric(df_r["point_total"], errors="coerce").round(1)
-            st.dataframe(df_r, use_container_width=True, hide_index=True)
+    st.caption("Exports every point event in the last 30 days, including a running total per employee.")
 
-            csv = df_r.to_csv(index=False).encode("utf-8")
-            st.download_button("Download CSV", csv, "rolloff_next_2_months.csv", "text/csv", key="dl_rolloff")
-
-    with cB:
-        st.markdown("### Perfect Attendance — Upcoming (Next 2 Months)")
-        if st.button("Run Upcoming Perfect Attendance"):
-            rows_p = repo.report_perfect_attendance_upcoming(conn)
-            df_p = pd.DataFrame([dict(r) for r in rows_p])
-            if not df_p.empty:
-                df_p["employee_id"] = df_p["employee_id"].astype(str)
-                df_p["point_total"] = pd.to_numeric(df_p["point_total"], errors="coerce").round(1)
-            st.dataframe(df_p, use_container_width=True, hide_index=True)
-
-            csv = df_p.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                "Download CSV",
-                csv,
-                "perfect_attendance_upcoming.csv",
-                "text/csv",
-                key="dl_perfect_upcoming",
-            )
-
-    st.divider()
-
-    st.markdown("### 30-Day Point History (BambooHR Import)")
-    if st.button("Run 30-Day Point History"):
+    if st.button("Generate 30-Day Point History CSV", key="btn_30day"):
         rows_30 = repo.report_points_last_30_days(conn)
         df_30 = pd.DataFrame([dict(r) for r in rows_30])
-        if not df_30.empty:
-            df_30["employee_id"] = df_30["employee_id"].astype(str)
-            df_30["points"] = pd.to_numeric(df_30["points"], errors="coerce").round(1)
-        st.dataframe(df_30, use_container_width=True, hide_index=True)
 
-        csv = df_30.to_csv(index=False).encode("utf-8")
-        st.download_button("Download CSV", csv, "points_last_30_days.csv", "text/csv", key="dl_30_day")
+        if df_30.empty:
+            st.info("No point events found in the last 30 days.")
+        else:
+            # Normalize column names we expect
+            # (adjust if your repo returns slightly different names)
+            rename_map = {
+                "employee_id": "Employee #",
+                "first_name": "First Name",
+                "last_name": "Last Name",
+                "point_date": "Point Date",
+                "points": "Point",
+                "reason": "Reason",
+                "note": "Note",
+                "flag_code": "Flag Code",
+                "point_total": "Point Total",  # current total if provided
+            }
+            for k, v in rename_map.items():
+                if k in df_30.columns:
+                    df_30 = df_30.rename(columns={k: v})
+
+            # Ensure required columns exist (create blanks if missing)
+            required = ["Employee #", "First Name", "Last Name", "Point Date", "Point", "Reason", "Note", "Point Total", "Flag Code"]
+            for col in required:
+                if col not in df_30.columns:
+                    df_30[col] = ""
+
+            # Types
+            df_30["Employee #"] = df_30["Employee #"].astype(str)
+            df_30["Point"] = pd.to_numeric(df_30["Point"], errors="coerce").fillna(0).round(1)
+
+            # If Point Total isn't provided by the query, hydrate from employee table (safe, but more queries)
+            if df_30["Point Total"].isna().all() or (df_30["Point Total"] == "").all():
+                emp_ids = df_30["Employee #"].unique().tolist()
+                totals = {}
+                for eid in emp_ids:
+                    emp_row = repo.get_employee(conn, int(eid))
+                    emp = dict(emp_row) if emp_row else {}
+                    totals[eid] = float(emp.get("point_total") or 0.0)
+                df_30["Point Total"] = df_30["Employee #"].map(totals).astype(float).round(1)
+            else:
+                df_30["Point Total"] = pd.to_numeric(df_30["Point Total"], errors="coerce").fillna(0).round(1)
+
+            # Running total per employee (chronological)
+            # Start_total = current_total - sum(points in last 30 days)  (assumes all changes are represented as events)
+            df_30["Point Date"] = pd.to_datetime(df_30["Point Date"], errors="coerce")
+            df_30 = df_30.sort_values(["Employee #", "Point Date"], ascending=[True, True]).copy()
+
+            sums = df_30.groupby("Employee #")["Point"].sum()
+            current = df_30.groupby("Employee #")["Point Total"].first()  # same for every row after map/normalize
+            start_total = (current - sums).to_dict()
+
+            df_30["Running Total"] = (
+                df_30.groupby("Employee #")["Point"].cumsum()
+                + df_30["Employee #"].map(start_total)
+            ).round(1)
+
+            # Final column order (include running total)
+            out_cols = ["Employee #", "First Name", "Last Name", "Point Date", "Point", "Reason", "Note", "Running Total", "Point Total", "Flag Code"]
+            df_out = df_30[out_cols].copy()
+
+            # Display + download
+            st.dataframe(df_out, use_container_width=True, hide_index=True)
+            csv = df_out.to_csv(index=False).encode("utf-8")
+            st.download_button("Download CSV", csv, "points_last_30_days_running_total.csv", "text/csv", key="dl_30day")
 
     st.divider()
 
-    st.markdown("### Full-Year Perfect Attendance")
-    year = st.number_input(
-        "Calendar year for Full-Year Perfect Attendance",
-        min_value=2000,
-        max_value=2100,
-        value=date.today().year - 1,
-        step=1,
-        key="full_year_pa_year",
-    )
-    if st.button("Run Full-Year Perfect Attendance"):
-        rows_y = repo.report_full_year_perfect_attendance(conn, int(year))
-        df_y = pd.DataFrame([dict(r) for r in rows_y])
-        if not df_y.empty:
-            df_y["employee_id"] = df_y["employee_id"].astype(str)
-        st.dataframe(df_y, use_container_width=True, hide_index=True)
+    # ------------------------------------------------------------
+    # 2) Preview reports (NO DB CHANGES)
+    # ------------------------------------------------------------
+    st.markdown("### Preview Reports (No Database Changes)")
+    st.caption("These exports do not write anything to the database. They are previews only.")
 
-        csv = df_y.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label="Download CSV",
-            data=csv,
-            file_name=f"perfect_attendance_full_year_{int(year)}.csv",
-            mime="text/csv",
-            key="dl_full_year",
-        )
+    c1, c2 = st.columns(2)
+
+    # ---- Preview Roll Offs ----
+    with c1:
+        st.markdown("#### Preview Roll Offs")
+        st.caption("Employees with an upcoming roll-off date. Exports a CSV formatted for manual review/editing.")
+
+        if st.button("Generate Preview Roll Offs CSV", key="btn_preview_rolloffs"):
+            rows_r = repo.report_rolloff_next_2_months(conn)  # NOTE: currently "next 2 months" source
+            df_r = pd.DataFrame([dict(r) for r in rows_r])
+
+            if df_r.empty:
+                st.info("No upcoming roll-offs found.")
+            else:
+                # Expected inputs: employee_id, first_name, last_name, rolloff_date, point_total
+                df_r["Employee #"] = df_r["employee_id"].astype(str)
+                df_r["First Name"] = df_r.get("first_name", "")
+                df_r["Last Name"] = df_r.get("last_name", "")
+
+                roll_dt = pd.to_datetime(df_r.get("rolloff_date"), errors="coerce")
+                df_r["_sort_rolloff_date"] = roll_dt  # for sorting only
+
+                df_r["Point"] = -1.0
+                df_r["Reason"] = "2 Month Rolloff"
+                df_r["Note"] = ""
+                df_r["Point Total"] = (pd.to_numeric(df_r.get("point_total"), errors="coerce").fillna(0) - 1.0).round(1)
+                df_r["Flag Code"] = df_r.get("flag_code", "")  # keep if exists; otherwise blank
+
+                # Sort: most recent rolloff date at top
+                df_r = df_r.sort_values("_sort_rolloff_date", ascending=False).copy()
+
+                out_cols = ["Employee #", "First Name", "Last Name", "Point", "Reason", "Note", "Point Total", "Flag Code"]
+                df_out = df_r[out_cols].copy()
+
+                st.dataframe(df_out, use_container_width=True, hide_index=True)
+                csv = df_out.to_csv(index=False).encode("utf-8")
+                st.download_button("Download CSV", csv, "preview_rolloffs.csv", "text/csv", key="dl_preview_rolloffs")
+
+    # ---- Preview Perfect Attendance ----
+    with c2:
+        st.markdown("#### Preview Perfect Attendance")
+        st.caption("Employees with an upcoming Perfect Attendance date. Exports a CSV formatted for manual review/editing.")
+
+        if st.button("Generate Preview Perfect Attendance CSV", key="btn_preview_pa"):
+            rows_p = repo.report_perfect_attendance_upcoming(conn)
+            df_p = pd.DataFrame([dict(r) for r in rows_p])
+
+            if df_p.empty:
+                st.info("No upcoming perfect attendance dates found.")
+            else:
+                df_p["Employee #"] = df_p["employee_id"].astype(str)
+                df_p["First Name"] = df_p.get("first_name", "")
+                df_p["Last Name"] = df_p.get("last_name", "")
+
+                df_p["Point"] = ""  # left blank per your spec
+                df_p["Reason"] = "$75 Perfect Attendance Bonus"
+                df_p["Note"] = ""
+                df_p["Point Total"] = pd.to_numeric(df_p.get("point_total"), errors="coerce").fillna(0).round(1)
+                df_p["Flag Code"] = df_p.get("flag_code", "")
+
+                out_cols = ["Employee #", "First Name", "Last Name", "Point", "Reason", "Note", "Point Total", "Flag Code"]
+                df_out = df_p[out_cols].copy()
+
+                st.dataframe(df_out, use_container_width=True, hide_index=True)
+                csv = df_out.to_csv(index=False).encode("utf-8")
+                st.download_button("Download CSV", csv, "preview_perfect_attendance.csv", "text/csv", key="dl_preview_pa")
 
     st.divider()
-    st.markdown("### Monthly YTD Roll-Off (Writes to Database)")
+
+    # ------------------------------------------------------------
+    # 3) DB-changing actions (we will wire the first two after you provide Beta7 logic)
+    # ------------------------------------------------------------
+    st.markdown("### Actions (Modifies Database)")
+    st.caption("These buttons write changes to the database and generate a CSV of what changed.")
+
+    # ---- Perform 2 Month Roll Off ----
+    st.markdown("#### Perform 2 Month Roll Off")
+    st.caption("Removes any roll-offs due as of today and advances the next roll-off date.")
+
+    st.warning("Not wired yet: I need the ATP_Beta7 roll-off logic/function so we don't guess and miscalculate.")
+    st.button("Perform 2 Month Roll Off (Commit)", disabled=True, key="btn_commit_rolloff")
+
+    # ---- Generate Perfect Attendance ----
+    st.markdown("#### Generate Perfect Attendance")
+    st.caption("Applies perfect attendance updates due as of today and advances the next perfect attendance date.")
+
+    st.warning("Not wired yet: I need the ATP_Beta7 perfect attendance logic/function so we don't guess and miscalculate.")
+    st.button("Generate Perfect Attendance (Commit)", disabled=True, key="btn_commit_pa")
+
+    st.divider()
+
+    # ---- Generate YTD Roll Offs (this one exists today via services.apply_ytd_rolloffs) ----
+    st.markdown("#### Generate YTD Roll Offs")
+    st.caption("Uses the existing YTD roll-off logic and writes entries to the database.")
 
     run_dt = st.date_input("Run date (rolloff uses the 1st of this month)", value=date.today(), key="roll_run_dt")
 
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.button("Preview YTD Roll-Off"):
+        if st.button("Preview YTD Roll Offs", key="btn_preview_ytd"):
             items = services.apply_ytd_rolloffs(conn, run_date=run_dt, dry_run=True)
-            df = pd.DataFrame(items, columns=["employee_id", "points_to_rolloff", "roll_date", "month_label"])
-            if not df.empty:
-                df = df.copy()
-                df.loc[:, "employee_id"] = df["employee_id"].astype(str)
-                df["points_to_rolloff"] = pd.to_numeric(df["points_to_rolloff"], errors="coerce").round(1)
-            st.dataframe(df, use_container_width=True, hide_index=True)
+
+            # Map into your requested CSV shape
+            df = pd.DataFrame(items)
+            if df.empty:
+                st.info("No YTD roll-offs found.")
+            else:
+                # Attempt to normalize expected columns from existing service output
+                # You may need to adjust these keys based on what apply_ytd_rolloffs returns
+                df_out = pd.DataFrame({
+                    "Employee #": df.get("employee_id", "").astype(str),
+                    "First Name": df.get("first_name", ""),
+                    "Last Name": df.get("last_name", ""),
+                    "Point": pd.to_numeric(df.get("points_to_rolloff", 0), errors="coerce").fillna(0).round(1),
+                    "Point Date": df.get("roll_date", ""),
+                    "Reason": "YTD Roll Off",
+                    "Note": "",
+                    "Point Total": pd.to_numeric(df.get("new_point_total", df.get("point_total", 0)), errors="coerce").fillna(0).round(1),
+                    "Flag Code": df.get("flag_code", ""),
+                })
+
+                st.dataframe(df_out, use_container_width=True, hide_index=True)
+                csv = df_out.to_csv(index=False).encode("utf-8")
+                st.download_button("Download CSV", csv, "preview_ytd_rolloffs.csv", "text/csv", key="dl_preview_ytd")
 
     with col2:
         confirm_apply = st.checkbox("I understand this will write roll-off entries to the database.", key="roll_confirm")
-        if st.button("APPLY YTD Roll-Off (Commit)") and confirm_apply:
+
+        if st.button("Generate YTD Roll Offs (Commit)", key="btn_commit_ytd") and confirm_apply:
             items = services.apply_ytd_rolloffs(conn, run_date=run_dt, dry_run=False)
-            df = pd.DataFrame(items, columns=["employee_id", "points_rolled", "roll_date", "month_label"])
-            if not df.empty:
-                df = df.copy()
-                df.loc[:, "employee_id"] = df["employee_id"].astype(str)
-                df["points_rolled"] = pd.to_numeric(df["points_rolled"], errors="coerce").round(1)
-            st.success(f"Applied roll-offs for {len(items)} employees.")
-            st.dataframe(df, use_container_width=True, hide_index=True)
+
+            df = pd.DataFrame(items)
+            if df.empty:
+                st.info("No YTD roll-offs were applied.")
+            else:
+                df_out = pd.DataFrame({
+                    "Employee #": df.get("employee_id", "").astype(str),
+                    "First Name": df.get("first_name", ""),
+                    "Last Name": df.get("last_name", ""),
+                    "Point": pd.to_numeric(df.get("points_rolled", df.get("points_to_rolloff", 0)), errors="coerce").fillna(0).round(1),
+                    "Point Date": df.get("roll_date", ""),
+                    "Reason": "YTD Roll Off",
+                    "Note": "",
+                    "Point Total": pd.to_numeric(df.get("new_point_total", df.get("point_total", 0)), errors="coerce").fillna(0).round(1),
+                    "Flag Code": df.get("flag_code", ""),
+                })
+
+                st.success(f"Applied YTD roll-offs for {len(df_out)} employees.")
+                st.dataframe(df_out, use_container_width=True, hide_index=True)
+                csv = df_out.to_csv(index=False).encode("utf-8")
+                st.download_button("Download CSV", csv, "ytd_rolloffs_applied.csv", "text/csv", key="dl_commit_ytd")
+
+    st.divider()
+
+    # ------------------------------------------------------------
+    # 4) Employee Point History PDF (Termination File) — next
+    # ------------------------------------------------------------
+    st.markdown("### Employee Point History (PDF)")
+    st.caption("Generates a PDF of the employee's complete point history for the termination file.")
+    st.warning("Next step: wire PDF generation once we confirm the exact Beta7 output format you want.")
