@@ -102,10 +102,8 @@ if selected_emp_id:
     if emp:
         st.sidebar.markdown(f"**{emp.get('last_name')}, {emp.get('first_name')}**")
         st.sidebar.caption(f"Employee ID: {emp.get('employee_id')}")
-        st.sidebar.caption(f"Location: {emp.get('location', '—')}")
-        st.sidebar.caption(f"Department: {emp.get('department', '—')}")
-
         st.sidebar.metric("Point Total", f"{float(emp.get('point_total') or 0.0):.1f}")
+        st.sidebar.caption(f"Location: {emp.get('location', '—')}")
         st.sidebar.caption(f"Last Point Date: {fmt_metric_date(emp.get('last_point_date'))}")
         st.sidebar.caption(f"Next Roll-Off Date: {fmt_metric_date(emp.get('rolloff_date'))}")
         st.sidebar.caption(f"Perfect Attendance Date: {fmt_metric_date(emp.get('perfect_attendance'))}")
