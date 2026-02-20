@@ -25,8 +25,6 @@ LOGO_PATH = APP_DIR / "assets" / "logo.png"
 try:
     if LOGO_PATH.is_file():
         st.sidebar.image(str(LOGO_PATH), use_container_width=True)
-    else:
-        st.sidebar.info(f"Logo missing: {LOGO_PATH.name}")
 except Exception as e:
     st.sidebar.warning(f"Logo failed to load: {e}") 
     
