@@ -83,12 +83,7 @@ st.divider()
 # --- Sidebar ------------------------------------------------------------------
 sidebar_logo()
 
-st.sidebar.header("Settings")
-active_only = st.sidebar.toggle("Active employees only", value=True)
-
-with st.sidebar.expander("System (debug)", expanded=False):
-    st.caption("Attendance Tracking")
-    st.code(get_db_path(), language="text")
+st.sidebar.header("Employee Info")
 
 st.sidebar.divider()
 st.sidebar.subheader("Selected Employee")
