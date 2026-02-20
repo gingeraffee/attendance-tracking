@@ -349,7 +349,7 @@ with tab_reports:
             df = pd.DataFrame(items, columns=["employee_id", "points_to_rolloff", "roll_date", "month_label"])
             if not df.empty:
                 df = df.copy()
-                df.loc[:, "employee_id"] = df["employee_id"].astype(str))
+                df.loc[:, "employee_id"] = df["employee_id"].astype(str)
                 df["points_to_rolloff"] = pd.to_numeric(df["points_to_rolloff"], errors="coerce").round(1)
             st.dataframe(df, use_container_width=True, hide_index=True)
 
