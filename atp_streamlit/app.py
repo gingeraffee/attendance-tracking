@@ -5,11 +5,11 @@ import sys
 from pathlib import Path
 
 # MUST be the first Streamlit command
-st.set_page_config(page_title="ATP Web (Streamlit)", layout="wide")
+st.set_page_config(page_title="Point System", layout="wide")
 
 # --- Path setup / imports -----------------------------------------------------
 APP_DIR = Path(__file__).resolve().parent
-ROOT = APP_DIR.parents[1]  # repo root (attendance-tracking/)
+ROOT = APP_DIR.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
