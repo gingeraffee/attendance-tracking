@@ -126,34 +126,79 @@ with tab_emp:
     if not rows:
         st.info("No employees match that search.")
     else:
-        df = pd.DataFrame([dict(r) for r in rows])
-
-        # Show point_total instead of is_active
-        if "is_active" in df.columns:
-            df = df.drop(columns=["is_active"])
-
-        # ensure employee_id shows nicely
-        if "employee_id" in df.columns:
-            df["employee_id"] = df["employee_id"].astype(str)
-
-        # ensure point_total looks nice (if present)
-        if "point_total" in df.columns:
-            df["point_total"] = pd.to_numeric(df["point_total"], errors="coerce").fillna(0).round(1)
-
-        st.dataframe(df, use_container_width=True, hide_index=True)
-
-        # Employee selectbox (drives sidebar selection)
         rows_d = [dict(r) for r in rows]
-        options = [
-            (str(r["employee_id"]), f'{r["employee_id"]} — {r["last_name"]}, {r["first_name"]} ({r.get("location","")})')
-            for r in rows_d
-        ]
-        sel = st.selectbox("Select an employee", options, format_func=lambda x: x[1], key="emp_select")
+        df = pd.DataFrame(rows_d).copy()
 
-        emp_id = int(sel[0]) if sel else None
-        if emp_id:
+        # Hide is_active; show point_total
+        if "is_active" in df.columns:
+            df = df.drop(columns=["is_active"]).copy()
+
+        # Format columns
+        if "employee_id" in df.columns:
+            df.loc[:, "employee_id"] = df["employee_id"].astype(str)
+
+        if "point_total" in df.columns:
+            df.loc[:, "point_total"] = (
+                pd.to_numeric(df["point_total"], errors="coerce")
+                .fillna(0)
+                .round(1)
+            )
+
+        # --- Click-to-select table ---
+        event = st.dataframe(
+            df,
+            use_container_width=True,
+            hide_index=True,
+            selection_mode="single-row",
+            on_select="rerun",
+        )
+
+        emp_id = None
+
+        # If user clicked a row
+        if event is not None and getattr(event, "selection", None) and event.selection.rows:
+            idx = event.selection.rows[0]
+            emp_id = int(df.iloc[idx]["employee_id"])
             st.session_state["selected_emp_id"] = emp_id
 
+        # Fallback: dropdown (optional)
+        with st.expander("Or select from a list"):
+            options = [
+                (
+                    str(r["employee_id"]),
+                    f'{r["employee_id"]} — {r["last_name"]}, {r["first_name"]} ({r.get("location","")})'
+                )
+                for r in rows_d
+            ]
+            # Default dropdown selection to current selected employee if possible
+            selected_emp_id = st.session_state.get("selected_emp_id")
+            default_index = 0
+            if selected_emp_id is not None:
+                s = str(selected_emp_id)
+                for i, opt in enumerate(options):
+                    if opt[0] == s:
+                        default_index = i
+                        break
+
+            sel = st.selectbox(
+                "Select an employee",
+                options,
+                format_func=lambda x: x[1],
+                index=default_index,
+                key="emp_select",
+            )
+            if sel:
+                emp_id = int(sel[0])
+                st.session_state["selected_emp_id"] = emp_id
+
+        # If no click and no dropdown change, fall back to the pinned selection
+        if emp_id is None:
+            pinned = st.session_state.get("selected_emp_id")
+            if pinned is not None:
+                emp_id = int(pinned)
+
+        # --- Details + history (run once) ---
+        if emp_id:
             emp_row = repo.get_employee(conn, emp_id)
             emp = dict(emp_row) if emp_row else None
 
@@ -170,12 +215,12 @@ with tab_emp:
             st.markdown("### Points History (latest 200)")
             hist = repo.get_points_history(conn, emp_id, limit=200)
             hdf = (
-                pd.DataFrame([dict(r) for r in hist])
+                pd.DataFrame([dict(r) for r in hist]).copy()
                 if hist
                 else pd.DataFrame(columns=["id", "point_date", "points", "reason", "note", "flag_code"])
             )
             if "points" in hdf.columns:
-                hdf["points"] = pd.to_numeric(hdf["points"], errors="coerce").round(1)
+                hdf.loc[:, "points"] = pd.to_numeric(hdf["points"], errors="coerce").round(1)
             st.dataframe(hdf, use_container_width=True, hide_index=True)
 
 # =============================================================================
