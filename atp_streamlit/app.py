@@ -43,7 +43,7 @@ def get_conn():
 @st.cache_data(ttl=60)
 def load_employees:
     conn = get_conn()
-    rows = repo.search_employees(conn, q="", active_only=active_only, limit=5000)
+    rows = repo.search_employees(conn, q="", limit=5000)
     return [dict(r) for r in rows]
 
 # --- Styling ------------------------------------------------------------------
@@ -133,10 +133,6 @@ with tab_emp:
                 emp = dict(emp_row) if emp_row else {}
                 r["point_total"] = emp.get("point_total")
         df = pd.DataFrame(rows_d).copy()
-
-        # Hide is_active; show point_total
-        if "is_active" in df.columns:
-            df = df.drop(columns=["is_active"]).copy()
 
         # Format columns
         if "employee_id" in df.columns:
@@ -245,7 +241,7 @@ with tab_emp:
 with tab_add:
     st.subheader("Add Points / Entry")
 
-    employees = load_employees(active_only)
+    employees = load_employees
 
     if not employees:
         st.info("No employees found.")
