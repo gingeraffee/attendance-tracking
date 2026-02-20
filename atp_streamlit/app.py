@@ -4,6 +4,25 @@ from datetime import date
 import sys
 from pathlib import Path
 
+def sidebar_logo():
+    app_dir = Path(__file__).resolve().parent
+    logo_path = app_dir / "assets" / "logo.png"
+    if logo_path.is_file():
+        st.sidebar.image(str(logo_path), use_container_width=True)
+
+sidebar_logo()
+
+APP_DIR = Path(__file__).resolve().parent
+LOGO_PATH = APP_DIR / "assets" / "logo.png"
+
+try:
+    if LOGO_PATH.is_file():
+        st.sidebar.image(str(LOGO_PATH), use_container_width=True)
+    else:
+        st.sidebar.info(f"Logo missing: {LOGO_PATH}")
+except Exception as e:
+    st.sidebar.warning(f"Logo failed to load: {e}")
+    
 ROOT = Path(__file__).resolve().parents[1]  # repo root (attendance-tracking/)
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
