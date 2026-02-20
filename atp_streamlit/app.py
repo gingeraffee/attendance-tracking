@@ -116,7 +116,7 @@ tab_emp, tab_add, tab_reports = st.tabs(["Employees", "Add Points", "Reports"])
 with tab_emp:
     st.subheader("Employee Lookup")
     q = st.text_input("Search by Employee #, last name, or first name", value="")
-    rows = repo.search_employees(conn, q, active_only=active_only, limit=1000)
+    rows = repo.search_employees(conn, q, limit=1000)
 
     if not rows:
         st.info("No employees match that search.")
