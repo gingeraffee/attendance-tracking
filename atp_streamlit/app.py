@@ -7,6 +7,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]  # repo root (attendance-tracking/)
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+LOGO_PATH = APP_DIR / "assets" / "logo.png"
+
+if LOGO_PATH.exists():
+    st.sidebar.image(str(LOGO_PATH), use_container_width=True)
+else:
+    st.sidebar.warning(f"Logo not found at: {LOGO_PATH}") 
     
 from atp_core.db import connect, get_db_path
 from atp_core.schema import ensure_schema
