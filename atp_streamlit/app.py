@@ -4,6 +4,8 @@ from datetime import date
 import sys
 from pathlib import Path
 
+st.set_page_config(page_title="ATP Web (Streamlit)", layout="wide")
+
 def sidebar_logo():
     app_dir = Path(__file__).resolve().parent
     logo_path = app_dir / "assets" / "logo.png"
@@ -41,7 +43,7 @@ from atp_core.schema import ensure_schema
 from atp_core.rules import REASON_OPTIONS
 from atp_core import repo, services
 
-st.set_page_config(page_title="ATP Web (Streamlit)", layout="wide")
+
 
 st.markdown("""
 <style>
