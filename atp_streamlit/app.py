@@ -9,10 +9,13 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 LOGO_PATH = APP_DIR / "assets" / "logo.png"
 
-if LOGO_PATH.exists():
-    st.sidebar.image(str(LOGO_PATH), use_container_width=True)
-else:
-    st.sidebar.warning(f"Logo not found at: {LOGO_PATH}") 
+try:
+    if LOGO_PATH.is_file():
+        st.sidebar.image(str(LOGO_PATH), use_container_width=True)
+    else:
+        st.sidebar.info(f"Logo missing: {LOGO_PATH.name}")
+except Exception as e:
+    st.sidebar.warning(f"Logo failed to load: {e}") 
     
 from atp_core.db import connect, get_db_path
 from atp_core.schema import ensure_schema
