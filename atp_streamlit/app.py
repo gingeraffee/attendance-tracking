@@ -41,7 +41,7 @@ def get_conn():
     return conn
 
 @st.cache_data(ttl=60)
-def load_employees(active_only: bool):
+def load_employees:
     conn = get_conn()
     rows = repo.search_employees(conn, q="", active_only=active_only, limit=5000)
     return [dict(r) for r in rows]
