@@ -1,0 +1,20 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+.env
+.venv/
+venv/
+.streamlit/
+
+# DO NOT COMMIT HR DATA
+*.db
+*.sqlite
+*.sqlite3
+
+.DS_Store
+Thumbs.db

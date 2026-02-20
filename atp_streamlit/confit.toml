@@ -1,0 +1,15 @@
+[theme]
+base="light"
+
+# Microsoft-ish blue accent, but softened
+primaryColor="#2563EB"
+
+# Clean corporate whites with gentle pastel grays
+backgroundColor="#FFFFFF"
+secondaryBackgroundColor="#F3F6FB"
+
+# Dark neutral text like Microsoft UI
+textColor="#111827"
+
+# Closest Streamlit option to Microsoft UI
+font="sans serif"
