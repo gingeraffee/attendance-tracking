@@ -5,7 +5,11 @@ import sys
 from pathlib import Path
 
 # MUST be the first Streamlit command
-st.set_page_config(page_title="Point System", layout="wide")
+st.set_page_config(
+    page_title="Point System",
+    page_icon="📅",
+    layout="wide",
+)
 
 # --- Path setup / imports -----------------------------------------------------
 APP_DIR = Path(__file__).resolve().parent
