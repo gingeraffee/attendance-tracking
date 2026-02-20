@@ -40,10 +40,9 @@ def get_conn():
     ensure_schema(conn)
     return conn
 
-@st.cache_data(ttl=60)
-def load_employees:
+def load_employees():
     conn = get_conn()
-    rows = repo.search_employees(conn, q="", limit=5000)
+    rows = repo.search_employees(conn, q="", limit=150)
     return [dict(r) for r in rows]
 
 # --- Styling ------------------------------------------------------------------
@@ -133,10 +132,6 @@ with tab_emp:
                 emp = dict(emp_row) if emp_row else {}
                 r["point_total"] = emp.get("point_total")
         df = pd.DataFrame(rows_d).copy()
-
-        # Format columns
-        if "employee_id" in df.columns:
-            df.loc[:, "employee_id"] = df["employee_id"].astype(str)
 
         if "point_total" in df.columns:
             df.loc[:, "point_total"] = (
@@ -241,7 +236,7 @@ with tab_emp:
 with tab_add:
     st.subheader("Add Points / Entry")
 
-    employees = load_employees
+    employees = load_employees()
 
     if not employees:
         st.info("No employees found.")
