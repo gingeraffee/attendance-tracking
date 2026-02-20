@@ -107,6 +107,8 @@ if selected_emp_id:
 
         st.sidebar.metric("Point Total", f"{float(emp.get('point_total') or 0.0):.1f}")
         st.sidebar.caption(f"Last Point Date: {fmt_metric_date(emp.get('last_point_date'))}")
+        st.sidebar.caption(f"Next Roll-Off Date: {fmt_metric_date(emp.get('rolloff_date'))}")
+        st.sidebar.caption(f"Perfect Attendance Date: {fmt_metric_date(emp.get('perfect_attendance'))}")
     else:
         st.sidebar.info("Employee not found.")
 else:
@@ -144,21 +146,31 @@ with tab_emp:
                 .round(1)
             )
 
-        # --- Click-to-select table ---
+        # --- Click-to-select table (show only the 4 columns you want) ---
+        display = pd.DataFrame({
+            "Employee #": df["employee_id"],
+            "Last Name": df.get("last_name", ""),
+            "First Name": df.get("first_name", ""),
+            "Point Total": df.get("point_total", 0),
+        }).copy()
+        
+        display.loc[:, "Employee #"] = display["Employee #"].astype(str)
+        display.loc[:, "Point Total"] = pd.to_numeric(display["Point Total"], errors="coerce").fillna(0).round(1)
+        
         event = st.dataframe(
-            df,
+            display,
             use_container_width=True,
             hide_index=True,
             selection_mode="single-row",
             on_select="rerun",
         )
-
+        
         emp_id = None
-
+        
         # If user clicked a row
         if event is not None and getattr(event, "selection", None) and event.selection.rows:
             idx = event.selection.rows[0]
-            emp_id = int(df.iloc[idx]["employee_id"])
+            emp_id = int(display.iloc[idx]["Employee #"])
             st.session_state["selected_emp_id"] = emp_id
 
         # Fallback: dropdown (optional)
@@ -170,6 +182,7 @@ with tab_emp:
                 )
                 for r in rows_d
             ]
+            
             # Default dropdown selection to current selected employee if possible
             selected_emp_id = st.session_state.get("selected_emp_id")
             default_index = 0
