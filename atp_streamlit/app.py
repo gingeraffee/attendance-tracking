@@ -116,12 +116,18 @@ tab_emp, tab_add, tab_reports = st.tabs(["Employees", "Add Points", "Reports"])
 with tab_emp:
     st.subheader("Employee Lookup")
     q = st.text_input("Search by Employee #, last name, or first name", value="")
-    rows = repo.search_employees(conn, q, active_only=active_only, limit=100)
+    rows = repo.search_employees(conn, q, active_only=active_only, limit=1000)
 
     if not rows:
         st.info("No employees match that search.")
     else:
         rows_d = [dict(r) for r in rows]
+        needs_totals = ("point_total" not in rows_d[0]) or all((r.get("point_total") in (None, "")) for r in rows_d)
+        if needs_totals:
+            for r in rows_d:
+                emp_row = repo.get_employee(conn, int(r["employee_id"]))
+                emp = dict(emp_row) if emp_row else {}
+                r["point_total"] = emp.get("point_total")
         df = pd.DataFrame(rows_d).copy()
 
         # Hide is_active; show point_total
