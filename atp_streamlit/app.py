@@ -37,6 +37,10 @@ try:
         st.sidebar.info(f"Logo missing: {LOGO_PATH.name}")
 except Exception as e:
     st.sidebar.warning(f"Logo failed to load: {e}") 
+
+st.sidebar.write("APP_DIR:", str(APP_DIR))
+st.sidebar.write("ROOT_DIR:", str(ROOT_DIR))
+st.sidebar.write("ROOT listing:", [p.name for p in ROOT_DIR.iterdir()])
     
 from atp_core.db import connect, get_db_path
 from atp_core.schema import ensure_schema
