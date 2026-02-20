@@ -24,11 +24,18 @@ from atp_core import repo, services
 
 # --- Helpers ------------------------------------------------------------------
 def fmt_metric_date(value):
+    if value is None or value == "":
+        return "—"
     if hasattr(value, "strftime"):
-        return value.strftime("%Y-%m-%d")
-    if value:
-        return str(value)
-    return "—"
+        return value.strftime("%m/%d/%Y")
+    if isinstance(value, str):
+        for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%m/%d/%Y"):
+            try:
+                return datetime.strptime(value, fmt).strftime("%m/%d/%Y")
+            except ValueError:
+                pass
+        return value  # fallback: show whatever it is
+    return str(value)
 
 def sidebar_logo():
     logo_path = APP_DIR / "assets" / "logo.png"
