@@ -4,38 +4,47 @@ from datetime import date
 import sys
 from pathlib import Path
 
+# MUST be the first Streamlit command
 st.set_page_config(page_title="ATP Web (Streamlit)", layout="wide")
 
-def sidebar_logo():
-    app_dir = Path(__file__).resolve().parent
-    logo_path = app_dir / "assets" / "logo.png"
-    if logo_path.is_file():
-        st.sidebar.image(str(logo_path), use_container_width=True)
-
-sidebar_logo()
-
+# --- Path setup / imports -----------------------------------------------------
 APP_DIR = Path(__file__).resolve().parent
-LOGO_PATH = APP_DIR / "assets" / "logo.png"
-    
-ROOT = Path(__file__).resolve().parents[1]  # repo root (attendance-tracking/)
+ROOT = APP_DIR.parents[1]  # repo root (attendance-tracking/)
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-LOGO_PATH = APP_DIR / "assets" / "logo.png"
 
-try:
-    if LOGO_PATH.is_file():
-        st.sidebar.image(str(LOGO_PATH), use_container_width=True)
-except Exception as e:
-    st.sidebar.warning(f"Logo failed to load: {e}") 
-    
 from atp_core.db import connect, get_db_path
 from atp_core.schema import ensure_schema
 from atp_core.rules import REASON_OPTIONS
 from atp_core import repo, services
 
+# --- Helpers ------------------------------------------------------------------
+def fmt_metric_date(value):
+    if hasattr(value, "strftime"):
+        return value.strftime("%Y-%m-%d")
+    if value:
+        return str(value)
+    return "—"
 
+def sidebar_logo():
+    logo_path = APP_DIR / "assets" / "logo.png"
+    if logo_path.is_file():
+        st.sidebar.image(str(logo_path), use_container_width=True)
 
-st.markdown("""
+def get_conn():
+    conn = connect()
+    ensure_schema(conn)
+    return conn
+
+@st.cache_data(ttl=60)
+def load_employees(active_only: bool):
+    conn = get_conn()
+    rows = repo.search_employees(conn, q="", active_only=active_only, limit=5000)
+    return [dict(r) for r in rows]
+
+# --- Styling ------------------------------------------------------------------
+st.markdown(
+    """
 <style>
 /* Layout polish */
 .block-container { padding-top: 1.2rem; padding-bottom: 2rem; }
@@ -44,7 +53,7 @@ st.markdown("""
 section[data-testid="stSidebar"] { width: 320px !important; }
 
 /* Softer card feel */
-div[data-testid="stMetric"] { 
+div[data-testid="stMetric"] {
   background: #F3F6FB;
   padding: 14px 14px 10px 14px;
   border-radius: 14px;
@@ -59,40 +68,56 @@ button[kind="primary"], button[kind="secondary"] {
 /* Hide Streamlit footer */
 footer { visibility: hidden; }
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
-def get_conn():
-    conn = connect()
-    ensure_schema(conn)
-    return conn
-
-@st.cache_data(ttl=60)
-def load_employees(active_only: bool):
-    conn = get_conn()
-    rows = repo.search_employees(conn, q="", active_only=active_only, limit=5000)
-    return [dict(r) for r in rows]
-    
+# --- Connection ---------------------------------------------------------------
 conn = get_conn()
 
+# --- Header -------------------------------------------------------------------
 st.title("Points Database")
-st.sidebar.image("assets/logo.png", use_container_width=True)
 st.caption("Internal HR Tool • Attendance Tracking")
 st.divider()
 
+# --- Sidebar ------------------------------------------------------------------
+sidebar_logo()
+
 st.sidebar.header("Settings")
-st.sidebar.caption("DB Path (set ATP_DB_PATH in secrets/env for production)")
-st.sidebar.code(get_db_path(), language="text")
 active_only = st.sidebar.toggle("Active employees only", value=True)
 
+with st.sidebar.expander("System (debug)", expanded=False):
+    st.caption("Attendance Tracking")
+    st.code(get_db_path(), language="text")
+
+st.sidebar.divider()
+st.sidebar.subheader("Selected Employee")
+
+selected_emp_id = st.session_state.get("selected_emp_id")
+
+if selected_emp_id:
+    emp_row = repo.get_employee(conn, int(selected_emp_id))
+    emp = dict(emp_row) if emp_row else None
+
+    if emp:
+        st.sidebar.markdown(f"**{emp.get('last_name')}, {emp.get('first_name')}**")
+        st.sidebar.caption(f"Employee ID: {emp.get('employee_id')}")
+        st.sidebar.caption(f"Location: {emp.get('location', '—')}")
+        st.sidebar.caption(f"Department: {emp.get('department', '—')}")
+
+        st.sidebar.metric("Point Total", f"{float(emp.get('point_total') or 0.0):.1f}")
+        st.sidebar.caption(f"Last Point Date: {fmt_metric_date(emp.get('last_point_date'))}")
+    else:
+        st.sidebar.info("Employee not found.")
+else:
+    st.sidebar.caption("Select an employee from the Employees tab.")
+
+# --- Tabs ---------------------------------------------------------------------
 tab_emp, tab_add, tab_reports = st.tabs(["Employees", "Add Points", "Reports"])
 
-def fmt_metric_date(value):
-    if hasattr(value, "strftime"):
-        return value.strftime("%Y-%m-%d")
-    if value:
-        return str(value)
-    return "—"
-    
+# =============================================================================
+# Employees tab
+# =============================================================================
 with tab_emp:
     st.subheader("Employee Lookup")
     q = st.text_input("Search by Employee #, last name, or first name", value="")
@@ -102,15 +127,32 @@ with tab_emp:
         st.info("No employees match that search.")
     else:
         df = pd.DataFrame([dict(r) for r in rows])
+
+        # Show point_total instead of is_active
+        if "is_active" in df.columns:
+            df = df.drop(columns=["is_active"])
+
+        # ensure employee_id shows nicely
         if "employee_id" in df.columns:
             df["employee_id"] = df["employee_id"].astype(str)
+
+        # ensure point_total looks nice (if present)
+        if "point_total" in df.columns:
+            df["point_total"] = pd.to_numeric(df["point_total"], errors="coerce").fillna(0).round(1)
+
         st.dataframe(df, use_container_width=True, hide_index=True)
 
-        options = [(str(r["employee_id"]), f'{r["employee_id"]} — {r["last_name"]}, {r["first_name"]} ({r["location"]})') for r in rows]
-        sel = st.selectbox("Select an employee", options, format_func=lambda x: x[1])
-        emp_id = int(sel[0]) if sel else None
+        # Employee selectbox (drives sidebar selection)
+        options = [
+            (str(r["employee_id"]), f'{r["employee_id"]} — {r["last_name"]}, {r["first_name"]} ({r.get("location","")})')
+            for r in rows
+        ]
+        sel = st.selectbox("Select an employee", options, format_func=lambda x: x[1], key="emp_select")
 
+        emp_id = int(sel[0]) if sel else None
         if emp_id:
+            st.session_state["selected_emp_id"] = emp_id
+
             emp_row = repo.get_employee(conn, emp_id)
             emp = dict(emp_row) if emp_row else None
 
@@ -126,13 +168,18 @@ with tab_emp:
 
             st.markdown("### Points History (latest 200)")
             hist = repo.get_points_history(conn, emp_id, limit=200)
-            hdf = pd.DataFrame([dict(r) for r in hist]) if hist else pd.DataFrame(
-                columns=["id", "point_date", "points", "reason", "note", "flag_code"]
+            hdf = (
+                pd.DataFrame([dict(r) for r in hist])
+                if hist
+                else pd.DataFrame(columns=["id", "point_date", "points", "reason", "note", "flag_code"])
             )
             if "points" in hdf.columns:
                 hdf["points"] = pd.to_numeric(hdf["points"], errors="coerce").round(1)
             st.dataframe(hdf, use_container_width=True, hide_index=True)
-            
+
+# =============================================================================
+# Add Points tab (defaults to the selected employee + keeps selection in sync)
+# =============================================================================
 with tab_add:
     st.subheader("Add Points / Entry")
 
@@ -142,13 +189,33 @@ with tab_add:
         st.info("No employees found.")
     else:
         options2 = [
-            (e["employee_id"], f'{e["employee_id"]} — {e["last_name"]}, {e["first_name"]} ({e.get("location","")})')
+            (str(e["employee_id"]), f'{e["employee_id"]} — {e["last_name"]}, {e["first_name"]} ({e.get("location","")})')
             for e in employees
         ]
-        sel2 = st.selectbox("Select an employee", options2, format_func=lambda x: x[1], key="add_emp")
-        emp_id2 = sel2[0] if sel2 else None
 
+        # Default selection based on sidebar-selected employee
+        selected_emp_id = st.session_state.get("selected_emp_id")
+        default_index = 0
+        if selected_emp_id is not None:
+            selected_str = str(selected_emp_id)
+            for i, opt in enumerate(options2):
+                if opt[0] == selected_str:
+                    default_index = i
+                    break
+
+        sel2 = st.selectbox(
+            "Select an employee",
+            options2,
+            format_func=lambda x: x[1],
+            index=default_index,
+            key="add_emp",
+        )
+
+        emp_id2 = int(sel2[0]) if sel2 else None
         if emp_id2:
+            # Keep global selection in sync
+            st.session_state["selected_emp_id"] = emp_id2
+
             with st.form("add_point_form", clear_on_submit=False):
                 pdate = st.date_input("Point date", value=date.today())
                 points = st.selectbox("Points", [0.5, 1.0, 1.5], index=0)
@@ -167,13 +234,15 @@ with tab_add:
                     after_total = before_total + float(points)
 
                     st.markdown("### Preview")
-                    st.write({
-                        "employee_id": preview.employee_id,
-                        "date": preview.point_date.isoformat(),
-                        "points": preview.points,
-                        "reason": preview.reason,
-                        "note": preview.note,
-                    })
+                    st.write(
+                        {
+                            "employee_id": preview.employee_id,
+                            "date": preview.point_date.isoformat(),
+                            "points": preview.points,
+                            "reason": preview.reason,
+                            "note": preview.note,
+                        }
+                    )
                     st.info(f"Point Total: {before_total:.1f}  →  {after_total:.1f}")
 
                     if confirm:
@@ -185,23 +254,9 @@ with tab_add:
                 except Exception as e:
                     st.error(str(e))
 
-with tab_reports:
-    st.subheader("Reports")
-    year = st.number_input("Calendar year for Full-Year Perfect Attendance", min_value=2000, max_value=2100,
-                           value=date.today().year-1, step=1)
-    if st.button("Run Perfect Attendance Report"):
-        rows = repo.report_full_year_perfect_attendance(conn, int(year))
-        df = pd.DataFrame([dict(r) for r in rows])
-        st.dataframe(df, use_container_width=True, hide_index=True)
-
-        csv = df.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label="Download CSV",
-            data=csv,
-            file_name=f"perfect_attendance_full_year_{int(year)}.csv",
-            mime="text/csv",
-        )
-
+# =============================================================================
+# Reports tab (single consolidated section)
+# =============================================================================
 with tab_reports:
     st.subheader("Reports")
 
@@ -231,7 +286,13 @@ with tab_reports:
             st.dataframe(df_p, use_container_width=True, hide_index=True)
 
             csv = df_p.to_csv(index=False).encode("utf-8")
-            st.download_button("Download CSV", csv, "perfect_attendance_upcoming.csv", "text/csv", key="dl_perfect_upcoming")
+            st.download_button(
+                "Download CSV",
+                csv,
+                "perfect_attendance_upcoming.csv",
+                "text/csv",
+                key="dl_perfect_upcoming",
+            )
 
     st.divider()
 
@@ -252,9 +313,11 @@ with tab_reports:
     st.markdown("### Full-Year Perfect Attendance")
     year = st.number_input(
         "Calendar year for Full-Year Perfect Attendance",
-        min_value=2000, max_value=2100,
-        value=date.today().year - 1, step=1,
-        key="full_year_pa_year"
+        min_value=2000,
+        max_value=2100,
+        value=date.today().year - 1,
+        step=1,
+        key="full_year_pa_year",
     )
     if st.button("Run Full-Year Perfect Attendance"):
         rows_y = repo.report_full_year_perfect_attendance(conn, int(year))
@@ -269,33 +332,32 @@ with tab_reports:
             data=csv,
             file_name=f"perfect_attendance_full_year_{int(year)}.csv",
             mime="text/csv",
-            key="dl_full_year"
+            key="dl_full_year",
         )
-        
-    
-        st.divider()
-        st.markdown("### Monthly YTD Roll-Off (Writes to Database)")
 
-        run_dt = st.date_input("Run date (rolloff uses the 1st of this month)", value=date.today(), key="roll_run_dt")
+    st.divider()
+    st.markdown("### Monthly YTD Roll-Off (Writes to Database)")
 
-        col1, col2 = st.columns(2)
+    run_dt = st.date_input("Run date (rolloff uses the 1st of this month)", value=date.today(), key="roll_run_dt")
 
-        with col1:
-            if st.button("Preview YTD Roll-Off"):
-                items = services.apply_ytd_rolloffs(conn, run_date=run_dt, dry_run=True)
-                df = pd.DataFrame(items, columns=["employee_id", "points_to_rolloff", "roll_date", "month_label"])
-                if not df.empty:
-                    df["employee_id"] = df["employee_id"].astype(str)
-                    df["points_to_rolloff"] = pd.to_numeric(df["points_to_rolloff"], errors="coerce").round(1)
-                st.dataframe(df, use_container_width=True, hide_index=True)
+    col1, col2 = st.columns(2)
 
-        with col2:
-            confirm_apply = st.checkbox("I understand this will write roll-off entries to the database.", key="roll_confirm")
-            if st.button("APPLY YTD Roll-Off (Commit)") and confirm_apply:
-                items = services.apply_ytd_rolloffs(conn, run_date=run_dt, dry_run=False)
-                df = pd.DataFrame(items, columns=["employee_id", "points_rolled", "roll_date", "month_label"])
-                if not df.empty:
-                    df["employee_id"] = df["employee_id"].astype(str)
-                    df["points_rolled"] = pd.to_numeric(df["points_rolled"], errors="coerce").round(1)
-                st.success(f"Applied roll-offs for {len(items)} employees.")
-                st.dataframe(df, use_container_width=True, hide_index=True)
+    with col1:
+        if st.button("Preview YTD Roll-Off"):
+            items = services.apply_ytd_rolloffs(conn, run_date=run_dt, dry_run=True)
+            df = pd.DataFrame(items, columns=["employee_id", "points_to_rolloff", "roll_date", "month_label"])
+            if not df.empty:
+                df["employee_id"] = df["employee_id"].astype(str)
+                df["points_to_rolloff"] = pd.to_numeric(df["points_to_rolloff"], errors="coerce").round(1)
+            st.dataframe(df, use_container_width=True, hide_index=True)
+
+    with col2:
+        confirm_apply = st.checkbox("I understand this will write roll-off entries to the database.", key="roll_confirm")
+        if st.button("APPLY YTD Roll-Off (Commit)") and confirm_apply:
+            items = services.apply_ytd_rolloffs(conn, run_date=run_dt, dry_run=False)
+            df = pd.DataFrame(items, columns=["employee_id", "points_rolled", "roll_date", "month_label"])
+            if not df.empty:
+                df["employee_id"] = df["employee_id"].astype(str)
+                df["points_rolled"] = pd.to_numeric(df["points_rolled"], errors="coerce").round(1)
+            st.success(f"Applied roll-offs for {len(items)} employees.")
+            st.dataframe(df, use_container_width=True, hide_index=True)
