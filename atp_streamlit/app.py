@@ -143,9 +143,10 @@ with tab_emp:
         st.dataframe(df, use_container_width=True, hide_index=True)
 
         # Employee selectbox (drives sidebar selection)
+        rows_d = [dict(r) for r in rows]
         options = [
             (str(r["employee_id"]), f'{r["employee_id"]} — {r["last_name"]}, {r["first_name"]} ({r.get("location","")})')
-            for r in rows
+            for r in rows_d
         ]
         sel = st.selectbox("Select an employee", options, format_func=lambda x: x[1], key="emp_select")
 
@@ -347,7 +348,8 @@ with tab_reports:
             items = services.apply_ytd_rolloffs(conn, run_date=run_dt, dry_run=True)
             df = pd.DataFrame(items, columns=["employee_id", "points_to_rolloff", "roll_date", "month_label"])
             if not df.empty:
-                df["employee_id"] = df["employee_id"].astype(str)
+                df = df.copy()
+                df.loc[:, "employee_id"] = df["employee_id"].astype(str))
                 df["points_to_rolloff"] = pd.to_numeric(df["points_to_rolloff"], errors="coerce").round(1)
             st.dataframe(df, use_container_width=True, hide_index=True)
 
@@ -357,7 +359,8 @@ with tab_reports:
             items = services.apply_ytd_rolloffs(conn, run_date=run_dt, dry_run=False)
             df = pd.DataFrame(items, columns=["employee_id", "points_rolled", "roll_date", "month_label"])
             if not df.empty:
-                df["employee_id"] = df["employee_id"].astype(str)
+                df = df.copy()
+                df.loc[:, "employee_id"] = df["employee_id"].astype(str)
                 df["points_rolled"] = pd.to_numeric(df["points_rolled"], errors="coerce").round(1)
             st.success(f"Applied roll-offs for {len(items)} employees.")
             st.dataframe(df, use_container_width=True, hide_index=True)
