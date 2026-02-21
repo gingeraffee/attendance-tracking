@@ -52,6 +52,36 @@ def add_point(conn: sqlite3.Connection, preview: AddPointPreview, flag_code: str
         )
         repo.update_employee_point_total(conn, preview.employee_id)
 
+
+def create_employee(conn: sqlite3.Connection, employee_id: int, last_name: str, first_name: str, location: str | None = None) -> None:
+    if employee_id is None:
+        raise ValueError("Employee ID is required.")
+    if not str(last_name or "").strip():
+        raise ValueError("Last name is required.")
+    if not str(first_name or "").strip():
+        raise ValueError("First name is required.")
+
+    with tx(conn):
+        repo.create_employee(
+            conn,
+            employee_id=int(employee_id),
+            last_name=str(last_name).strip(),
+            first_name=str(first_name).strip(),
+            location=(location or "").strip(),
+        )
+
+
+def delete_employee(conn: sqlite3.Connection, employee_id: int) -> None:
+    if employee_id is None:
+        raise ValueError("Employee ID is required.")
+
+    emp = repo.get_employee(conn, int(employee_id))
+    if not emp:
+        raise ValueError("Employee not found.")
+
+    with tx(conn):
+        repo.delete_employee(conn, int(employee_id))
+
 from datetime import date
 from .db import tx
 from . import repo

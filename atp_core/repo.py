@@ -49,6 +49,25 @@ def insert_points_history(conn: sqlite3.Connection, employee_id: int, point_date
         VALUES (?, ?, ?, ?, ?, ?);
     """, (employee_id, point_date.isoformat(), float(points), reason, note, flag_code))
 
+def create_employee(
+    conn: sqlite3.Connection,
+    employee_id: int,
+    last_name: str,
+    first_name: str,
+    location: str | None = None,
+):
+    conn.execute(
+        """
+        INSERT INTO employees (employee_id, last_name, first_name, "Location", is_active)
+        VALUES (?, ?, ?, ?, 1);
+        """,
+        (int(employee_id), str(last_name).strip(), str(first_name).strip(), (location or "").strip() or None),
+    )
+
+def delete_employee(conn: sqlite3.Connection, employee_id: int):
+    conn.execute("DELETE FROM points_history WHERE employee_id = ?;", (int(employee_id),))
+    conn.execute("DELETE FROM employees WHERE employee_id = ?;", (int(employee_id),))
+
 def update_employee_point_total(conn: sqlite3.Connection, employee_id: int):
     row = conn.execute("""
         SELECT ROUND(COALESCE(SUM(points),0.0), 3) AS total,

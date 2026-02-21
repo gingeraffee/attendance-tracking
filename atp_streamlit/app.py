@@ -241,6 +241,64 @@ tab_emp, tab_add, tab_reports = st.tabs(["Employees", "Add Points", "Reports"])
 # Employees tab
 # =============================================================================
 with tab_emp:
+    st.subheader("Employee Management")
+
+    c_add, c_del = st.columns(2)
+
+    with c_add:
+        with st.expander("Add employee", expanded=False):
+            with st.form("add_employee_form", clear_on_submit=True):
+                new_emp_id = st.number_input("Employee #", min_value=1, step=1, format="%d")
+                new_last_name = st.text_input("Last name")
+                new_first_name = st.text_input("First name")
+                new_location = st.text_input("Location (optional)")
+                add_emp_submit = st.form_submit_button("Add Employee")
+
+            if add_emp_submit:
+                try:
+                    services.create_employee(
+                        conn,
+                        employee_id=int(new_emp_id),
+                        last_name=new_last_name,
+                        first_name=new_first_name,
+                        location=new_location,
+                    )
+                    st.success("Employee added.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(str(e))
+
+    with c_del:
+        with st.expander("Delete employee", expanded=False):
+            selected_emp_id = st.session_state.get("selected_emp_id")
+            if selected_emp_id:
+                st.caption(f"Selected Employee #: {selected_emp_id}")
+            st.warning("Deleting an employee also deletes all of their point history.")
+            with st.form("delete_employee_form"):
+                delete_emp_id = st.number_input(
+                    "Employee # to delete",
+                    min_value=1,
+                    step=1,
+                    format="%d",
+                    value=int(selected_emp_id) if selected_emp_id else 1,
+                )
+                confirm_delete = st.checkbox("I understand this action cannot be undone.")
+                delete_emp_submit = st.form_submit_button("Delete Employee")
+
+            if delete_emp_submit:
+                if not confirm_delete:
+                    st.error("Please confirm deletion before continuing.")
+                else:
+                    try:
+                        services.delete_employee(conn, int(delete_emp_id))
+                        if st.session_state.get("selected_emp_id") == int(delete_emp_id):
+                            st.session_state.pop("selected_emp_id", None)
+                        st.success("Employee deleted.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(str(e))
+
+    st.divider()
     st.subheader("Employee Lookup")
     q = st.text_input("Search by Employee #, last name, or first name", value="")
     rows = repo.search_employees(conn, q, limit=1000)
@@ -287,6 +345,7 @@ with tab_emp:
         )
 
         # Fallback: dropdown (optional)
+        emp_id = None
         with st.expander("Or select from a list"):
             options = [
                 (
@@ -811,8 +870,69 @@ with tab_reports:
     st.divider()
 
     # ============================================================
-    # 4) YTD + PDF placeholders (we'll align these next)
+    # 4) Employee Point History PDF
     # ============================================================
-    st.markdown("### Generate YTD Roll Offs")
-    st.caption("Keeping your existing YTD UI here for now — we can align output columns next if needed.")
-    st.info("Use the existing YTD section below (unchanged).")
+    st.markdown("### Employee Point History PDF")
+    st.caption("Generate a PDF of an employee's full point history for personnel records.")
+
+    all_emp_rows = repo.search_employees(conn, q="", active_only=False, limit=5000)
+    all_employees = [dict(r) for r in all_emp_rows]
+
+    if not all_employees:
+        st.info("No employees found.")
+    else:
+        pdf_options = [
+            (
+                str(e["employee_id"]),
+                f'{e["employee_id"]} — {e.get("last_name", "")}, {e.get("first_name", "")} ({e.get("location", "")})'
+            )
+            for e in all_employees
+        ]
+
+        default_pdf_index = 0
+        selected_emp_id = st.session_state.get("selected_emp_id")
+        if selected_emp_id is not None:
+            sel_str = str(selected_emp_id)
+            for i, opt in enumerate(pdf_options):
+                if opt[0] == sel_str:
+                    default_pdf_index = i
+                    break
+
+        selected_pdf_emp = st.selectbox(
+            "Select employee for PDF",
+            pdf_options,
+            format_func=lambda x: x[1],
+            index=default_pdf_index,
+            key="report_pdf_employee",
+        )
+
+        if selected_pdf_emp:
+            report_emp_id = int(selected_pdf_emp[0])
+            emp_row = repo.get_employee(conn, report_emp_id)
+            emp = dict(emp_row) if emp_row else None
+
+            if emp:
+                history_rows = conn.execute(
+                    """
+                    SELECT point_date, points, reason, note, flag_code
+                    FROM points_history
+                    WHERE employee_id = ?
+                    ORDER BY date(point_date), id;
+                    """,
+                    (report_emp_id,),
+                ).fetchall()
+                history_list = [dict(r) for r in history_rows]
+
+                pdf_bytes = build_point_history_pdf(emp, history_list)
+                file_name = f"employee_{report_emp_id}_point_history.pdf"
+
+                st.write(f"History entries included: **{len(history_list)}**")
+                st.download_button(
+                    "Download Employee Point History PDF",
+                    data=pdf_bytes,
+                    file_name=file_name,
+                    mime="application/pdf",
+                    key="dl_employee_point_history_pdf",
+                )
+            else:
+                st.warning("Selected employee could not be loaded.")
