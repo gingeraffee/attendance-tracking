@@ -870,8 +870,69 @@ with tab_reports:
     st.divider()
 
     # ============================================================
-    # 4) YTD + PDF placeholders (we'll align these next)
+    # 4) Employee Point History PDF
     # ============================================================
-    st.markdown("### Generate YTD Roll Offs")
-    st.caption("Keeping your existing YTD UI here for now — we can align output columns next if needed.")
-    st.info("Use the existing YTD section below (unchanged).")
+    st.markdown("### Employee Point History PDF")
+    st.caption("Generate a PDF of an employee's full point history for personnel records.")
+
+    all_emp_rows = repo.search_employees(conn, q="", active_only=False, limit=5000)
+    all_employees = [dict(r) for r in all_emp_rows]
+
+    if not all_employees:
+        st.info("No employees found.")
+    else:
+        pdf_options = [
+            (
+                str(e["employee_id"]),
+                f'{e["employee_id"]} — {e.get("last_name", "")}, {e.get("first_name", "")} ({e.get("location", "")})'
+            )
+            for e in all_employees
+        ]
+
+        default_pdf_index = 0
+        selected_emp_id = st.session_state.get("selected_emp_id")
+        if selected_emp_id is not None:
+            sel_str = str(selected_emp_id)
+            for i, opt in enumerate(pdf_options):
+                if opt[0] == sel_str:
+                    default_pdf_index = i
+                    break
+
+        selected_pdf_emp = st.selectbox(
+            "Select employee for PDF",
+            pdf_options,
+            format_func=lambda x: x[1],
+            index=default_pdf_index,
+            key="report_pdf_employee",
+        )
+
+        if selected_pdf_emp:
+            report_emp_id = int(selected_pdf_emp[0])
+            emp_row = repo.get_employee(conn, report_emp_id)
+            emp = dict(emp_row) if emp_row else None
+
+            if emp:
+                history_rows = conn.execute(
+                    """
+                    SELECT point_date, points, reason, note, flag_code
+                    FROM points_history
+                    WHERE employee_id = ?
+                    ORDER BY date(point_date), id;
+                    """,
+                    (report_emp_id,),
+                ).fetchall()
+                history_list = [dict(r) for r in history_rows]
+
+                pdf_bytes = build_point_history_pdf(emp, history_list)
+                file_name = f"employee_{report_emp_id}_point_history.pdf"
+
+                st.write(f"History entries included: **{len(history_list)}**")
+                st.download_button(
+                    "Download Employee Point History PDF",
+                    data=pdf_bytes,
+                    file_name=file_name,
+                    mime="application/pdf",
+                    key="dl_employee_point_history_pdf",
+                )
+            else:
+                st.warning("Selected employee could not be loaded.")
