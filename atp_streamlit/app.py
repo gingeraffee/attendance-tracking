@@ -255,30 +255,26 @@ with tab_emp:
 
         # --- Click-to-select table (show only the 4 columns you want) ---
         display = pd.DataFrame({
-            "Employee #": df["employee_id"],
+            "_employee_id": df["employee_id"],
+            "Employee #": df["employee_id"].astype("string"),
             "Last Name": df.get("last_name", ""),
             "First Name": df.get("first_name", ""),
             "Point Total": df.get("point_total", 0),
         }).copy()
-        
-        display = display.copy()
-        display["Employee # (display)"] = display["Employee #"].astype("string")
-        display.loc[:, "Point Total"] = pd.to_numeric(display["Point Total"], errors="coerce").fillna(0).round(1)
-        
+
         event = st.dataframe(
-            display,
+            display.drop(columns=["_employee_id"]),
             use_container_width=True,
             hide_index=True,
             selection_mode="single-row",
             on_select="rerun",
         )
-        
         emp_id = None
         
         # If user clicked a row
         if event is not None and getattr(event, "selection", None) and event.selection.rows:
             idx = event.selection.rows[0]
-            emp_id = int(display.iloc[idx]["Employee #"])
+            emp_id = int(display.iloc[idx]["_employee_id"])
             st.session_state["selected_emp_id"] = emp_id
 
         # Fallback: dropdown (optional)
