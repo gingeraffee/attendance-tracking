@@ -46,6 +46,13 @@ def sidebar_logo():
     if logo_path.is_file():
         st.sidebar.image(str(logo_path), use_container_width=True)
 
+def on_emp_table_select():
+    sel = st.session_state.get("emp_table", {}).selection.rows
+    if sel:
+        idx = sel[0]
+        emp_id = int(st.session_state["emp_table_ids"][idx])
+        st.session_state["selected_emp_id"] = emp_id
+        
 def get_conn():
     conn = connect()
     ensure_schema(conn)
@@ -261,21 +268,18 @@ with tab_emp:
             "First Name": df.get("first_name", ""),
             "Point Total": df.get("point_total", 0),
         }).copy()
+        
+        # Store row->id mapping for the callback
+        st.session_state["emp_table_ids"] = display["_employee_id"].tolist()
 
-        event = st.dataframe(
+        st.dataframe(
             display.drop(columns=["_employee_id"]),
             use_container_width=True,
             hide_index=True,
             selection_mode="single-row",
-            on_select="rerun",
+            key="emp_table",
+            on_select=on_emp_table_select,
         )
-        emp_id = None
-        
-        # If user clicked a row
-        if event is not None and getattr(event, "selection", None) and event.selection.rows:
-            idx = event.selection.rows[0]
-            emp_id = int(display.iloc[idx]["_employee_id"])
-            st.session_state["selected_emp_id"] = emp_id
 
         # Fallback: dropdown (optional)
         with st.expander("Or select from a list"):
