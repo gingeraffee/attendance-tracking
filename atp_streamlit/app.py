@@ -345,6 +345,8 @@ with tab_emp:
                 if hist
                 else pd.DataFrame(columns=["id", "point_date", "points", "reason", "note", "flag_code"])
             )
+            if "id" in hdf.columns:
+                hdf = hdf.drop(columns=["id"])
             if "points" in hdf.columns:
                 hdf.loc[:, "points"] = pd.to_numeric(hdf["points"], errors="coerce").round(1)
             st.dataframe(hdf, use_container_width=True, hide_index=True)
