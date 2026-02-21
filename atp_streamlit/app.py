@@ -1,6 +1,6 @@
 import pandas as pd
 import streamlit as st
-from datetime import date
+from datetime import date, datetime
 import sys
 from pathlib import Path
 import io
@@ -590,46 +590,46 @@ with tab_reports:
                 csv = df_out.to_csv(index=False).encode("utf-8")
                 st.download_button("Download CSV", csv, "preview_rolloffs.csv", "text/csv", key="dl_preview_rolloffs")
 
-# ---- Preview Perfect Attendance ----
-with c2:
-    st.markdown("#### Preview Perfect Attendance")
-    st.caption("Upcoming perfect attendance dates (no DB changes).")
+    # ---- Preview Perfect Attendance ----
+    with c2:
+        st.markdown("#### Preview Perfect Attendance")
+        st.caption("Upcoming perfect attendance dates (no DB changes).")
 
-    if st.button("Generate Preview Perfect Attendance CSV", key="btn_preview_pa"):
-        rows_p = conn.execute(
-            """
-            SELECT employee_id, first_name, last_name,
-                   perfect_attendance AS pa_date,
-                   COALESCE(point_total,0.0) AS pt
-            FROM employees
-            WHERE perfect_attendance IS NOT NULL
-              AND date(perfect_attendance) >= date('now')
-            ORDER BY date(perfect_attendance) ASC, last_name, first_name;
-            """
-        ).fetchall()
+        if st.button("Generate Preview Perfect Attendance CSV", key="btn_preview_pa"):
+            rows_p = conn.execute(
+                """
+                SELECT employee_id, first_name, last_name,
+                       perfect_attendance AS pa_date,
+                       COALESCE(point_total,0.0) AS pt
+                FROM employees
+                WHERE perfect_attendance IS NOT NULL
+                  AND date(perfect_attendance) >= date('now')
+                ORDER BY date(perfect_attendance) ASC, last_name, first_name;
+                """
+            ).fetchall()
 
-        df_p = pd.DataFrame([dict(r) for r in rows_p])
-        if df_p.empty:
-            st.info("No upcoming perfect attendance dates found.")
-        else:
-            # Format date as MM/DD/YYYY
-            df_p["pa_date"] = pd.to_datetime(df_p["pa_date"], errors="coerce").dt.strftime("%m/%d/%Y")
+            df_p = pd.DataFrame([dict(r) for r in rows_p])
+            if df_p.empty:
+                st.info("No upcoming perfect attendance dates found.")
+            else:
+                # Format date as MM/DD/YYYY
+                df_p["pa_date"] = pd.to_datetime(df_p["pa_date"], errors="coerce").dt.strftime("%m/%d/%Y")
 
-            df_out = pd.DataFrame({
-                "Employee #": df_p["employee_id"].astype(str),
-                "First Name": df_p["first_name"],
-                "Last Name": df_p["last_name"],
-                "Point Date": df_p["pa_date"],  # MM/DD/YYYY
-                "Point": "",
-                "Reason": "$75 Perfect Attendance Bonus",
-                "Note": "",
-                "Point Total": pd.to_numeric(df_p["pt"], errors="coerce").fillna(0).round(1),
-                "Flag Code": "",
-            })
+                df_out = pd.DataFrame({
+                    "Employee #": df_p["employee_id"].astype(str),
+                    "First Name": df_p["first_name"],
+                    "Last Name": df_p["last_name"],
+                    "Point Date": df_p["pa_date"],  # MM/DD/YYYY
+                    "Point": "",
+                    "Reason": "$75 Perfect Attendance Bonus",
+                    "Note": "",
+                    "Point Total": pd.to_numeric(df_p["pt"], errors="coerce").fillna(0).round(1),
+                    "Flag Code": "",
+                })
 
-            st.dataframe(df_out, use_container_width=True, hide_index=True)
-            csv = df_out.to_csv(index=False).encode("utf-8")
-            st.download_button("Download CSV", csv, "preview_perfect_attendance.csv", "text/csv", key="dl_preview_pa")
+                st.dataframe(df_out, use_container_width=True, hide_index=True)
+                csv = df_out.to_csv(index=False).encode("utf-8")
+                st.download_button("Download CSV", csv, "preview_perfect_attendance.csv", "text/csv", key="dl_preview_pa")
 
     st.divider()
 
