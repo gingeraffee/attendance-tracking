@@ -270,7 +270,8 @@ with tab_emp:
             "Employee #": df["employee_id"].astype("string"),
             "Last Name": df.get("last_name", ""),
             "First Name": df.get("first_name", ""),
-            "Point Total": df.get("point_total", 0),
+            # Keep this as text so it aligns left like the other columns.
+            "Point Total": pd.to_numeric(df.get("point_total", 0), errors="coerce").fillna(0).map(lambda v: f"{v:.1f}"),
         }).copy()
         
         # Store row->id mapping for the callback
