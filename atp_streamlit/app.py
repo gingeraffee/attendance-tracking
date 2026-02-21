@@ -566,17 +566,20 @@ with tab_reports:
                 ORDER BY date(rolloff_date) ASC, last_name, first_name;
                 """
             ).fetchall()
-
+            
             df_r = pd.DataFrame([dict(r) for r in rows_r])
             if df_r.empty:
                 st.info("No upcoming roll-offs found.")
             else:
+                # Format date as MM/DD/YYYY BEFORE building df_out
+                df_r["rolloff_date"] = pd.to_datetime(df_r["rolloff_date"], errors="coerce").dt.strftime("%m/%d/%Y")
+
                 df_out = pd.DataFrame({
                     "Employee #": df_r["employee_id"].astype(str),
                     "First Name": df_r["first_name"],
                     "Last Name": df_r["last_name"],
+                    "Point Date": df_r["rolloff_date"],
                     "Point": -1.0,
-                    "Point Date": df_r["rolloff_date"] = pd.to_datetime(df_r["rolloff_date"], errors="coerce").dt.strftime("%m/%d/%Y"),
                     "Reason": "2 Month Rolloff",
                     "Note": "",
                     "Point Total": (pd.to_numeric(df_r["pt"], errors="coerce").fillna(0) - 1.0).clip(lower=0.0).round(1),
