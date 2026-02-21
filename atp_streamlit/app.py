@@ -261,7 +261,8 @@ with tab_emp:
             "Point Total": df.get("point_total", 0),
         }).copy()
         
-        display.loc[:, "Employee #"] = display["Employee #"].astype(str)
+        display = display.copy()
+        display["Employee # (display)"] = display["Employee #"].astype("string")
         display.loc[:, "Point Total"] = pd.to_numeric(display["Point Total"], errors="coerce").fillna(0).round(1)
         
         event = st.dataframe(
@@ -613,13 +614,14 @@ with tab_reports:
                 st.info("No upcoming perfect attendance dates found.")
             else:
                 # Format date as MM/DD/YYYY
-                df_p["pa_date"] = pd.to_datetime(df_p["pa_date"], errors="coerce").dt.strftime("%m/%d/%Y")
+                df_p = df_p.copy()
+                df_p.loc[:, "pa_date"] = pd.to_datetime(df_p["pa_date"], errors="coerce")
 
                 df_out = pd.DataFrame({
-                    "Employee #": df_p["employee_id"].astype(str),
+                    "Employee #": df_p["employee_id"].astype("string"),
                     "First Name": df_p["first_name"],
                     "Last Name": df_p["last_name"],
-                    "Point Date": df_p["pa_date"],  # MM/DD/YYYY
+                    "Point Date": df_p["pa_date"].dt.strftime("%m/%d/%Y"),
                     "Point": "",
                     "Reason": "$75 Perfect Attendance Bonus",
                     "Note": "",
