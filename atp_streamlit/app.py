@@ -576,7 +576,7 @@ with tab_reports:
                     "First Name": df_r["first_name"],
                     "Last Name": df_r["last_name"],
                     "Point": -1.0,
-                    "Point Date": df_r["rolloff_date"] 
+                    "Point Date": df_r["rolloff_date"] = pd.to_datetime(df_r["rolloff_date"], errors="coerce").dt.strftime("%m/%d/%Y"),
                     "Reason": "2 Month Rolloff",
                     "Note": "",
                     "Point Total": (pd.to_numeric(df_r["pt"], errors="coerce").fillna(0) - 1.0).clip(lower=0.0).round(1),
