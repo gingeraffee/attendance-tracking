@@ -413,7 +413,7 @@ with tab_emp:
                     hide_index=True,
                     num_rows="fixed",
                     column_config={
-                        "id": st.column_config.NumberColumn("ID", disabled=True),
+                        "id": None,
                         "point_date": st.column_config.DateColumn("Point Date", format="MM/DD/YYYY", required=True),
                         "points": st.column_config.SelectboxColumn("Points", options=[0.5, 1.0, 1.5], required=True),
                         "reason": st.column_config.SelectboxColumn("Reason", options=REASON_OPTIONS, required=True),
