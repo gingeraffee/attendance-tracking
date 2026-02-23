@@ -1,5 +1,6 @@
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 from datetime import date, datetime
 import sys
 from pathlib import Path
@@ -449,11 +450,37 @@ with tab_add:
             # Keep global selection in sync
             st.session_state["selected_emp_id"] = emp_id2
 
+            components.html(
+                """
+                <script>
+                const setupDateField = () => {
+                  const doc = window.parent.document;
+                  const input = doc.querySelector('input[aria-label="Point date (MM/DD/YYYY)"]');
+                  if (!input || input.dataset.autoclearBound === "1") return;
+                  input.dataset.autoclearBound = "1";
+                  input.addEventListener("focus", () => { input.dataset.autoclearOnType = "1"; });
+                  input.addEventListener("keydown", (ev) => {
+                    if (input.dataset.autoclearOnType !== "1") return;
+                    if (ev.key.length === 1 || ev.key === "Backspace" || ev.key === "Delete") {
+                      input.value = "";
+                      input.dataset.autoclearOnType = "0";
+                      input.dispatchEvent(new Event("input", { bubbles: true }));
+                    }
+                  });
+                };
+                setupDateField();
+                setTimeout(setupDateField, 250);
+                </script>
+                """,
+                height=0,
+            )
+
             with st.form("add_point_form", clear_on_submit=False):
-                pdate = st.date_input("Point date", value=date.today())
+                pdate = st.date_input("Point date (MM/DD/YYYY)", value=date.today(), format="MM/DD/YYYY")
                 points = st.selectbox("Points", [0.5, 1.0, 1.5], index=0)
                 reason = st.selectbox("Reason", REASON_OPTIONS, index=0)
-                note = st.text_area("Note (recommended)")
+                flag_code = st.text_input("Flag Code (optional)", value="")
+                note = st.text_area("Note (optional)", placeholder="Leave blank unless needed")
                 confirm = st.checkbox("I reviewed the preview and confirm this entry is correct.")
                 submitted = st.form_submit_button("Preview & Save")
 
@@ -470,16 +497,17 @@ with tab_add:
                     st.write(
                         {
                             "employee_id": preview.employee_id,
-                            "date": preview.point_date.isoformat(),
+                            "date": preview.point_date.strftime("%m/%d/%Y"),
                             "points": preview.points,
                             "reason": preview.reason,
+                            "flag_code": (flag_code or "").strip(),
                             "note": preview.note,
                         }
                     )
                     st.info(f"Point Total: {before_total:.1f}  →  {after_total:.1f}")
 
                     if confirm:
-                        services.add_point(conn, preview, flag_code="MANUAL")
+                        services.add_point(conn, preview, flag_code=(flag_code or "").strip() or None)
                         st.success("Saved successfully.")
                         st.rerun()
                     else:
