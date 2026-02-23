@@ -242,7 +242,7 @@ if selected_emp_id:
             # Parse existing dates for the calendar pickers
             def parse_date_for_picker(val):
                 if not val:
-                    return date.today()
+                    return None
                 if hasattr(val, "date"):
                     return val.date()
                 if isinstance(val, date):
@@ -252,26 +252,50 @@ if selected_emp_id:
                         return datetime.strptime(str(val), fmt).date()
                     except ValueError:
                         pass
-                return date.today()
+                return None
 
             with st.sidebar.form("edit_info_form"):
+                last_point_default = parse_date_for_picker(emp.get("last_point_date"))
+                rolloff_default = parse_date_for_picker(emp.get("rolloff_date"))
+                perfect_default = parse_date_for_picker(emp.get("perfect_attendance"))
+
+                clear_last_point = st.checkbox(
+                    "Clear Last Point Date",
+                    value=False,
+                    key="clear_last_point_date",
+                )
                 new_last_point = st.date_input(
                     "Last Point Date",
-                    value=parse_date_for_picker(emp.get("last_point_date")),
+                    value=last_point_default,
                     format="MM/DD/YYYY",
                     key="edit_last_point_date",
+                    disabled=clear_last_point,
+                )
+
+                clear_rolloff = st.checkbox(
+                    "Clear 2 Month Roll-Off Date",
+                    value=False,
+                    key="clear_rolloff_date",
                 )
                 new_rolloff = st.date_input(
                     "2 Month Roll-Off Date",
-                    value=parse_date_for_picker(emp.get("rolloff_date")),
+                    value=rolloff_default,
                     format="MM/DD/YYYY",
                     key="edit_rolloff_date",
+                    disabled=clear_rolloff,
+                )
+
+                clear_perfect = st.checkbox(
+                    "Clear Perfect Attendance Date",
+                    value=False,
+                    key="clear_perfect_date",
                 )
                 new_perfect = st.date_input(
                     "Perfect Attendance Date",
-                    value=parse_date_for_picker(emp.get("perfect_attendance")),
+                    value=perfect_default,
                     format="MM/DD/YYYY",
                     key="edit_perfect_date",
+                    disabled=clear_perfect,
                 )
 
                 col_save, col_cancel = st.columns(2)
@@ -291,9 +315,9 @@ if selected_emp_id:
                          WHERE employee_id = ?
                         """,
                         (
-                            new_last_point.isoformat(),
-                            new_rolloff.isoformat(),
-                            new_perfect.isoformat(),
+                            None if clear_last_point else (new_last_point.isoformat() if new_last_point else None),
+                            None if clear_rolloff else (new_rolloff.isoformat() if new_rolloff else None),
+                            None if clear_perfect else (new_perfect.isoformat() if new_perfect else None),
                             int(selected_emp_id),
                         ),
                     )
