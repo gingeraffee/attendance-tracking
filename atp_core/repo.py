@@ -3,6 +3,8 @@ import sqlite3
 from datetime import date, timedelta
 from typing import Any
 
+from .rules import calc_rolloff_and_perfect
+
 def search_employees(conn: sqlite3.Connection, q: str, active_only: bool = True, limit: int = 50):
     q = (q or "").strip()
     where = []
@@ -70,19 +72,73 @@ def delete_employee(conn: sqlite3.Connection, employee_id: int):
 
 def update_employee_point_total(conn: sqlite3.Connection, employee_id: int):
     row = conn.execute("""
-        SELECT ROUND(COALESCE(SUM(points),0.0), 3) AS total,
-               MAX(date(point_date)) AS last_point_date
+        SELECT ROUND(COALESCE(SUM(points),0.0), 3) AS total
         FROM points_history
         WHERE employee_id = ?;
     """, (employee_id,)).fetchone()
     total = float(row["total"] or 0.0)
-    last_point_date = row["last_point_date"]
+
+    last_positive = conn.execute(
+        """
+        SELECT MAX(date(point_date)) AS last_point_date
+        FROM points_history
+        WHERE employee_id = ?
+          AND COALESCE(points, 0.0) > 0.0;
+        """,
+        (employee_id,),
+    ).fetchone()
+    last_point_date = last_positive["last_point_date"]
+
+    if last_point_date:
+        policy_dates = calc_rolloff_and_perfect(date.fromisoformat(last_point_date))
+        rolloff_date = policy_dates.rolloff_date.isoformat()
+        perfect_attendance = policy_dates.perfect_date.isoformat()
+    else:
+        rolloff_date = None
+        perfect_attendance = None
+
     conn.execute("""
         UPDATE employees
            SET point_total = ?,
-               last_point_date = ?
+               last_point_date = ?,
+               rolloff_date = ?,
+               perfect_attendance = ?
          WHERE employee_id = ?;
-    """, (total, last_point_date, employee_id))
+    """, (total, last_point_date, rolloff_date, perfect_attendance, employee_id))
+
+
+def update_points_history_entry(
+    conn: sqlite3.Connection,
+    point_id: int,
+    point_date: date,
+    points: float,
+    reason: str,
+    note: str | None,
+    flag_code: str | None,
+):
+    conn.execute(
+        """
+        UPDATE points_history
+           SET point_date = ?,
+               points = ?,
+               reason = ?,
+               note = ?,
+               flag_code = ?
+         WHERE id = ?;
+        """,
+        (
+            point_date.isoformat(),
+            float(points),
+            str(reason).strip(),
+            (note or "").strip() or None,
+            (flag_code or "").strip() or None,
+            int(point_id),
+        ),
+    )
+
+
+def delete_points_history_entry(conn: sqlite3.Connection, point_id: int):
+    conn.execute("DELETE FROM points_history WHERE id = ?;", (int(point_id),))
 
 def report_rolloff_next_2_months(conn: sqlite3.Connection, start: date | None = None):
     start = start or date.today()
