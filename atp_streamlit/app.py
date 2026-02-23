@@ -230,10 +230,90 @@ if selected_emp_id:
         st.sidebar.caption(f"Last Point Date: {fmt_metric_date(emp.get('last_point_date'))}")
         st.sidebar.caption(f"Next Roll-Off Date: {fmt_metric_date(emp.get('rolloff_date'))}")
         st.sidebar.caption(f"Perfect Attendance Date: {fmt_metric_date(emp.get('perfect_attendance'))}")
+
+        # Edit Info toggle button
+        if not st.session_state["show_edit_info"]:
+            if st.sidebar.button("✏️ Edit Info", key="btn_edit_info"):
+                st.session_state["show_edit_info"] = True
+                st.rerun()
+        else:
+            st.sidebar.markdown("#### Edit Employee Dates")
+
+            # Parse existing dates for the calendar pickers
+            def parse_date_for_picker(val):
+                if not val:
+                    return date.today()
+                if hasattr(val, "date"):
+                    return val.date()
+                if isinstance(val, date):
+                    return val
+                for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%Y/%m/%d"):
+                    try:
+                        return datetime.strptime(str(val), fmt).date()
+                    except ValueError:
+                        pass
+                return date.today()
+
+            with st.sidebar.form("edit_info_form"):
+                new_last_point = st.date_input(
+                    "Last Point Date",
+                    value=parse_date_for_picker(emp.get("last_point_date")),
+                    format="MM/DD/YYYY",
+                    key="edit_last_point_date",
+                )
+                new_rolloff = st.date_input(
+                    "2 Month Roll-Off Date",
+                    value=parse_date_for_picker(emp.get("rolloff_date")),
+                    format="MM/DD/YYYY",
+                    key="edit_rolloff_date",
+                )
+                new_perfect = st.date_input(
+                    "Perfect Attendance Date",
+                    value=parse_date_for_picker(emp.get("perfect_attendance")),
+                    format="MM/DD/YYYY",
+                    key="edit_perfect_date",
+                )
+
+                col_save, col_cancel = st.columns(2)
+                with col_save:
+                    save_clicked = st.form_submit_button("💾 Save")
+                with col_cancel:
+                    cancel_clicked = st.form_submit_button("✖ Cancel")
+
+            if save_clicked:
+                try:
+                    conn.execute(
+                        """
+                        UPDATE employees
+                           SET last_point_date    = ?,
+                               rolloff_date       = ?,
+                               perfect_attendance = ?
+                         WHERE employee_id = ?
+                        """,
+                        (
+                            new_last_point.isoformat(),
+                            new_rolloff.isoformat(),
+                            new_perfect.isoformat(),
+                            int(selected_emp_id),
+                        ),
+                    )
+                    conn.commit()
+                    st.session_state["show_edit_info"] = False
+                    st.sidebar.success("Dates updated.")
+                    st.rerun()
+                except Exception as e:
+                    st.sidebar.error(str(e))
+
+            if cancel_clicked:
+                st.session_state["show_edit_info"] = False
+                st.rerun()
+
     else:
         st.sidebar.info("Employee not found.")
 else:
     st.sidebar.caption("Select an employee from the Employees tab.")
+    if st.session_state.get("show_edit_info"):
+        st.session_state["show_edit_info"] = False
 
 
 st.sidebar.divider()
