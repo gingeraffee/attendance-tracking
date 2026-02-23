@@ -235,6 +235,61 @@ if selected_emp_id:
 else:
     st.sidebar.caption("Select an employee from the Employees tab.")
 
+
+st.sidebar.divider()
+st.sidebar.subheader("Employee Management")
+
+with st.sidebar.expander("Add employee", expanded=False):
+    with st.form("add_employee_form", clear_on_submit=True):
+        new_emp_id = st.number_input("Employee #", min_value=1, step=1, format="%d")
+        new_last_name = st.text_input("Last name")
+        new_first_name = st.text_input("First name")
+        new_location = st.text_input("Location (optional)")
+        add_emp_submit = st.form_submit_button("Add Employee")
+
+    if add_emp_submit:
+        try:
+            services.create_employee(
+                conn,
+                employee_id=int(new_emp_id),
+                last_name=new_last_name,
+                first_name=new_first_name,
+                location=new_location,
+            )
+            st.sidebar.success("Employee added.")
+            st.rerun()
+        except Exception as e:
+            st.sidebar.error(str(e))
+
+with st.sidebar.expander("Delete employee", expanded=False):
+    selected_emp_id = st.session_state.get("selected_emp_id")
+    if selected_emp_id:
+        st.caption(f"Selected Employee #: {selected_emp_id}")
+    st.warning("Deleting an employee also deletes all of their point history.")
+    with st.form("delete_employee_form"):
+        delete_emp_id = st.number_input(
+            "Employee # to delete",
+            min_value=1,
+            step=1,
+            format="%d",
+            value=int(selected_emp_id) if selected_emp_id else 1,
+        )
+        confirm_delete = st.checkbox("I understand this action cannot be undone.")
+        delete_emp_submit = st.form_submit_button("Delete Employee")
+
+    if delete_emp_submit:
+        if not confirm_delete:
+            st.sidebar.error("Please confirm deletion before continuing.")
+        else:
+            try:
+                services.delete_employee(conn, int(delete_emp_id))
+                if st.session_state.get("selected_emp_id") == int(delete_emp_id):
+                    st.session_state.pop("selected_emp_id", None)
+                st.sidebar.success("Employee deleted.")
+                st.rerun()
+            except Exception as e:
+                st.sidebar.error(str(e))
+
 # --- Tabs ---------------------------------------------------------------------
 tab_emp, tab_add, tab_reports = st.tabs(["Employees", "Add Points", "Reports"])
 
@@ -242,64 +297,6 @@ tab_emp, tab_add, tab_reports = st.tabs(["Employees", "Add Points", "Reports"])
 # Employees tab
 # =============================================================================
 with tab_emp:
-    st.subheader("Employee Management")
-
-    c_add, c_del = st.columns(2)
-
-    with c_add:
-        with st.expander("Add employee", expanded=False):
-            with st.form("add_employee_form", clear_on_submit=True):
-                new_emp_id = st.number_input("Employee #", min_value=1, step=1, format="%d")
-                new_last_name = st.text_input("Last name")
-                new_first_name = st.text_input("First name")
-                new_location = st.text_input("Location (optional)")
-                add_emp_submit = st.form_submit_button("Add Employee")
-
-            if add_emp_submit:
-                try:
-                    services.create_employee(
-                        conn,
-                        employee_id=int(new_emp_id),
-                        last_name=new_last_name,
-                        first_name=new_first_name,
-                        location=new_location,
-                    )
-                    st.success("Employee added.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(str(e))
-
-    with c_del:
-        with st.expander("Delete employee", expanded=False):
-            selected_emp_id = st.session_state.get("selected_emp_id")
-            if selected_emp_id:
-                st.caption(f"Selected Employee #: {selected_emp_id}")
-            st.warning("Deleting an employee also deletes all of their point history.")
-            with st.form("delete_employee_form"):
-                delete_emp_id = st.number_input(
-                    "Employee # to delete",
-                    min_value=1,
-                    step=1,
-                    format="%d",
-                    value=int(selected_emp_id) if selected_emp_id else 1,
-                )
-                confirm_delete = st.checkbox("I understand this action cannot be undone.")
-                delete_emp_submit = st.form_submit_button("Delete Employee")
-
-            if delete_emp_submit:
-                if not confirm_delete:
-                    st.error("Please confirm deletion before continuing.")
-                else:
-                    try:
-                        services.delete_employee(conn, int(delete_emp_id))
-                        if st.session_state.get("selected_emp_id") == int(delete_emp_id):
-                            st.session_state.pop("selected_emp_id", None)
-                        st.success("Employee deleted.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(str(e))
-
-    st.divider()
     st.subheader("Employee Lookup")
     q = st.text_input("Search by Employee #, last name, or first name", value="")
     rows = repo.search_employees(conn, q, limit=1000)
@@ -403,13 +400,108 @@ with tab_emp:
             hdf = (
                 pd.DataFrame([dict(r) for r in hist]).copy()
                 if hist
-                else pd.DataFrame(columns=["id", "point_date", "points", "reason", "note", "flag_code"])
+                else pd.DataFrame(columns=["id", "point_date", "points", "reason", "note", "flag_code", "point_total"])
             )
-            if "id" in hdf.columns:
-                hdf = hdf.drop(columns=["id"])
-            if "points" in hdf.columns:
+
+            if not hdf.empty:
+                hdf.loc[:, "point_date"] = pd.to_datetime(hdf["point_date"], errors="coerce")
                 hdf.loc[:, "points"] = pd.to_numeric(hdf["points"], errors="coerce").round(1)
-            st.dataframe(hdf, use_container_width=True, hide_index=True)
+                hdf.loc[:, "point_total"] = pd.to_numeric(hdf["point_total"], errors="coerce").round(1)
+
+                editor_ids = hdf["id"].astype(int).tolist()
+                editor_view = hdf.drop(columns=["id"]).rename(columns={"point_total": "Point Total"})
+
+                edited_hdf = st.data_editor(
+                    editor_view,
+                    use_container_width=True,
+                    hide_index=True,
+                    num_rows="fixed",
+                    column_config={
+                        "point_date": st.column_config.DateColumn("Point Date", format="MM/DD/YYYY", required=True),
+                        "points": st.column_config.NumberColumn("Points", format="%.1f", required=True),
+                        "reason": st.column_config.SelectboxColumn("Reason", options=REASON_OPTIONS, required=True),
+                        "note": st.column_config.TextColumn("Note"),
+                        "flag_code": st.column_config.TextColumn("Flag Code"),
+                        "Point Total": st.column_config.NumberColumn("Point Total", format="%.1f", disabled=True),
+                    },
+                    disabled=["Point Total"],
+                    key=f"points_history_editor_{emp_id}",
+                )
+
+                if st.button("Save history edits", key=f"save_history_{emp_id}"):
+                    try:
+                        for idx, row in edited_hdf.iterrows():
+                            point_date_value = row.get("point_date")
+                            if pd.isna(point_date_value):
+                                raise ValueError("Point date is required.")
+
+                            if hasattr(point_date_value, "to_pydatetime"):
+                                point_date_value = point_date_value.to_pydatetime().date()
+                            elif hasattr(point_date_value, "date"):
+                                point_date_value = point_date_value.date()
+
+                            services.update_point_history_entry(
+                                conn,
+                                point_id=editor_ids[idx],
+                                employee_id=int(emp_id),
+                                point_date=point_date_value,
+                                points=float(row["points"]),
+                                reason=str(row["reason"]),
+                                note=("" if pd.isna(row.get("note")) else str(row.get("note"))),
+                                flag_code=("" if pd.isna(row.get("flag_code")) else str(row.get("flag_code"))),
+                            )
+                        st.success("Point history updated.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(str(e))
+
+                st.caption("Select a row below, then delete the selected point.")
+                delete_view = hdf[["point_date", "points", "reason", "point_total", "note", "flag_code"]].copy()
+                delete_view = delete_view.rename(columns={"point_total": "Point Total"})
+                row_selection = st.dataframe(
+                    delete_view,
+                    use_container_width=True,
+                    hide_index=True,
+                    selection_mode="single-row",
+                    on_select="rerun",
+                    key=f"points_delete_table_{emp_id}",
+                    column_config={
+                        "point_date": st.column_config.DateColumn("Point Date", format="MM/DD/YYYY"),
+                        "points": st.column_config.NumberColumn("Points", format="%.1f"),
+                        "reason": "Reason",
+                        "Point Total": st.column_config.NumberColumn("Point Total", format="%.1f"),
+                        "note": "Note",
+                        "flag_code": "Flag Code",
+                    },
+                )
+
+                selected_rows = row_selection.selection.rows if row_selection and row_selection.selection else []
+                selected_point_id = None
+                if selected_rows:
+                    selected_point_id = int(hdf.iloc[selected_rows[0]]["id"])
+
+                confirm_delete_point = st.checkbox(
+                    "I understand this point will be permanently deleted.",
+                    key=f"confirm_delete_point_{emp_id}",
+                )
+                if st.button("Delete selected point", key=f"delete_point_btn_{emp_id}"):
+                    if selected_point_id is None:
+                        st.error("Please select a point row to delete.")
+                    elif not confirm_delete_point:
+                        st.error("Please confirm deletion before continuing.")
+                    else:
+                        try:
+                            services.delete_point_history_entry(
+                                conn,
+                                point_id=selected_point_id,
+                                employee_id=int(emp_id),
+                            )
+                            st.success("Point deleted.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(str(e))
+            else:
+                st.info("No point history found for this employee.")
 
 # =============================================================================
 # Add Points tab (defaults to the selected employee + keeps selection in sync)

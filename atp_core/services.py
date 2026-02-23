@@ -47,6 +47,51 @@ def add_point(conn: sqlite3.Connection, preview: AddPointPreview, flag_code: str
         repo.update_employee_point_total(conn, preview.employee_id)
 
 
+
+
+def update_point_history_entry(
+    conn: sqlite3.Connection,
+    point_id: int,
+    employee_id: int,
+    point_date: date,
+    points: float,
+    reason: str,
+    note: str | None,
+    flag_code: str | None = None,
+) -> None:
+    if point_id is None:
+        raise ValueError("Point history row is required.")
+    if employee_id is None:
+        raise ValueError("Employee is required.")
+    if points is None:
+        raise ValueError("Points are required.")
+    if reason is None or not str(reason).strip():
+        raise ValueError("Reason is required.")
+    if point_date > date.today():
+        raise ValueError("Point date cannot be in the future.")
+
+    with tx(conn):
+        repo.update_points_history_entry(
+            conn,
+            point_id=int(point_id),
+            point_date=point_date,
+            points=float(points),
+            reason=str(reason).strip(),
+            note=(note or "").strip() or None,
+            flag_code=(flag_code or "").strip() or None,
+        )
+        repo.update_employee_point_total(conn, int(employee_id))
+
+
+def delete_point_history_entry(conn: sqlite3.Connection, point_id: int, employee_id: int) -> None:
+    if point_id is None:
+        raise ValueError("Point history row is required.")
+    if employee_id is None:
+        raise ValueError("Employee is required.")
+
+    with tx(conn):
+        repo.delete_points_history_entry(conn, int(point_id))
+        repo.update_employee_point_total(conn, int(employee_id))
 def create_employee(conn: sqlite3.Connection, employee_id: int, last_name: str, first_name: str, location: str | None = None) -> None:
     if employee_id is None:
         raise ValueError("Employee ID is required.")
