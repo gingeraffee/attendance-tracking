@@ -405,11 +405,92 @@ with tab_emp:
                 if hist
                 else pd.DataFrame(columns=["id", "point_date", "points", "reason", "note", "flag_code"])
             )
-            if "id" in hdf.columns:
-                hdf = hdf.drop(columns=["id"])
-            if "points" in hdf.columns:
+
+            if not hdf.empty:
+                hdf.loc[:, "point_date"] = pd.to_datetime(hdf["point_date"], errors="coerce")
                 hdf.loc[:, "points"] = pd.to_numeric(hdf["points"], errors="coerce").round(1)
-            st.dataframe(hdf, use_container_width=True, hide_index=True)
+
+                edited_hdf = st.data_editor(
+                    hdf,
+                    use_container_width=True,
+                    hide_index=True,
+                    num_rows="fixed",
+                    column_config={
+                        "id": st.column_config.NumberColumn("ID", disabled=True),
+                        "point_date": st.column_config.DateColumn("Point Date", format="MM/DD/YYYY", required=True),
+                        "points": st.column_config.SelectboxColumn("Points", options=[0.5, 1.0, 1.5], required=True),
+                        "reason": st.column_config.SelectboxColumn("Reason", options=REASON_OPTIONS, required=True),
+                        "note": st.column_config.TextColumn("Note"),
+                        "flag_code": st.column_config.TextColumn("Flag Code"),
+                    },
+                    disabled=["id"],
+                    key=f"points_history_editor_{emp_id}",
+                )
+
+                c_save, c_delete = st.columns(2)
+
+                with c_save:
+                    if st.button("Save history edits", key=f"save_history_{emp_id}"):
+                        try:
+                            for _, row in edited_hdf.iterrows():
+                                point_date_value = row.get("point_date")
+                                if pd.isna(point_date_value):
+                                    raise ValueError("Point date is required.")
+
+                                if hasattr(point_date_value, "to_pydatetime"):
+                                    point_date_value = point_date_value.to_pydatetime().date()
+                                elif hasattr(point_date_value, "date"):
+                                    point_date_value = point_date_value.date()
+
+                                services.update_point_history_entry(
+                                    conn,
+                                    point_id=int(row["id"]),
+                                    employee_id=int(emp_id),
+                                    point_date=point_date_value,
+                                    points=float(row["points"]),
+                                    reason=str(row["reason"]),
+                                    note=("" if pd.isna(row.get("note")) else str(row.get("note"))),
+                                    flag_code=("" if pd.isna(row.get("flag_code")) else str(row.get("flag_code"))),
+                                )
+                            st.success("Point history updated.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(str(e))
+
+                with c_delete:
+                    delete_options = [
+                        (
+                            int(r["id"]),
+                            f"{pd.to_datetime(r['point_date'], errors='coerce').strftime('%m/%d/%Y') if pd.notna(pd.to_datetime(r['point_date'], errors='coerce')) else r['point_date']} • {float(r.get('points') or 0):.1f} • {r.get('reason') or ''}"
+                        )
+                        for r in hdf.to_dict(orient="records")
+                    ]
+                    selected_delete = st.selectbox(
+                        "Select point to delete",
+                        options=delete_options,
+                        format_func=lambda x: x[1],
+                        key=f"delete_point_select_{emp_id}",
+                    )
+                    confirm_delete_point = st.checkbox(
+                        "I understand this point will be permanently deleted.",
+                        key=f"confirm_delete_point_{emp_id}",
+                    )
+                    if st.button("Delete selected point", key=f"delete_point_btn_{emp_id}"):
+                        if not confirm_delete_point:
+                            st.error("Please confirm deletion before continuing.")
+                        else:
+                            try:
+                                services.delete_point_history_entry(
+                                    conn,
+                                    point_id=int(selected_delete[0]),
+                                    employee_id=int(emp_id),
+                                )
+                                st.success("Point deleted.")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(str(e))
+            else:
+                st.info("No point history found for this employee.")
 
 # =============================================================================
 # Add Points tab (defaults to the selected employee + keeps selection in sync)
