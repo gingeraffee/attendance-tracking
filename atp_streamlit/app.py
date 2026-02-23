@@ -232,7 +232,7 @@ if selected_emp_id:
         st.sidebar.caption(f"Perfect Attendance Date: {fmt_metric_date(emp.get('perfect_attendance'))}")
 
         # Edit Info toggle button
-        if not st.session_state["show_edit_info"]:
+        if not st.session_state.setdefault("show_edit_info", False):
             if st.sidebar.button("✏️ Edit Info", key="btn_edit_info"):
                 st.session_state["show_edit_info"] = True
                 st.rerun()
