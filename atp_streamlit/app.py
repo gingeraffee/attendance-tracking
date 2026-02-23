@@ -235,6 +235,61 @@ if selected_emp_id:
 else:
     st.sidebar.caption("Select an employee from the Employees tab.")
 
+
+st.sidebar.divider()
+st.sidebar.subheader("Employee Management")
+
+with st.sidebar.expander("Add employee", expanded=False):
+    with st.form("add_employee_form", clear_on_submit=True):
+        new_emp_id = st.number_input("Employee #", min_value=1, step=1, format="%d")
+        new_last_name = st.text_input("Last name")
+        new_first_name = st.text_input("First name")
+        new_location = st.text_input("Location (optional)")
+        add_emp_submit = st.form_submit_button("Add Employee")
+
+    if add_emp_submit:
+        try:
+            services.create_employee(
+                conn,
+                employee_id=int(new_emp_id),
+                last_name=new_last_name,
+                first_name=new_first_name,
+                location=new_location,
+            )
+            st.sidebar.success("Employee added.")
+            st.rerun()
+        except Exception as e:
+            st.sidebar.error(str(e))
+
+with st.sidebar.expander("Delete employee", expanded=False):
+    selected_emp_id = st.session_state.get("selected_emp_id")
+    if selected_emp_id:
+        st.caption(f"Selected Employee #: {selected_emp_id}")
+    st.warning("Deleting an employee also deletes all of their point history.")
+    with st.form("delete_employee_form"):
+        delete_emp_id = st.number_input(
+            "Employee # to delete",
+            min_value=1,
+            step=1,
+            format="%d",
+            value=int(selected_emp_id) if selected_emp_id else 1,
+        )
+        confirm_delete = st.checkbox("I understand this action cannot be undone.")
+        delete_emp_submit = st.form_submit_button("Delete Employee")
+
+    if delete_emp_submit:
+        if not confirm_delete:
+            st.sidebar.error("Please confirm deletion before continuing.")
+        else:
+            try:
+                services.delete_employee(conn, int(delete_emp_id))
+                if st.session_state.get("selected_emp_id") == int(delete_emp_id):
+                    st.session_state.pop("selected_emp_id", None)
+                st.sidebar.success("Employee deleted.")
+                st.rerun()
+            except Exception as e:
+                st.sidebar.error(str(e))
+
 # --- Tabs ---------------------------------------------------------------------
 tab_emp, tab_add, tab_reports = st.tabs(["Employees", "Add Points", "Reports"])
 
@@ -242,64 +297,6 @@ tab_emp, tab_add, tab_reports = st.tabs(["Employees", "Add Points", "Reports"])
 # Employees tab
 # =============================================================================
 with tab_emp:
-    st.subheader("Employee Management")
-
-    c_add, c_del = st.columns(2)
-
-    with c_add:
-        with st.expander("Add employee", expanded=False):
-            with st.form("add_employee_form", clear_on_submit=True):
-                new_emp_id = st.number_input("Employee #", min_value=1, step=1, format="%d")
-                new_last_name = st.text_input("Last name")
-                new_first_name = st.text_input("First name")
-                new_location = st.text_input("Location (optional)")
-                add_emp_submit = st.form_submit_button("Add Employee")
-
-            if add_emp_submit:
-                try:
-                    services.create_employee(
-                        conn,
-                        employee_id=int(new_emp_id),
-                        last_name=new_last_name,
-                        first_name=new_first_name,
-                        location=new_location,
-                    )
-                    st.success("Employee added.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(str(e))
-
-    with c_del:
-        with st.expander("Delete employee", expanded=False):
-            selected_emp_id = st.session_state.get("selected_emp_id")
-            if selected_emp_id:
-                st.caption(f"Selected Employee #: {selected_emp_id}")
-            st.warning("Deleting an employee also deletes all of their point history.")
-            with st.form("delete_employee_form"):
-                delete_emp_id = st.number_input(
-                    "Employee # to delete",
-                    min_value=1,
-                    step=1,
-                    format="%d",
-                    value=int(selected_emp_id) if selected_emp_id else 1,
-                )
-                confirm_delete = st.checkbox("I understand this action cannot be undone.")
-                delete_emp_submit = st.form_submit_button("Delete Employee")
-
-            if delete_emp_submit:
-                if not confirm_delete:
-                    st.error("Please confirm deletion before continuing.")
-                else:
-                    try:
-                        services.delete_employee(conn, int(delete_emp_id))
-                        if st.session_state.get("selected_emp_id") == int(delete_emp_id):
-                            st.session_state.pop("selected_emp_id", None)
-                        st.success("Employee deleted.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(str(e))
-
-    st.divider()
     st.subheader("Employee Lookup")
     q = st.text_input("Search by Employee #, last name, or first name", value="")
     rows = repo.search_employees(conn, q, limit=1000)
@@ -403,7 +400,7 @@ with tab_emp:
             hdf = (
                 pd.DataFrame([dict(r) for r in hist]).copy()
                 if hist
-                else pd.DataFrame(columns=["id", "point_date", "points", "reason", "note", "flag_code"])
+                else pd.DataFrame(columns=["id", "point_date", "points", "reason", "note", "flag_code", "point_total"])
             )
 
             if not hdf.empty:

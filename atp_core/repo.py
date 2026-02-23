@@ -37,9 +37,24 @@ def get_employee(conn: sqlite3.Connection, employee_id: int):
 
 def get_points_history(conn: sqlite3.Connection, employee_id: int, limit: int = 200):
     return conn.execute("""
-        SELECT id, point_date, points, reason, note, flag_code
-        FROM points_history
-        WHERE employee_id = ?
+        WITH ordered AS (
+            SELECT
+                id,
+                point_date,
+                points,
+                reason,
+                note,
+                flag_code,
+                ROUND(SUM(COALESCE(points, 0.0)) OVER (
+                    PARTITION BY employee_id
+                    ORDER BY date(point_date), id
+                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                ), 1) AS point_total
+            FROM points_history
+            WHERE employee_id = ?
+        )
+        SELECT id, point_date, points, reason, note, flag_code, point_total
+        FROM ordered
         ORDER BY date(point_date) DESC, id DESC
         LIMIT ?;
     """, (employee_id, limit)).fetchall()
