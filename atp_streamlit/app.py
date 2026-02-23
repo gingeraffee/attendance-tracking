@@ -415,7 +415,7 @@ with tab_emp:
                     column_config={
                         "id": None,
                         "point_date": st.column_config.DateColumn("Point Date", format="MM/DD/YYYY", required=True),
-                        "points": st.column_config.SelectboxColumn("Points", options=[0.5, 1.0, 1.5], required=True),
+                        "points": st.column_config.NumberColumn("Points", step=0.5, format="%.1f"),
                         "reason": st.column_config.SelectboxColumn("Reason", options=REASON_OPTIONS, required=True),
                         "note": st.column_config.TextColumn("Note"),
                         "flag_code": st.column_config.TextColumn("Flag Code"),
