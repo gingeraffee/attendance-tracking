@@ -1,5 +1,4 @@
 from __future__ import annotations
-import getpass
 from dataclasses import dataclass
 from datetime import date
 import sqlite3
@@ -35,11 +34,6 @@ def preview_add_point(employee_id: int, point_date: date, points: float, reason:
 
 def add_point(conn: sqlite3.Connection, preview: AddPointPreview, flag_code: str | None = None) -> None:
     """Single, validated write path: inserts history row + recomputes employee total."""
-    user = getpass.getuser()
-    audit_note = preview.note
-    if user and user not in (audit_note or ""):
-        audit_note = (audit_note + f" | entered_by={user}").strip(" |")
-
     with tx(conn):
         repo.insert_points_history(
             conn,
@@ -47,7 +41,7 @@ def add_point(conn: sqlite3.Connection, preview: AddPointPreview, flag_code: str
             point_date=preview.point_date,
             points=preview.points,
             reason=preview.reason,
-            note=audit_note or None,
+            note=preview.note or None,
             flag_code=flag_code,
         )
         repo.update_employee_point_total(conn, preview.employee_id)
