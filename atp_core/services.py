@@ -5,7 +5,7 @@ import sqlite3
 
 from .db import tx
 from . import repo
-from .rules import calc_rolloff_and_perfect, step_next_rolloff
+from .rules import calc_rolloff_and_perfect, step_next_perfect_attendance, step_next_rolloff
 
 # ---------------------------------------------------------------------------
 # Core recalculation — the single function called after EVERY history change
@@ -394,6 +394,65 @@ def apply_2mo_rolloffs(
             recalculate_employee_dates(conn, emp_id)
 
     return applied
+
+
+def advance_due_perfect_attendance_dates(
+    conn,
+    run_date: date | None = None,
+    dry_run: bool = False,
+):
+    """
+    Advance due perfect-attendance dates to the next future month boundary.
+
+    For each employee with perfect_attendance <= run_date, repeatedly advance
+    by one month until the date is strictly greater than run_date.
+    """
+    run_date = run_date or date.today()
+
+    due_rows = conn.execute(
+        """
+        SELECT employee_id, first_name, last_name, perfect_attendance
+          FROM employees
+         WHERE perfect_attendance IS NOT NULL
+           AND date(perfect_attendance) <= date(?)
+         ORDER BY date(perfect_attendance) ASC, last_name, first_name
+        """,
+        (run_date.isoformat(),),
+    ).fetchall()
+
+    advanced = []
+
+    for rec in due_rows:
+        old_due = datetime.strptime(rec["perfect_attendance"], "%Y-%m-%d").date()
+        new_due = old_due
+        steps = 0
+
+        while new_due <= run_date:
+            new_due = step_next_perfect_attendance(new_due)
+            steps += 1
+
+        if steps == 0:
+            continue
+
+        advanced.append({
+            "employee_id": int(rec["employee_id"]),
+            "first_name": rec["first_name"],
+            "last_name": rec["last_name"],
+            "old_perfect_attendance": old_due.isoformat(),
+            "new_perfect_attendance": new_due.isoformat(),
+            "months_advanced": steps,
+        })
+
+        if dry_run:
+            continue
+
+        with tx(conn):
+            conn.execute(
+                "UPDATE employees SET perfect_attendance = ? WHERE employee_id = ?",
+                (new_due.isoformat(), int(rec["employee_id"])),
+            )
+
+    return advanced
 
 
 # ---------------------------------------------------------------------------

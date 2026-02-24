@@ -956,8 +956,7 @@ with tab_reports:
         df_due["pa_date"] = pd.to_datetime(df_due["pa_date"], errors="coerce").dt.strftime("%m/%d/%Y")
         st.warning(
             f"{len(df_due)} employee(s) have a perfect attendance date on or before today. "
-            "Once you process the bonus in payroll, add a note — the dates will "
-            "auto-advance the next time a point is added or recalculated."
+            "After processing payroll, use the button below to advance due dates."
         )
         df_display = pd.DataFrame({
             "Employee #": df_due["employee_id"].astype(str),
@@ -972,6 +971,32 @@ with tab_reports:
             "Download CSV", csv, "perfect_attendance_due.csv",
             "text/csv", key="dl_pa_due",
         )
+
+        if st.button("Advance Due Perfect Attendance Dates", key="btn_adv_pa_due"):
+            advanced = services.advance_due_perfect_attendance_dates(conn, run_date=today, dry_run=False)
+            if not advanced:
+                st.info("No perfect attendance dates were advanced.")
+            else:
+                df_adv = pd.DataFrame([
+                    {
+                        "Employee #": str(r["employee_id"]),
+                        "First Name": r["first_name"],
+                        "Last Name": r["last_name"],
+                        "Old Perfect Date": r["old_perfect_attendance"],
+                        "New Perfect Date": r["new_perfect_attendance"],
+                        "Months Advanced": int(r["months_advanced"]),
+                    }
+                    for r in advanced
+                ])
+                st.success(f"Advanced perfect attendance dates for {len(df_adv)} employee(s).")
+                st.dataframe(df_adv, use_container_width=True, hide_index=True)
+                st.download_button(
+                    "Download Advance Log CSV",
+                    df_adv.to_csv(index=False).encode("utf-8"),
+                    "perfect_attendance_advance_log.csv",
+                    "text/csv",
+                    key="dl_pa_advance_log",
+                )
 
     st.divider()
 
