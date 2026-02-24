@@ -704,59 +704,25 @@ with tab_add:
 with tab_reports:
     st.subheader("Reports")
 
-    # ----------------------------
-    # Beta7 helper logic (local)
-    # ----------------------------
     from datetime import datetime, timedelta
-
-    def add_months_first(d, months: int):
-        """Beta7: first day of the month 'months' after date d."""
-        m_total = (d.month - 1) + months
-        y = d.year + (m_total // 12)
-        m = (m_total % 12) + 1
-        return date(y, m, 1)
-
-    def add_months(orig: date, months: int) -> date:
-        """Beta7: add calendar months, clamp day if needed."""
-        y = orig.year + (orig.month - 1 + months) // 12
-        m = (orig.month - 1 + months) % 12 + 1
-        if m in (1, 3, 5, 7, 8, 10, 12):
-            dim = 31
-        elif m in (4, 6, 9, 11):
-            dim = 30
-        else:
-            leap = (y % 4 == 0 and (y % 100 != 0 or y % 400 == 0))
-            dim = 29 if leap else 28
-        d = min(orig.day, dim)
-        return date(y, m, d)
-
-    def first_of_month(d: date) -> date:
-        return date(d.year, d.month, 1)
-
-    def first_of_next_month(d: date) -> date:
-        return add_months(first_of_month(d), 1)
-
-    def two_months_then_first(d: date) -> date:
-        return first_of_next_month(add_months(d, 2))
-
-    # Beta7 has this (it’s functionally the same as two_months_then_first in that file)
-    def three_months_then_first(d: date) -> date:
-        return first_of_next_month(add_months(d, 2))
-
-    def step_next_due(current_due: date, perfect_date: date) -> date:
-        """Beta7: advance next rolloff due date."""
-        if current_due < perfect_date:
-            return two_months_then_first(perfect_date)
-        return two_months_then_first(current_due)
+    # Import the corrected helpers from rules.py instead of re-defining them locally
+    from atp_core.rules import (
+        add_months,
+        first_of_month,
+        first_of_next_month,
+        two_months_then_first,
+        three_months_then_first,
+        step_next_rolloff,
+    )
 
     today = date.today()
     today_iso = today.isoformat()
 
     # ============================================================
-    # 1) 30-Day Point History (CSV) — true running total (Beta7)
+    # 1) 30-Day Point History (CSV)
     # ============================================================
     st.markdown("### 30-Day Point History (CSV)")
-    st.caption("Exports every point event in the last 30 days with a true running total per employee (Beta7 logic).")
+    st.caption("Exports every point event in the last 30 days with a true running total per employee.")
 
     if st.button("Generate 30-Day Point History CSV", key="btn_30day"):
         cutoff = (today - timedelta(days=30)).isoformat()
@@ -828,61 +794,64 @@ with tab_reports:
 
     c1, c2 = st.columns(2)
 
-    # ---- Preview Roll Offs (sorted earliest -> latest, grouped by date) ----
     with c1:
         st.markdown("#### Preview Roll Offs")
-        st.caption("Sorted by roll-off date (earliest first): March rolloffs, then April, then May, etc.")
+        st.caption("Employees with a future roll-off date, sorted earliest first.")
 
         if st.button("Generate Preview Roll Offs CSV", key="btn_preview_rolloffs"):
             rows_r = conn.execute(
                 """
-                SELECT employee_id, first_name, last_name, rolloff_date, COALESCE(point_total,0.0) AS pt
-                FROM employees
-                WHERE rolloff_date IS NOT NULL
-                  AND date(rolloff_date) >= date('now')
-                  AND COALESCE(point_total, 0.0) > 0
-                ORDER BY date(rolloff_date) ASC, last_name, first_name;
+                SELECT employee_id, first_name, last_name, rolloff_date,
+                       COALESCE(point_total, 0.0) AS pt
+                  FROM employees
+                 WHERE rolloff_date IS NOT NULL
+                   AND date(rolloff_date) >= date('now')
+                   AND COALESCE(point_total, 0.0) > 0
+                 ORDER BY date(rolloff_date) ASC, last_name, first_name;
                 """
             ).fetchall()
-            
+
             df_r = pd.DataFrame([dict(r) for r in rows_r])
             if df_r.empty:
                 st.info("No upcoming roll-offs found.")
             else:
-                # Format date as MM/DD/YYYY BEFORE building df_out
-                df_r["rolloff_date"] = pd.to_datetime(df_r["rolloff_date"], errors="coerce").dt.strftime("%m/%d/%Y")
+                df_r["rolloff_date"] = pd.to_datetime(
+                    df_r["rolloff_date"], errors="coerce"
+                ).dt.strftime("%m/%d/%Y")
 
                 df_out = pd.DataFrame({
                     "Employee #": df_r["employee_id"].astype(str),
                     "First Name": df_r["first_name"],
                     "Last Name": df_r["last_name"],
-                    "Point Date": df_r["rolloff_date"],
-                    "Point": -1.0,
-                    "Reason": "2 Month Rolloff",
+                    "Roll-Off Date": df_r["rolloff_date"],
+                    "Point": df_r["pt"].apply(lambda v: f"-{float(v):.1f}"),  # all at once
+                    "Reason": "2 Month Roll Off",
                     "Note": "",
-                    "Point Total": (pd.to_numeric(df_r["pt"], errors="coerce").fillna(0) - 1.0).clip(lower=0.0).round(1),
-                    "Flag Code": "",
+                    "Point Total After": 0.0,  # all points roll off at once
+                    "Flag Code": "AUTO",
                 })
 
                 st.dataframe(df_out, use_container_width=True, hide_index=True)
                 csv = df_out.to_csv(index=False).encode("utf-8")
-                st.download_button("Download CSV", csv, "preview_rolloffs.csv", "text/csv", key="dl_preview_rolloffs")
+                st.download_button(
+                    "Download CSV", csv, "preview_rolloffs.csv",
+                    "text/csv", key="dl_preview_rolloffs",
+                )
 
-    # ---- Preview Perfect Attendance ----
     with c2:
         st.markdown("#### Preview Perfect Attendance")
-        st.caption("Upcoming perfect attendance dates (no DB changes).")
+        st.caption("Employees with an upcoming perfect attendance bonus date.")
 
         if st.button("Generate Preview Perfect Attendance CSV", key="btn_preview_pa"):
             rows_p = conn.execute(
                 """
                 SELECT employee_id, first_name, last_name,
                        perfect_attendance AS pa_date,
-                       COALESCE(point_total,0.0) AS pt
-                FROM employees
-                WHERE perfect_attendance IS NOT NULL
-                  AND date(perfect_attendance) >= date('now')
-                ORDER BY date(perfect_attendance) ASC, last_name, first_name;
+                       COALESCE(point_total, 0.0) AS pt
+                  FROM employees
+                 WHERE perfect_attendance IS NOT NULL
+                   AND date(perfect_attendance) >= date('now')
+                 ORDER BY date(perfect_attendance) ASC, last_name, first_name;
                 """
             ).fetchall()
 
@@ -890,15 +859,14 @@ with tab_reports:
             if df_p.empty:
                 st.info("No upcoming perfect attendance dates found.")
             else:
-                # Format date as MM/DD/YYYY
                 df_p = df_p.copy()
-                df_p.loc[:, "pa_date"] = pd.to_datetime(df_p["pa_date"], errors="coerce")
+                df_p["pa_date"] = pd.to_datetime(df_p["pa_date"], errors="coerce")
 
                 df_out = pd.DataFrame({
                     "Employee #": df_p["employee_id"].astype("string"),
                     "First Name": df_p["first_name"],
                     "Last Name": df_p["last_name"],
-                    "Point Date": df_p["pa_date"].dt.strftime("%m/%d/%Y"),
+                    "Perfect Attendance Date": df_p["pa_date"].dt.strftime("%m/%d/%Y"),
                     "Point": "",
                     "Reason": "$75 Perfect Attendance Bonus",
                     "Note": "",
@@ -908,7 +876,10 @@ with tab_reports:
 
                 st.dataframe(df_out, use_container_width=True, hide_index=True)
                 csv = df_out.to_csv(index=False).encode("utf-8")
-                st.download_button("Download CSV", csv, "preview_perfect_attendance.csv", "text/csv", key="dl_preview_pa")
+                st.download_button(
+                    "Download CSV", csv, "preview_perfect_attendance.csv",
+                    "text/csv", key="dl_preview_pa",
+                )
 
     st.divider()
 
@@ -920,163 +891,91 @@ with tab_reports:
 
     # ---- Perform 2 Month Roll Off ----
     st.markdown("#### Perform 2 Month Roll Off")
-    st.caption("Applies roll-offs only for rolloff dates on or before today. Multiple overdue roll-offs create multiple rows.")
+    st.caption(
+        "Applies all points due for roll-off as of today. "
+        "ALL remaining points roll off at once per employee. "
+        "Roll-off resets the roll-off clock. YTD entries are excluded from the clock."
+    )
 
-    confirm_roll = st.checkbox("I understand this will write roll-off entries to the database.", key="confirm_2mo_rolloff")
+    confirm_roll = st.checkbox(
+        "I understand this will write roll-off entries to the database.",
+        key="confirm_2mo_rolloff",
+    )
 
     if st.button("Perform 2 Month Roll Off (Commit)", key="btn_commit_rolloff") and confirm_roll:
-        expired = conn.execute(
-            """
-            SELECT employee_id, first_name, last_name,
-                   rolloff_date,
-                   COALESCE(point_total,0.0) AS pt,
-                   NULLIF(last_point_date,'') AS last_point_iso
-            FROM employees
-            WHERE rolloff_date IS NOT NULL AND date(rolloff_date) <= date('now');
-            """
-        ).fetchall()
+        # Delegate entirely to the service — it handles all policy correctly
+        applied = services.apply_2mo_rolloffs(conn, run_date=today, dry_run=False)
 
-        log = []
-
-        with conn:
-            for rec in expired:
-                emp_id = int(rec["employee_id"])
-                fn = rec["first_name"]
-                ln = rec["last_name"]
-                current_total = float(rec["pt"] or 0.0)
-
-                next_roll = datetime.strptime(rec["rolloff_date"], "%Y-%m-%d").date()
-
-                # Beta7 perfect_date anchor
-                last_point_iso = rec["last_point_iso"]
-                if last_point_iso:
-                    anchor = datetime.strptime(last_point_iso, "%Y-%m-%d").date()
-                    perfect_date = three_months_then_first(anchor)
-                else:
-                    perfect_date = date.min
-
-                # Apply due roll-offs, but only while due <= today
-                # Create one CSV row AND one history row per event (your requirement)
-                while next_roll <= today and current_total > 0:
-                    current_total = max(0.0, round(current_total - 1.0, 2))
-
-                    # Write one history entry per roll-off event
-                    conn.execute(
-                        """
-                        INSERT INTO points_history (employee_id, point_date, points, reason, note, flag_code)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                        """,
-                        (emp_id, next_roll.isoformat(), -1.0, "2 Month Roll Off", "", ""),
-                    )
-
-                    # Log row (one per roll-off)
-                    log.append({
-                        "Employee #": str(emp_id),
-                        "First Name": fn,
-                        "Last Name": ln,
-                        "Point": -1.0,
-                        "Point Date": next_roll.isoformat(),
-                        "Reason": "2 Month Roll Off",
-                        "Note": "",
-                        "Point Total": round(current_total, 1),
-                        "Flag Code": "",
-                    })
-
-                    # Advance to next due date using Beta7 stepping
-                    next_roll = step_next_due(next_roll, perfect_date)
-
-                # If the rolloff_date itself is overdue, advance it even if total is already 0
-                # (still only changes overdue dates)
-                if rec["rolloff_date"] != next_roll.isoformat():
-                    conn.execute(
-                        "UPDATE employees SET rolloff_date=? WHERE employee_id=?",
-                        (next_roll.isoformat(), emp_id),
-                    )
-
-                # Update point_total if it changed
-                conn.execute(
-                    "UPDATE employees SET point_total=? WHERE employee_id=?",
-                    (current_total, emp_id),
-                )
-
-        df_log = pd.DataFrame(log)
-        if df_log.empty:
+        if not applied:
             st.info("No roll-offs were applied (nothing due today or earlier, or point totals already at 0).")
         else:
-            # Sort so most recent roll-off date appears at the top of the audit
-            df_log["Point Date"] = pd.to_datetime(df_log["Point Date"], errors="coerce")
-            df_log = df_log.sort_values("Point Date", ascending=False).copy()
-            df_log["Point Date"] = df_log["Point Date"].dt.strftime("%Y-%m-%d")
-
-            st.success(f"Applied {len(df_log)} roll-off event(s).")
+            log = [
+                {
+                    "Employee #": str(r["employee_id"]),
+                    "First Name": r["first_name"],
+                    "Last Name": r["last_name"],
+                    "Roll-Off Date": today.strftime("%Y-%m-%d"),
+                    "Points Removed": r["points_removed"],
+                    "New Total": r["new_total"],
+                    "Reason": "2 Month Roll Off",
+                    "Flag Code": "AUTO",
+                }
+                for r in applied
+            ]
+            df_log = pd.DataFrame(log)
+            st.success(f"Applied roll-offs for {len(df_log)} employee(s).")
             st.dataframe(df_log, use_container_width=True, hide_index=True)
             csv = df_log.to_csv(index=False).encode("utf-8")
-            st.download_button("Download CSV", csv, "apply_2_month_rolloffs.csv", "text/csv", key="dl_apply_rolloffs")
+            st.download_button(
+                "Download CSV", csv, "apply_2_month_rolloffs.csv",
+                "text/csv", key="dl_apply_rolloffs",
+            )
 
     st.divider()
 
-    # ---- Generate Perfect Attendance (Beta7 logic for advancing dates) ----
-    st.markdown("#### Generate Perfect Attendance")
-    st.caption("Updates perfect attendance dates that are due as of today, advancing them using Beta7 logic (3-month steps to the 1st).")
+    # ---- Perfect Attendance ----
+    st.markdown("#### Perfect Attendance Status")
+    st.caption(
+        "Perfect attendance dates are maintained automatically by the system whenever "
+        "a point is added, edited, or deleted. This section shows employees whose "
+        "perfect attendance bonus is due on or before today."
+    )
 
-    confirm_pa = st.checkbox("I understand this will update perfect attendance dates in the database.", key="confirm_pa")
+    due_pa = conn.execute(
+        """
+        SELECT employee_id, first_name, last_name,
+               perfect_attendance AS pa_date,
+               COALESCE(point_total, 0.0) AS pt
+          FROM employees
+         WHERE perfect_attendance IS NOT NULL
+           AND date(perfect_attendance) <= date('now')
+         ORDER BY date(perfect_attendance) ASC, last_name, first_name;
+        """
+    ).fetchall()
 
-    if st.button("Generate Perfect Attendance (Commit)", key="btn_commit_pa") and confirm_pa:
-        rows = conn.execute(
-            """
-            SELECT employee_id, first_name, last_name,
-                   COALESCE(point_total,0.0) AS pt,
-                   NULLIF(perfect_attendance,'') AS d
-            FROM employees
-            WHERE perfect_attendance IS NOT NULL
-              AND date(perfect_attendance) <= date(?)
-            ORDER BY last_name, first_name;
-            """,
-            (today_iso,),
-        ).fetchall()
-
-        if not rows:
-            st.info("No perfect attendance dates are due as of today.")
-        else:
-            log = []
-
-            with conn:
-                for r in rows:
-                    emp_id = int(r["employee_id"])
-                    fn = r["first_name"]
-                    ln = r["last_name"]
-                    pt = float(r["pt"] or 0.0)
-                    due_iso = r["d"]
-
-                    due_d = datetime.strptime(due_iso, "%Y-%m-%d").date()
-
-                    # Beta7: advance by 3 months to first-of-month, repeat until in future
-                    next_d = add_months_first(due_d, 3)
-                    while next_d <= today:
-                        next_d = add_months_first(next_d, 3)
-
-                    conn.execute(
-                        "UPDATE employees SET perfect_attendance=? WHERE employee_id=?",
-                        (next_d.isoformat(), emp_id),
-                    )
-
-                    log.append({
-                        "Employee #": str(emp_id),
-                        "First Name": fn,
-                        "Last Name": ln,
-                        "Point": 0.0,
-                        "Point Date": due_iso,  # date of perfect attendance event
-                        "Reason": "$75 Attendance Bonus",
-                        "Note": "",
-                        "Point Total": round(pt, 1),
-                        "Flag Code": "",
-                    })
-
-            df_log = pd.DataFrame(log)
-            st.success(f"Updated perfect attendance dates for {len(df_log)} employee(s).")
-            st.dataframe(df_log, use_container_width=True, hide_index=True)
-            csv = df_log.to_csv(index=False).encode("utf-8")
-            st.download_button("Download CSV", csv, "apply_perfect_attendance.csv", "text/csv", key="dl_apply_pa")
+    if not due_pa:
+        st.info("No perfect attendance bonuses are due as of today.")
+    else:
+        df_due = pd.DataFrame([dict(r) for r in due_pa])
+        df_due["pa_date"] = pd.to_datetime(df_due["pa_date"], errors="coerce").dt.strftime("%m/%d/%Y")
+        st.warning(
+            f"{len(df_due)} employee(s) have a perfect attendance date on or before today. "
+            "Once you process the bonus in payroll, add a note — the dates will "
+            "auto-advance the next time a point is added or recalculated."
+        )
+        df_display = pd.DataFrame({
+            "Employee #": df_due["employee_id"].astype(str),
+            "First Name": df_due["first_name"],
+            "Last Name": df_due["last_name"],
+            "Perfect Attendance Date": df_due["pa_date"],
+            "Point Total": df_due["pt"].apply(lambda v: f"{float(v):.1f}"),
+        })
+        st.dataframe(df_display, use_container_width=True, hide_index=True)
+        csv = df_display.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "Download CSV", csv, "perfect_attendance_due.csv",
+            "text/csv", key="dl_pa_due",
+        )
 
     st.divider()
 
@@ -1095,15 +994,16 @@ with tab_reports:
         pdf_options = [
             (
                 str(e["employee_id"]),
-                f'{e["employee_id"]} — {e.get("last_name", "")}, {e.get("first_name", "")} ({e.get("location", "")})'
+                f'{e["employee_id"]} — {e.get("last_name", "")}, '
+                f'{e.get("first_name", "")} ({e.get("location", "")})'
             )
             for e in all_employees
         ]
 
         default_pdf_index = 0
-        selected_emp_id = st.session_state.get("selected_emp_id")
-        if selected_emp_id is not None:
-            sel_str = str(selected_emp_id)
+        selected_emp_id_pdf = st.session_state.get("selected_emp_id")
+        if selected_emp_id_pdf is not None:
+            sel_str = str(selected_emp_id_pdf)
             for i, opt in enumerate(pdf_options):
                 if opt[0] == sel_str:
                     default_pdf_index = i
@@ -1126,9 +1026,9 @@ with tab_reports:
                 history_rows = conn.execute(
                     """
                     SELECT point_date, points, reason, note, flag_code
-                    FROM points_history
-                    WHERE employee_id = ?
-                    ORDER BY date(point_date), id;
+                      FROM points_history
+                     WHERE employee_id = ?
+                     ORDER BY date(point_date), id;
                     """,
                     (report_emp_id,),
                 ).fetchall()

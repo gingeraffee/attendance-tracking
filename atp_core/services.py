@@ -5,79 +5,79 @@ import sqlite3
 
 from .db import tx
 from . import repo
+from .rules import calc_rolloff_and_perfect, step_next_rolloff
 
 # ---------------------------------------------------------------------------
-# Date helpers (ported directly from ATP_Beta7)
-# ---------------------------------------------------------------------------
-
-def _add_months(orig: date, months: int) -> date:
-    """Add calendar months to a date, clamping the day if needed."""
-    y = orig.year + (orig.month - 1 + months) // 12
-    m = (orig.month - 1 + months) % 12 + 1
-    if m in (1, 3, 5, 7, 8, 10, 12):
-        dim = 31
-    elif m in (4, 6, 9, 11):
-        dim = 30
-    else:
-        leap = (y % 4 == 0 and (y % 100 != 0 or y % 400 == 0))
-        dim = 29 if leap else 28
-    d = min(orig.day, dim)
-    return date(y, m, d)
-
-
-def _first_of_next_month(d: date) -> date:
-    """Return the first day of the month following d."""
-    y = d.year + (1 if d.month == 12 else 0)
-    m = 1 if d.month == 12 else d.month + 1
-    return date(y, m, 1)
-
-
-def _calc_rolloff_and_perfect(last_point: date) -> tuple[date, date]:
-    """
-    Core policy logic (mirrors Beta7 calc_rolloff_and_perfect):
-      - Rolloff  = first day of the month after (last_point + 2 months)
-      - Perfect  = first day of the month after (last_point + 3 months)
-
-    Example:
-      last_point = 2026-01-15
-      rolloff    = 2026-04-01  (Jan+2=Mar, first of next = Apr 1)
-      perfect    = 2026-05-01  (Jan+3=Apr, first of next = May 1)
-    """
-    roll_mark = _add_months(last_point, 2)
-    perf_mark = _add_months(last_point, 3)
-    return _first_of_next_month(roll_mark), _first_of_next_month(perf_mark)
-
-
-# ---------------------------------------------------------------------------
-# Core recalculation (mirrors Beta7 recompute_employee_after_change)
+# Core recalculation — the single function called after EVERY history change
 # ---------------------------------------------------------------------------
 
 def recalculate_employee_dates(conn: sqlite3.Connection, employee_id: int) -> None:
     """
     Recompute point_total, last_point_date, rolloff_date, and perfect_attendance
-    for one employee from their points_history.
+    for one employee from their points_history. Called after every add, edit,
+    delete, roll-off, or YTD roll-off.
 
-    Mirrors the Beta7 recompute_employee_after_change() logic exactly:
-      - Uses MAX(point_date) across ALL entries (positive and negative)
-      - If history exists: recalculates both dates from last_point_date
-      - If no history remains: clears all three date fields, sets total to 0.0
-      - Point total is always floored at 0.0
+    Policy rules encoded here
+    -------------------------
+    POINT TOTAL
+        SUM(points) across ALL history rows, floored at 0.0.
+
+    ROLL-OFF ANCHOR  (last_point_date stored on the employee)
+        MAX(point_date) from all entries EXCEPT YTD Roll-Offs
+        (reason = 'YTD Roll-Off' AND flag_code = 'AUTO').
+        2-month roll-off entries (flag_code='AUTO', reason='2 Month Roll Off')
+        DO count — they reset the roll-off clock.
+
+    PERFECT ATTENDANCE ANCHOR
+        MAX(point_date) WHERE points > 0 only (positive incidents).
+        Roll-off entries (negative) and YTD entries do NOT move this anchor.
+
+    DATE FORMULAS
+        rolloff_date       = first of month after (roll-off anchor + 2 months)
+        perfect_attendance = first of month after (perfect anchor  + 3 months)
+
+    WHEN POINT TOTAL HITS 0
+        rolloff_date is cleared (NULL) — nothing left to roll off.
+        perfect_attendance is cleared (NULL) — no positive history means
+        the clock hasn't started (or has already been fully cleared).
+
+    WHEN NO HISTORY EXISTS AT ALL
+        All three date fields are cleared and total is set to 0.0.
     """
-    row = conn.execute(
+    # --- Step 1: total across all history ---
+    total_row = conn.execute(
+        "SELECT SUM(points) AS total FROM points_history WHERE employee_id = ?",
+        (employee_id,),
+    ).fetchone()
+    new_total = float(total_row["total"]) if total_row["total"] is not None else 0.0
+    new_total = max(0.0, round(new_total, 1))
+
+    # --- Step 2: roll-off anchor (any entry except YTD Roll-Off) ---
+    rolloff_anchor_row = conn.execute(
         """
-        SELECT MAX(point_date) AS last_date,
-               SUM(points)     AS total
-        FROM points_history
-        WHERE employee_id = ?
+        SELECT MAX(point_date) AS last_date
+          FROM points_history
+         WHERE employee_id = ?
+           AND NOT (reason = 'YTD Roll-Off' AND flag_code = 'AUTO')
         """,
         (employee_id,),
     ).fetchone()
+    rolloff_anchor_iso = rolloff_anchor_row["last_date"] if rolloff_anchor_row else None
 
-    new_total = float(row["total"]) if row["total"] is not None else 0.0
-    new_total = max(0.0, round(new_total, 1))   # floor at 0.0
-    last_date_iso = row["last_date"]
+    # --- Step 3: perfect attendance anchor (positive entries only) ---
+    perfect_anchor_row = conn.execute(
+        """
+        SELECT MAX(point_date) AS last_date
+          FROM points_history
+         WHERE employee_id = ?
+           AND points > 0
+        """,
+        (employee_id,),
+    ).fetchone()
+    perfect_anchor_iso = perfect_anchor_row["last_date"] if perfect_anchor_row else None
 
-    if not last_date_iso:
+    # --- Step 4: decide what to write ---
+    if not rolloff_anchor_iso and not perfect_anchor_iso:
         # No history at all — clear everything
         conn.execute(
             """
@@ -90,26 +90,50 @@ def recalculate_employee_dates(conn: sqlite3.Connection, employee_id: int) -> No
             """,
             (new_total, employee_id),
         )
-    else:
-        last_point = datetime.strptime(last_date_iso, "%Y-%m-%d").date()
-        rolloff, perfect = _calc_rolloff_and_perfect(last_point)
-        conn.execute(
-            """
-            UPDATE employees
-               SET point_total        = ?,
-                   last_point_date    = ?,
-                   rolloff_date       = ?,
-                   perfect_attendance = ?
-             WHERE employee_id = ?
-            """,
-            (
-                new_total,
-                last_date_iso,
-                rolloff.isoformat(),
-                perfect.isoformat(),
-                employee_id,
-            ),
-        )
+        return
+
+    # Compute dates
+    rolloff_date_iso = None
+    perfect_date_iso = None
+
+    if rolloff_anchor_iso and new_total > 0:
+        # Only schedule a rolloff if there are points left to roll off
+        rolloff_anchor = datetime.strptime(rolloff_anchor_iso, "%Y-%m-%d").date()
+
+        if perfect_anchor_iso:
+            perfect_anchor = datetime.strptime(perfect_anchor_iso, "%Y-%m-%d").date()
+        else:
+            # No positive points; use the rolloff anchor for perfect calc too
+            perfect_anchor = rolloff_anchor
+
+        policy = calc_rolloff_and_perfect(rolloff_anchor, perfect_anchor)
+        rolloff_date_iso = policy.rolloff_date.isoformat()
+        perfect_date_iso = policy.perfect_date.isoformat()
+
+    elif perfect_anchor_iso:
+        # Has positive history but total is currently 0 (all rolled off).
+        # Clear rolloff_date; still keep perfect_attendance cleared too
+        # (per policy: no points = no rolloff scheduled, no perfect date shown).
+        rolloff_date_iso = None
+        perfect_date_iso = None
+
+    conn.execute(
+        """
+        UPDATE employees
+           SET point_total        = ?,
+               last_point_date    = ?,
+               rolloff_date       = ?,
+               perfect_attendance = ?
+         WHERE employee_id = ?
+        """,
+        (
+            new_total,
+            rolloff_anchor_iso,   # last_point_date = rolloff anchor
+            rolloff_date_iso,
+            perfect_date_iso,
+            employee_id,
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -126,7 +150,7 @@ class AddPointPreview:
 
 
 # ---------------------------------------------------------------------------
-# Service functions
+# Service functions — all write through recalculate_employee_dates
 # ---------------------------------------------------------------------------
 
 def preview_add_point(
@@ -204,7 +228,6 @@ def update_point_history_entry(
             note=(note or "").strip() or None,
             flag_code=(flag_code or "").strip() or None,
         )
-        # Recalculate total, last_point_date, rolloff_date, and perfect_attendance
         recalculate_employee_dates(conn, int(employee_id))
 
 
@@ -220,7 +243,6 @@ def delete_point_history_entry(
 
     with tx(conn):
         repo.delete_points_history_entry(conn, int(point_id))
-        # Recalculate total, last_point_date, rolloff_date, and perfect_attendance
         recalculate_employee_dates(conn, int(employee_id))
 
 
@@ -261,11 +283,125 @@ def delete_employee(conn: sqlite3.Connection, employee_id: int) -> None:
 
 
 # ---------------------------------------------------------------------------
-# YTD Roll-Off Engine (preserved from original, duplicate helpers removed)
+# 2-Month Roll-Off Engine
 # ---------------------------------------------------------------------------
 
-def _month_start(d: date) -> date:
-    return date(d.year, d.month, 1)
+def apply_2mo_rolloffs(
+    conn: sqlite3.Connection,
+    run_date: date | None = None,
+    dry_run: bool = False,
+) -> list[dict]:
+    """
+    Apply 2-month roll-offs for all employees whose rolloff_date is on or
+    before run_date (default: today).
+
+    Policy
+    ------
+    - ALL remaining points roll off at once in a single history entry.
+    - The roll-off entry DOES reset the roll-off clock (step_next_rolloff).
+    - The roll-off entry does NOT move the perfect attendance anchor
+      (because it is not a positive point entry).
+    - If the employee's total hits 0, rolloff_date is cleared (NULL).
+    - YTD Roll-Off entries are excluded from the roll-off anchor.
+
+    Returns
+    -------
+    List of dicts describing what was (or would be) applied, one per employee.
+    """
+    run_date = run_date or date.today()
+
+    expired = conn.execute(
+        """
+        SELECT employee_id, first_name, last_name,
+               rolloff_date,
+               COALESCE(point_total, 0.0) AS pt,
+               NULLIF(last_point_date, '') AS last_point_iso
+          FROM employees
+         WHERE rolloff_date IS NOT NULL
+           AND date(rolloff_date) <= date(?)
+        """,
+        (run_date.isoformat(),),
+    ).fetchall()
+
+    applied = []
+
+    for rec in expired:
+        emp_id = int(rec["employee_id"])
+        current_total = float(rec["pt"] or 0.0)
+        next_roll = datetime.strptime(rec["rolloff_date"], "%Y-%m-%d").date()
+        last_point_iso = rec["last_point_iso"]
+
+        # perfect_date anchor: still based on last POSITIVE point entry
+        # (the stored last_point_date is the rolloff anchor, which may differ)
+        perfect_anchor_row = conn.execute(
+            """
+            SELECT MAX(point_date) AS last_date
+              FROM points_history
+             WHERE employee_id = ? AND points > 0
+            """,
+            (emp_id,),
+        ).fetchone()
+        perfect_iso = perfect_anchor_row["last_date"] if perfect_anchor_row else None
+
+        if perfect_iso:
+            perfect_date = datetime.strptime(perfect_iso, "%Y-%m-%d").date()
+            from .rules import three_months_then_first
+            perfect_milestone = three_months_then_first(perfect_date)
+        else:
+            from datetime import date as _date
+            perfect_milestone = _date.min
+
+        # Count how many periods are overdue and advance next_roll
+        removed = 0
+        while next_roll <= run_date and current_total > 0:
+            current_total = max(0.0, round(current_total - 1.0, 2))
+            removed += 1
+            next_roll = step_next_rolloff(next_roll, perfect_milestone)
+
+        # Even if no points removed, advance an overdue date
+        while next_roll <= run_date:
+            next_roll = step_next_rolloff(next_roll, perfect_milestone)
+
+        if removed == 0 and rec["rolloff_date"] == next_roll.isoformat():
+            continue  # nothing to do
+
+        applied.append({
+            "employee_id": emp_id,
+            "first_name": rec["first_name"],
+            "last_name": rec["last_name"],
+            "roll_date": run_date,
+            "points_removed": -float(removed),
+            "new_total": round(current_total, 1),
+        })
+
+        if dry_run:
+            continue
+
+        with tx(conn):
+            if removed > 0:
+                # Single aggregated history entry for the roll-off
+                repo.insert_points_history(
+                    conn,
+                    employee_id=emp_id,
+                    point_date=run_date,
+                    points=-float(removed),
+                    reason="2 Month Roll Off",
+                    note="",
+                    flag_code="AUTO",
+                )
+            # Recalculate all date fields — this handles the cleared rolloff
+            # if total hits 0, and resets next rolloff date from the new entry
+            recalculate_employee_dates(conn, emp_id)
+
+    return applied
+
+
+# ---------------------------------------------------------------------------
+# YTD Roll-Off Engine (matches Beta7 apply_ytd_rolloffs exactly)
+# ---------------------------------------------------------------------------
+
+def _first_of_month(d: date) -> date:
+    return d.replace(day=1)
 
 
 def _add_month(d: date) -> date:
@@ -276,7 +412,7 @@ def _add_month(d: date) -> date:
 
 def preview_ytd_rolloffs(conn, run_date: date | None = None):
     run_date = run_date or date.today()
-    roll_date = _month_start(run_date)
+    roll_date = _first_of_month(run_date)
 
     window_start = date(roll_date.year - 1, roll_date.month, 1)
     window_end = _add_month(window_start)
@@ -307,6 +443,10 @@ def apply_ytd_rolloffs(
     run_date: date | None = None,
     dry_run: bool = False,
 ):
+    """
+    YTD roll-offs do NOT reset the roll-off or perfect attendance clock
+    (flag_code='AUTO', reason='YTD Roll-Off' — excluded from both anchors).
+    """
     items = preview_ytd_rolloffs(conn, run_date=run_date)
     applied = []
 
@@ -342,7 +482,8 @@ def apply_ytd_rolloffs(
                 note=f"YTD roll-off for {label}",
                 flag_code="AUTO",
             )
-            # Recalculate all date fields after the YTD roll-off entry
+            # Recalculate — YTD entry will be excluded from both anchors
+            # so dates will NOT shift; only point_total changes
             recalculate_employee_dates(conn, int(employee_id))
 
     return applied
