@@ -860,13 +860,15 @@ with tab_reports:
                 st.info("No upcoming perfect attendance dates found.")
             else:
                 df_p = df_p.copy()
-                df_p["pa_date"] = pd.to_datetime(df_p["pa_date"], errors="coerce")
+
+                df_p["pa_date"] = pd.to_datetime(df_p["pa_date"], errors="coerce").dt.strftime("%m/%d/%Y")
 
                 df_out = pd.DataFrame({
                     "Employee #": df_p["employee_id"].astype("string"),
                     "First Name": df_p["first_name"],
                     "Last Name": df_p["last_name"],
                     "Perfect Attendance Date": df_p["pa_date"].dt.strftime("%m/%d/%Y"),
+                    "Point Date": df_p["pa_date"],
                     "Point": "",
                     "Reason": "$75 Perfect Attendance Bonus",
                     "Note": "",
