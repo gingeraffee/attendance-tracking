@@ -118,3 +118,13 @@ def step_next_rolloff(current_due: date, perfect_date: date) -> date:
     if current_due < perfect_date:
         return two_months_then_first(perfect_date)
     return two_months_then_first(current_due)
+
+
+def step_next_perfect_attendance(current_due: date) -> date:
+    """
+    Advance perfect-attendance date by one monthly cycle.
+
+    Perfect attendance bonuses follow a monthly cadence after becoming due,
+    so we move to the first day of the next month.
+    """
+    return first_of_next_month(current_due)
