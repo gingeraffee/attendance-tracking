@@ -8,7 +8,7 @@ def get_db_path() -> str:
     env = os.getenv("ATP_DB_PATH")
     if env:
         return env
-    return "/var/data/employeeroster.db"  # Render persistent disk)
+    return "/var/data/employeeroster.db"
 
 def connect(db_path: str | None = None) -> sqlite3.Connection:
     path = db_path or get_db_path()
