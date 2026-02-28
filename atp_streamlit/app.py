@@ -63,6 +63,17 @@ def get_conn():
     ensure_schema(conn)
     return conn
 
+with st.sidebar.expander("🧪 Diagnostics", expanded=True):
+    st.code(get_db_path(), language="text")
+
+    try:
+        emp_n = conn.execute("SELECT COUNT(*) AS n FROM employees;").fetchone()["n"]
+        pts_n = conn.execute("SELECT COUNT(*) AS n FROM points_history;").fetchone()["n"]
+        st.write("employees rows:", emp_n)
+        st.write("points_history rows:", pts_n)
+    except Exception as e:
+        st.error(e)
+
 def load_employees():
     conn = get_conn()
     rows = repo.search_employees(conn, q="", limit=150)
