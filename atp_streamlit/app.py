@@ -327,27 +327,28 @@ def dashboard_page(conn, building: str) -> None:
     win_days = int(win_label.split()[0])
     since = (today - timedelta(days=win_days)).isoformat()
 
-    # ── KPI queries ──────────────────────────────────────────────────────────
+    # ── KPI queries — always use AS aliases so dict rows work ────────────────
     if is_pg(conn):
-        sql_active  = f"SELECT COUNT(DISTINCT employee_id) FROM points_history WHERE employee_id IN ({ph}) AND points > 0 AND (point_date::date) >= (%s::date)"
-        sql_roll30  = f"SELECT COUNT(*) FROM employees WHERE employee_id IN ({ph}) AND rolloff_date IS NOT NULL AND (rolloff_date::date) <= (%s::date) AND point_total > 0"
-        sql_perf60  = f"SELECT COUNT(*) FROM employees WHERE employee_id IN ({ph}) AND perfect_attendance IS NOT NULL AND (perfect_attendance::date) <= (%s::date)"
+        sql_active  = f"SELECT COUNT(DISTINCT employee_id) AS cnt FROM points_history WHERE employee_id IN ({ph}) AND points > 0 AND (point_date::date) >= (%s::date)"
+        sql_roll30  = f"SELECT COUNT(*) AS cnt FROM employees WHERE employee_id IN ({ph}) AND rolloff_date IS NOT NULL AND (rolloff_date::date) <= (%s::date) AND point_total > 0"
+        sql_perf60  = f"SELECT COUNT(*) AS cnt FROM employees WHERE employee_id IN ({ph}) AND perfect_attendance IS NOT NULL AND (perfect_attendance::date) <= (%s::date)"
         sql_trend   = f"SELECT (point_date::date)::text AS d, COUNT(*) AS n FROM points_history WHERE employee_id IN ({ph}) AND points > 0 AND (point_date::date) >= (%s::date) GROUP BY 1 ORDER BY 1"
         sql_leaders = f"SELECT employee_id, last_name, first_name, COALESCE(\"Location\",'') AS loc, COALESCE(point_total,0) AS pts FROM employees WHERE employee_id IN ({ph}) ORDER BY pts DESC, last_name LIMIT %s"
         sql_rolloffs= f"SELECT employee_id, last_name, first_name, rolloff_date, point_total FROM employees WHERE employee_id IN ({ph}) AND rolloff_date IS NOT NULL AND point_total > 0 ORDER BY rolloff_date LIMIT 12"
         sql_perfect = f"SELECT employee_id, last_name, first_name, perfect_attendance FROM employees WHERE employee_id IN ({ph}) AND perfect_attendance IS NOT NULL AND (perfect_attendance::date) <= (%s::date) ORDER BY perfect_attendance LIMIT 10"
     else:
-        sql_active  = f"SELECT COUNT(DISTINCT employee_id) FROM points_history WHERE employee_id IN ({ph}) AND points > 0 AND date(point_date) >= date(?)"
-        sql_roll30  = f"SELECT COUNT(*) FROM employees WHERE employee_id IN ({ph}) AND rolloff_date IS NOT NULL AND date(rolloff_date) <= date(?) AND point_total > 0"
-        sql_perf60  = f"SELECT COUNT(*) FROM employees WHERE employee_id IN ({ph}) AND perfect_attendance IS NOT NULL AND date(perfect_attendance) <= date(?)"
+        sql_active  = f"SELECT COUNT(DISTINCT employee_id) AS cnt FROM points_history WHERE employee_id IN ({ph}) AND points > 0 AND date(point_date) >= date(?)"
+        sql_roll30  = f"SELECT COUNT(*) AS cnt FROM employees WHERE employee_id IN ({ph}) AND rolloff_date IS NOT NULL AND date(rolloff_date) <= date(?) AND point_total > 0"
+        sql_perf60  = f"SELECT COUNT(*) AS cnt FROM employees WHERE employee_id IN ({ph}) AND perfect_attendance IS NOT NULL AND date(perfect_attendance) <= date(?)"
         sql_trend   = f"SELECT date(point_date) AS d, COUNT(*) AS n FROM points_history WHERE employee_id IN ({ph}) AND points > 0 AND date(point_date) >= date(?) GROUP BY 1 ORDER BY 1"
         sql_leaders = f"SELECT employee_id, last_name, first_name, COALESCE(\"Location\",'') AS loc, COALESCE(point_total,0) AS pts FROM employees WHERE employee_id IN ({ph}) ORDER BY pts DESC, last_name LIMIT ?"
         sql_rolloffs= f"SELECT employee_id, last_name, first_name, rolloff_date, point_total FROM employees WHERE employee_id IN ({ph}) AND rolloff_date IS NOT NULL AND point_total > 0 ORDER BY rolloff_date LIMIT 12"
         sql_perfect = f"SELECT employee_id, last_name, first_name, perfect_attendance FROM employees WHERE employee_id IN ({ph}) AND perfect_attendance IS NOT NULL AND date(perfect_attendance) <= date(?) ORDER BY perfect_attendance LIMIT 10"
 
-    active_n = first_value(fetchall(conn, sql_active, (*emp_ids, since))) or 0
-    rolloff_n = first_value(fetchall(conn, sql_roll30, (*emp_ids, (today + timedelta(30)).isoformat()))) or 0
-    perf_n = first_value(fetchall(conn, sql_perf60, (*emp_ids, (today + timedelta(60)).isoformat()))) or 0
+    # Access scalars by column name (works for both sqlite3.Row and pg dict rows)
+    active_n  = dict(fetchall(conn, sql_active,  (*emp_ids, since))[0]).get("cnt") or 0
+    rolloff_n = dict(fetchall(conn, sql_roll30,  (*emp_ids, (today + timedelta(30)).isoformat()))[0]).get("cnt") or 0
+    perf_n    = dict(fetchall(conn, sql_perf60,  (*emp_ids, (today + timedelta(60)).isoformat()))[0]).get("cnt") or 0
 
     # ── KPI row ──────────────────────────────────────────────────────────────
     m1, m2, m3, m4 = st.columns(4)
@@ -363,9 +364,10 @@ def dashboard_page(conn, building: str) -> None:
     # ── Trend chart + leaderboard ────────────────────────────────────────────
     with col_left:
         section_label(f"Incident Trend — last {win_days} days")
-        trend = fetchall(conn, sql_trend, (*emp_ids, since))
+        # Convert to dicts so field access works for both SQLite and PostgreSQL
+        trend = [dict(r) for r in fetchall(conn, sql_trend, (*emp_ids, since))]
         if trend:
-            df_t = pd.DataFrame(trend, columns=["Date", "Incidents"])
+            df_t = pd.DataFrame(trend).rename(columns={"d": "Date", "n": "Incidents"})
             df_t["Date"] = pd.to_datetime(df_t["Date"])
             st.line_chart(df_t.set_index("Date")["Incidents"], color="#4f8ef7", height=220)
         else:
@@ -379,10 +381,11 @@ def dashboard_page(conn, building: str) -> None:
         with n_col:
             top_n = st.slider("Top", 5, 25, 10, step=5, label_visibility="collapsed", key="dash_n")
 
-        leaders = fetchall(conn, sql_leaders, (*emp_ids, top_n))
+        leaders = [dict(r) for r in fetchall(conn, sql_leaders, (*emp_ids, top_n))]
         if leaders:
             df_l = pd.DataFrame(
-                [{"Emp #": r[0], "Name": f"{r[1]}, {r[2]}", "Building": r[3] or "—", "Points": float(r[4] or 0)}
+                [{"Emp #": r["employee_id"], "Name": f"{r['last_name']}, {r['first_name']}",
+                  "Building": r["loc"] or "—", "Points": float(r["pts"] or 0)}
                  for r in leaders]
             )
             st.dataframe(df_l, use_container_width=True, hide_index=True)
@@ -392,19 +395,19 @@ def dashboard_page(conn, building: str) -> None:
     # ── Upcoming roll-offs + perfect attendance ───────────────────────────────
     with col_right:
         section_label("Upcoming Roll-offs")
-        rolloffs = fetchall(conn, sql_rolloffs, emp_ids)
+        rolloffs = [dict(r) for r in fetchall(conn, sql_rolloffs, emp_ids)]
         if rolloffs:
             html = []
             for r in rolloffs:
-                days = days_until(r[3])
+                days = days_until(r["rolloff_date"])
                 html.append(
                     f"<div class='list-row'>"
                     f"<div style='display:flex;justify-content:space-between;align-items:center'>"
-                    f"<div><span style='font-weight:600;font-size:.9rem;color:#1a2744'>{r[1]}, {r[2]}</span>"
-                    f"<span style='color:#8fa0b8;font-size:.78rem;margin-left:.4rem'>#{r[0]}</span></div>"
-                    f"<div style='display:flex;gap:.3rem;align-items:center'>{pt_badge(r[4])}{days_badge(days)}</div>"
+                    f"<div><span style='font-weight:600;font-size:.9rem;color:#1a2744'>{r['last_name']}, {r['first_name']}</span>"
+                    f"<span style='color:#8fa0b8;font-size:.78rem;margin-left:.4rem'>#{r['employee_id']}</span></div>"
+                    f"<div style='display:flex;gap:.3rem;align-items:center'>{pt_badge(r['point_total'])}{days_badge(days)}</div>"
                     f"</div>"
-                    f"<div style='font-size:.75rem;color:#8fa0b8;margin-top:.18rem'>Due {fmt_date(r[3])}</div>"
+                    f"<div style='font-size:.75rem;color:#8fa0b8;margin-top:.18rem'>Due {fmt_date(r['rolloff_date'])}</div>"
                     f"</div>"
                 )
             st.markdown("".join(html), unsafe_allow_html=True)
@@ -414,18 +417,18 @@ def dashboard_page(conn, building: str) -> None:
         divider()
 
         section_label("Perfect Attendance Due ≤60 Days")
-        perfects = fetchall(conn, sql_perfect, (*emp_ids, (today + timedelta(60)).isoformat()))
+        perfects = [dict(r) for r in fetchall(conn, sql_perfect, (*emp_ids, (today + timedelta(60)).isoformat()))]
         if perfects:
             html = []
             for r in perfects:
-                days = days_until(r[3])
+                days = days_until(r["perfect_attendance"])
                 html.append(
                     f"<div class='list-row'>"
                     f"<div style='display:flex;justify-content:space-between;align-items:center'>"
-                    f"<span style='font-weight:600;font-size:.9rem;color:#1a2744'>{r[1]}, {r[2]}</span>"
+                    f"<span style='font-weight:600;font-size:.9rem;color:#1a2744'>{r['last_name']}, {r['first_name']}</span>"
                     f"{days_badge(days)}"
                     f"</div>"
-                    f"<div style='font-size:.75rem;color:#8fa0b8;margin-top:.18rem'>Eligible {fmt_date(r[3])}</div>"
+                    f"<div style='font-size:.75rem;color:#8fa0b8;margin-top:.18rem'>Eligible {fmt_date(r['perfect_attendance'])}</div>"
                     f"</div>"
                 )
             st.markdown("".join(html), unsafe_allow_html=True)
