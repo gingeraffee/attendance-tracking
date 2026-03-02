@@ -461,16 +461,19 @@ with st.sidebar.expander("Delete employee", expanded=False):
     if selected_emp_id:
         st.caption(f"Selected Employee #: {selected_emp_id}")
     st.warning("Deleting an employee also deletes all of their point history.")
-    with st.form("delete_employee_form"):
-        delete_emp_id = st.number_input(
-            "Employee # to delete",
-            min_value=1,
-            step=1,
-            format="%d",
-            value=int(selected_emp_id) if selected_emp_id else 1,
-        )
-        confirm_delete = st.checkbox("I understand this action cannot be undone.")
-        delete_emp_submit = st.form_submit_button("Delete Employee")
+    delete_emp_id = st.number_input(
+        "Employee # to delete",
+        min_value=1,
+        step=1,
+        format="%d",
+        value=int(selected_emp_id) if selected_emp_id else 1,
+        key="delete_employee_id",
+    )
+    confirm_delete = st.checkbox(
+        "I understand this action cannot be undone.",
+        key="confirm_delete_employee",
+    )
+    delete_emp_submit = st.button("Delete Employee", key="btn_delete_employee")
 
     if delete_emp_submit:
         if not confirm_delete:
