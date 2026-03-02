@@ -41,7 +41,10 @@ st.sidebar.write("Parent exists:", (pp.parent.exists() if pp else False))
 st.sidebar.write("Writable parent:", (os.access(str(pp.parent), os.W_OK) if pp else False))
 st.sidebar.write("/var/data exists:", Path("/var/data").exists())
 st.sidebar.write("/var/data writable:", os.access("/var/data", os.W_OK) if Path("/var/data").exists() else False)
-
+p = Path(get_db_path())
+if p.exists():
+    st.sidebar.write("DB size:", p.stat().st_size)
+    st.sidebar.write("DB modified:", time.ctime(p.stat().st_mtime))
 # --- Helpers ------------------------------------------------------------------
 def fmt_metric_date(value):
     if value is None or value == "":
