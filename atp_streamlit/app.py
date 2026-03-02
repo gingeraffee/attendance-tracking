@@ -404,7 +404,11 @@ def dashboard_page(conn, building: str) -> None:
         emp_lookup = {int(e["employee_id"]): e for e in employees}
         ytd_entries: list[dict] = []
         try:
-            for p in services.preview_ytd_rolloffs(conn, run_date=date.today()):
+            for p in services.preview_ytd_rolloffs(
+                conn,
+                run_date=today,
+                exclude_applied=True,
+            ):
                 eid = int(p[0])
                 if eid not in emp_set:
                     continue

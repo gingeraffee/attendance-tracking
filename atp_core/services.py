@@ -541,7 +541,12 @@ def _add_month(d: date) -> date:
     return date(y, m, 1)
 
 
-def preview_ytd_rolloffs(conn, run_date: date | None = None):
+def preview_ytd_rolloffs(
+    conn,
+    run_date: date | None = None,
+    *,
+    exclude_applied: bool = False,
+):
     run_date = run_date or date.today()
     roll_date = _first_of_month(run_date)
 
@@ -580,10 +585,49 @@ def preview_ytd_rolloffs(conn, run_date: date | None = None):
             (window_start.isoformat(), window_end.isoformat()),
         )
 
-    return [
+    items = [
         (r["employee_id"], float(r["net_points"]), roll_date, label)
         for r in rows
     ]
+
+    if not exclude_applied:
+        return items
+
+    pending = []
+    for employee_id, net_points, item_roll_date, item_label in items:
+        if _is_pg(conn):
+            already = _fetchone(
+                conn,
+                """
+                SELECT 1
+                  FROM points_history
+                 WHERE employee_id = %s
+                   AND (point_date::date) = (%s::date)
+                   AND reason = 'YTD Roll-Off'
+                   AND note LIKE %s
+                 LIMIT 1;
+                """,
+                (employee_id, item_roll_date.isoformat(), f"%{item_label}%"),
+            )
+        else:
+            already = _fetchone(
+                conn,
+                """
+                SELECT 1
+                  FROM points_history
+                 WHERE employee_id = ?
+                   AND date(point_date) = date(?)
+                   AND reason = 'YTD Roll-Off'
+                   AND note LIKE ?
+                 LIMIT 1;
+                """,
+                (employee_id, item_roll_date.isoformat(), f"%{item_label}%"),
+            )
+
+        if not already:
+            pending.append((employee_id, net_points, item_roll_date, item_label))
+
+    return pending
 
 
 def apply_ytd_rolloffs(
