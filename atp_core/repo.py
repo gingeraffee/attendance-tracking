@@ -97,11 +97,13 @@ def get_points_history(conn, employee_id: int, limit: int = 200):
                 reason,
                 note,
                 flag_code,
-                ROUND(SUM(COALESCE(points, 0.0)) OVER (
-                    PARTITION BY employee_id
-                    ORDER BY date(point_date), id
-                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-                ), 1) AS point_total
+                ROUND(
+                  (SUM(COALESCE(points, 0.0)) OVER (
+                      PARTITION BY employee_id
+                      ORDER BY date(point_date), id
+                      ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                  ))::numeric
+                , 1)::float8 AS point_total
             FROM points_history
             WHERE employee_id = ?
         )
@@ -131,7 +133,7 @@ def delete_employee(conn, employee_id: int):
 
 def update_employee_point_total(conn, employee_id: int):
     row = _fetchone(conn, """
-        SELECT ROUND(COALESCE(SUM(points),0.0), 3) AS total
+        SELECT ROUND((COALESCE(SUM(points),0.0))::numeric, 3)::float8 AS total
         FROM points_history
         WHERE employee_id = ?;
     """, (employee_id,))
