@@ -32,13 +32,15 @@ def apply_theme():
             --muted: #55627d;
             --line: #e6eaf2;
             --metric: #f3f6fb;
-            --hero-a: #f6f9ff;
-            --hero-b: #eef3ff;
+            --hero-a: #f4f8ff;
+            --hero-b: #edf3ff;
             --primary: #2f5ed7;
+            --accent-red: #ef3340;
+            --accent-blue: #1f7ab7;
         }
 
         .stApp {
-            background: #ffffff;
+            background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
             color: var(--text);
         }
 
@@ -59,14 +61,15 @@ def apply_theme():
         .hero {
             background: linear-gradient(120deg, var(--hero-a), var(--hero-b));
             border: 1px solid #dce5f7;
-            border-left: 5px solid var(--primary);
+            border-left: 4px solid var(--primary);
+            border-top: 3px solid var(--accent-red);
             border-radius: 14px;
             padding: 1.05rem 1.2rem;
             margin-bottom: .9rem;
         }
 
         .cool-card, .dash-card {
-            background: #ffffff;
+            background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
             border: 1px solid var(--line);
             border-radius: 12px;
             padding: .9rem 1rem;
@@ -76,12 +79,23 @@ def apply_theme():
 
         .stButton>button {
             border-radius: 10px !important;
-            border: 1px solid #cfd8eb;
+            border: 1px solid #bfcbe6;
+            color: #1f2a44;
         }
 
         .stDataFrame, .stTabs [data-baseweb="tab-panel"] {
             border: 1px solid var(--line);
             border-radius: 12px;
+        }
+
+
+
+        .sidebar-logo-wrap {
+            background: #ffffff;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            padding: .45rem;
+            margin-bottom: .9rem;
         }
 
         h1,h2,h3,h4,h5 { color: var(--text) !important; }
@@ -610,8 +624,15 @@ def main():
     apply_theme()
     st.title("Attendance Point Tracker")
     st.caption("Professional attendance operations workspace")
+    st.markdown("<div style='height:4px; width:120px; border-radius:999px; background:linear-gradient(90deg,#1f7ab7,#ef3340); margin-bottom:.65rem;'></div>", unsafe_allow_html=True)
 
     conn = get_conn()
+
+    logo_path = REPO_ROOT / "assets" / "logo.png"
+    if logo_path.exists():
+        st.sidebar.markdown("<div class='sidebar-logo-wrap'>", unsafe_allow_html=True)
+        st.sidebar.image(str(logo_path), use_container_width=True)
+        st.sidebar.markdown("</div>", unsafe_allow_html=True)
 
     st.sidebar.subheader("Navigation")
     page = st.sidebar.radio(
