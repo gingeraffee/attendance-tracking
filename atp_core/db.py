@@ -10,17 +10,37 @@ def _sqlite_path() -> str:
     repo_root = Path(__file__).resolve().parents[1]
     return str(repo_root / "employeeroster.db")
 
+def get_db_path() -> str:
+    """
+    Backwards-compatible helper used by the Streamlit app for diagnostics.
+    If using Postgres, return a sanitized descriptor.
+    If using SQLite, return the file path.
+    """
+    url = _database_url()
+    if url:
+        # Don't leak credentials into the UI
+        return "postgresql://<set via DATABASE_URL>"
+    return _sqlite_path()
+
 def connect():
+    """
+    Returns a DB connection.
+    - If DATABASE_URL is set => Postgres (persistent)
+    - Else => SQLite (local dev fallback)
+    """
     url = _database_url()
     if url:
         import psycopg2
         from psycopg2.extras import RealDictCursor
         return psycopg2.connect(url, cursor_factory=RealDictCursor)
 
-    # Local fallback only
     path = Path(_sqlite_path())
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path), detect_types=sqlite3.PARSE_DECLTYPES, check_same_thread=False)
+    conn = sqlite3.connect(
+        str(path),
+        detect_types=sqlite3.PARSE_DECLTYPES,
+        check_same_thread=False
+    )
     conn.row_factory = sqlite3.Row
     return conn
 
