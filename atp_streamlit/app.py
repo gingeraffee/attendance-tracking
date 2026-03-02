@@ -16,6 +16,23 @@ st.set_page_config(
     layout="wide",
 )
 
+# TEMP DEBUG
+from atp_core.db import get_db_path
+import os
+from pathlib import Path
+import streamlit as st
+
+p = get_db_path()
+st.sidebar.write("DB path:", p)
+st.sidebar.write("CWD:", os.getcwd())
+
+if p is None:
+    st.sidebar.error("DB path is None (get_db_path() returned None)")
+else:
+    pp = Path(p)
+    st.sidebar.write("DB exists:", pp.exists())
+    st.sidebar.write("Parent exists:", pp.parent.exists())
+    st.sidebar.write("Writable parent:", os.access(str(pp.parent), os.W_OK))
 # --- Path setup / imports -----------------------------------------------------
 APP_DIR = Path(__file__).resolve().parent
 ROOT = APP_DIR.parent
