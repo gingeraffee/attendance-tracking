@@ -36,6 +36,7 @@ except Exception as e:
 # Show what the module actually contains (temporary debug)
 st.sidebar.write("db.py loaded from:", getattr(db, "__file__", "unknown"))
 st.sidebar.write("db exports:", [n for n in ("connect", "get_db_path", "tx") if hasattr(db, n)])
+st.sidebar.write("Using Postgres:", bool(os.getenv("DATABASE_URL")))
 
 connect = db.connect
 get_db_path = getattr(db, "get_db_path", lambda: "MISSING get_db_path()")

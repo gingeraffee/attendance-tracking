@@ -1,7 +1,56 @@
+from __future__ import annotations
 import sqlite3
 
-def ensure_schema(conn: sqlite3.Connection) -> None:
-    """Idempotent schema creation/migration, matching ATP_Beta7."""
+def _is_pg(conn) -> bool:
+    return conn.__class__.__module__.startswith("psycopg2")
+
+def ensure_schema(conn):
+    """
+    Create tables/indexes if needed.
+    - SQLite: original schema + PRAGMA migration
+    - Postgres: Postgres-safe schema
+    """
+    if _is_pg(conn):
+        cur = conn.cursor()
+
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS employees (
+            employee_id BIGINT PRIMARY KEY,
+            last_name TEXT NOT NULL,
+            first_name TEXT NOT NULL,
+            point_total DOUBLE PRECISION DEFAULT 0.0,
+            last_point_date TEXT,
+            rolloff_date TEXT,
+            perfect_attendance TEXT,
+            point_warning_date TEXT,
+            is_active INTEGER DEFAULT 1,
+            "Location" TEXT
+        );
+        """)
+
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS points_history (
+            id BIGSERIAL PRIMARY KEY,
+            employee_id BIGINT NOT NULL REFERENCES employees(employee_id),
+            point_date TEXT NOT NULL,
+            points DOUBLE PRECISION NOT NULL,
+            reason TEXT,
+            note TEXT,
+            flag_code TEXT
+        );
+        """)
+
+        # Indexes (idempotent)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_emp_name ON employees(last_name, first_name);")
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_emp_loc_name ON employees("Location", last_name, first_name);')
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_points_emp ON points_history(employee_id);")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_points_date ON points_history(point_date);")
+
+        conn.commit()
+        return
+
+    # ---------------- SQLite branch (your original behavior) ----------------
+    assert isinstance(conn, sqlite3.Connection)
     cur = conn.cursor()
 
     cur.execute("""
@@ -9,7 +58,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             employee_id INTEGER PRIMARY KEY,
             last_name TEXT NOT NULL,
             first_name TEXT NOT NULL,
-            point_total REAL DEFAULT 0.0,
+            point_total REAL DEFAULT 0,
             last_point_date TEXT,
             rolloff_date TEXT,
             perfect_attendance TEXT,
@@ -31,17 +80,16 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         );
     """)
 
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_emp_name ON employees(last_name, first_name);")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_points_emp ON points_history(employee_id);")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_points_date ON points_history(point_date);")
-
-    cols = [r[1] for r in cur.execute("PRAGMA table_info(employees)").fetchall()]
+    # Migration: add Location column if missing
+    cur.execute("PRAGMA table_info(employees);")
+    cols = [r[1] for r in cur.fetchall()]
     if "Location" not in cols:
         cur.execute('ALTER TABLE employees ADD COLUMN "Location" TEXT;')
 
-    try:
-        cur.execute('CREATE INDEX IF NOT EXISTS idx_emp_loc_name ON employees("Location", last_name, first_name);')
-    except Exception:
-        pass
+    # Indexes
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_emp_name ON employees(last_name, first_name);")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_points_emp ON points_history(employee_id);")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_points_date ON points_history(point_date);")
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_emp_loc_name ON employees("Location", last_name, first_name);')
 
     conn.commit()

@@ -13,13 +13,11 @@ def _sqlite_path() -> str:
 def get_db_path() -> str:
     """
     Backwards-compatible helper used by the Streamlit app for diagnostics.
-    If using Postgres, return a sanitized descriptor.
+    If using Postgres, return a sanitized descriptor (no credentials).
     If using SQLite, return the file path.
     """
-    url = _database_url()
-    if url:
-        # Don't leak credentials into the UI
-        return "postgresql://<set via DATABASE_URL>"
+    if _database_url():
+        return "postgresql://<DATABASE_URL set in Streamlit secrets>"
     return _sqlite_path()
 
 def connect():
@@ -42,10 +40,14 @@ def connect():
         check_same_thread=False
     )
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON;")
     return conn
 
 @contextmanager
 def tx(conn=None):
+    """
+    Transaction context manager that works for sqlite3 + psycopg2.
+    """
     own = False
     if conn is None:
         conn = connect()
