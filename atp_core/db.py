@@ -3,11 +3,6 @@ import os
 import sqlite3
 from pathlib import Path
 
-def get_db_path() -> str:
-<<<<<<< HEAD
-    # env override (Render)
-    return os.getenv("ATP_DB_PATH", "employeeroster.db")
-
 def connect(db_path: str | None = None) -> sqlite3.Connection:
     path = Path(db_path or get_db_path())
 

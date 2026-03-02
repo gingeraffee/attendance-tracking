@@ -16,26 +16,7 @@ st.set_page_config(
     page_icon="📅",
     layout="wide",
 )
-
-# TEMP DEBUG
-from atp_core.db import get_db_path
-import os
-from pathlib import Path
-import streamlit as st
-
-p = get_db_path()
-st.sidebar.write("DB path:", p)
-st.sidebar.write("CWD:", os.getcwd())
-
-if p is None:
-    st.sidebar.error("DB path is None (get_db_path() returned None)")
-else:
-    pp = Path(p)
-    st.sidebar.write("DB exists:", pp.exists())
-    st.sidebar.write("Parent exists:", pp.parent.exists())
-    st.sidebar.write("Writable parent:", os.access(str(pp.parent), os.W_OK))
     
-# --- Path setup / imports -----------------------------------------------------
 # ---- Path setup (MUST come before importing atp_core) -------------------------
 APP_DIR = Path(__file__).resolve().parent          # .../attendance-tracking/atp_streamlit
 REPO_ROOT = APP_DIR.parent                         # .../attendance-tracking
@@ -47,6 +28,18 @@ from atp_core.db import connect, get_db_path
 from atp_core.schema import ensure_schema
 from atp_core.rules import REASON_OPTIONS
 from atp_core import repo, services
+
+# ---- TEMP DEBUG (safe now) ---------------------------------------------------
+p = get_db_path()
+st.sidebar.write("DB path:", p)
+st.sidebar.write("CWD:", os.getcwd())
+
+pp = Path(p) if p else None
+st.sidebar.write("DB exists:", (pp.exists() if pp else False))
+st.sidebar.write("Parent exists:", (pp.parent.exists() if pp else False))
+st.sidebar.write("Writable parent:", (os.access(str(pp.parent), os.W_OK) if pp else False))
+st.sidebar.write("/var/data exists:", Path("/var/data").exists())
+st.sidebar.write("/var/data writable:", os.access("/var/data", os.W_OK) if Path("/var/data").exists() else False)
 
 # --- Helpers ------------------------------------------------------------------
 def fmt_metric_date(value):
