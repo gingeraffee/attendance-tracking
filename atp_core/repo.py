@@ -5,6 +5,61 @@ from typing import Any
 
 from .rules import calc_rolloff_and_perfect
 
+def _is_pg(conn) -> bool:
+    return conn.__class__.__module__.startswith("psycopg2")
+
+def _adapt_sql(sql: str, pg: bool) -> str:
+    if not pg:
+        return sql
+
+    # 1) placeholders
+    sql = sql.replace("?", "%s")
+
+    # 2) SQLite "COLLATE NOCASE" -> Postgres equivalent
+    sql = sql.replace(" COLLATE NOCASE", "")
+
+    # 3) SQLite date(x) where x is ISO text -> Postgres cast
+    #    (your dates are stored as 'YYYY-MM-DD', so ::date works)
+    sql = sql.replace("date(point_date)", "(point_date::date)")
+    sql = sql.replace("date(rolloff_date)", "(rolloff_date::date)")
+    sql = sql.replace("date(perfect_attendance)", "(perfect_attendance::date)")
+    sql = sql.replace("date(ph.point_date)", "(ph.point_date::date)")
+    sql = sql.replace("date(?)", "(%s::date)")  # used in report queries
+
+    return sql
+
+def _fetchall(conn, sql: str, params=()):
+    pg = _is_pg(conn)
+    sql = _adapt_sql(sql, pg)
+    if pg:
+        cur = conn.cursor()  # RealDictCursor from db.py => dict rows
+        cur.execute(sql, params)
+        rows = cur.fetchall()
+        cur.close()
+        return rows
+    return conn.execute(sql, params).fetchall()
+
+def _fetchone(conn, sql: str, params=()):
+    pg = _is_pg(conn)
+    sql = _adapt_sql(sql, pg)
+    if pg:
+        cur = conn.cursor()
+        cur.execute(sql, params)
+        row = cur.fetchone()
+        cur.close()
+        return row
+    return conn.execute(sql, params).fetchone()
+
+def _exec(conn, sql: str, params=()):
+    pg = _is_pg(conn)
+    sql = _adapt_sql(sql, pg)
+    if pg:
+        cur = conn.cursor()
+        cur.execute(sql, params)
+        cur.close()
+        return
+    conn.execute(sql, params)
+
 def search_employees(conn: sqlite3.Connection, q: str, active_only: bool = True, limit: int = 50):
     q = (q or "").strip()
     where = []
