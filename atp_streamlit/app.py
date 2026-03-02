@@ -7,7 +7,7 @@ import sys
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="Attendance Point Tracker", page_icon="📅", layout="wide")
+st.set_page_config(page_title="Attendance Point Tracker", page_icon="📋", layout="wide")
 
 APP_DIR = Path(__file__).resolve().parent
 REPO_ROOT = APP_DIR.parent
@@ -28,78 +28,175 @@ def apply_theme():
         """
         <style>
         :root {
-            --text: #1f2a44;
-            --muted: #55627d;
-            --line: #e6eaf2;
-            --metric: #f3f6fb;
-            --hero-a: #f4f8ff;
-            --hero-b: #edf3ff;
-            --primary: #2f5ed7;
-            --accent-red: #ef3340;
-            --accent-blue: #1f7ab7;
+            --bg:           #0d1426;
+            --bg2:          #141e33;
+            --bg3:          #1c2a42;
+            --text:         #e2e8f4;
+            --muted:        #7a8ba8;
+            --line:         rgba(255,255,255,0.07);
+            --primary:      #4f8ef7;
+            --primary-soft: rgba(79,142,247,0.14);
+            --cyan:         #00d4ff;
+            --green:        #00c896;
+            --amber:        #ffb020;
+            --red:          #ff5b6b;
+            --card-bg:      rgba(255,255,255,0.034);
+            --card-border:  rgba(255,255,255,0.08);
+            --shadow:       0 4px 28px rgba(0,0,0,0.45);
         }
 
+        /* ── Base ── */
         .stApp {
-            background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+            background:
+                radial-gradient(ellipse at 18% 0%,   rgba(79,142,247,.07)  0%, transparent 55%),
+                radial-gradient(ellipse at 82% 100%,  rgba(0,212,255,.05)   0%, transparent 55%),
+                linear-gradient(180deg, #0d1426 0%, #0e1529 100%);
             color: var(--text);
         }
 
-        .block-container { padding-top: 1.2rem; padding-bottom: 2rem; max-width: 1460px; }
+        .block-container { padding-top: 1.2rem; padding-bottom: 2.5rem; max-width: 1460px; }
 
+        /* ── Sidebar ── */
         section[data-testid="stSidebar"] {
-            width: 320px !important;
+            width: 300px !important;
+            background: linear-gradient(180deg, #101828 0%, #0d1426 100%) !important;
             border-right: 1px solid var(--line);
         }
 
+        section[data-testid="stSidebar"] h3 {
+            color: var(--muted) !important;
+            font-size: .72rem !important;
+            font-weight: 700 !important;
+            letter-spacing: .1em !important;
+            text-transform: uppercase;
+        }
+
+        /* ── Metric cards ── */
         div[data-testid="stMetric"] {
-            background: var(--metric);
-            padding: 14px 14px 10px 14px;
+            background: linear-gradient(135deg, var(--bg3) 0%, var(--bg2) 100%);
+            padding: 16px 18px 12px 18px;
             border-radius: 14px;
-            border: 1px solid var(--line);
+            border: 1px solid var(--card-border);
+            box-shadow: var(--shadow), inset 0 1px 0 rgba(255,255,255,0.05);
         }
 
+        div[data-testid="stMetric"] label {
+            color: var(--muted) !important;
+            font-size: .78rem !important;
+            font-weight: 600 !important;
+            letter-spacing: .05em !important;
+            text-transform: uppercase !important;
+        }
+
+        div[data-testid="stMetric"] [data-testid="stMetricValue"] {
+            color: var(--text) !important;
+            font-size: 2rem !important;
+            font-weight: 700 !important;
+            letter-spacing: -.02em !important;
+        }
+
+        /* ── Hero banner ── */
         .hero {
-            background: linear-gradient(120deg, var(--hero-a), var(--hero-b));
-            border: 1px solid #dce5f7;
-            border-left: 4px solid var(--primary);
-            border-top: 3px solid var(--accent-red);
+            background: linear-gradient(135deg,
+                rgba(79,142,247,.10) 0%,
+                rgba(0,212,255,.05) 100%);
+            border: 1px solid rgba(79,142,247,.22);
+            border-left: 3px solid var(--primary);
             border-radius: 14px;
-            padding: 1.05rem 1.2rem;
-            margin-bottom: .9rem;
+            padding: 1.2rem 1.5rem;
+            margin-bottom: 1rem;
+            position: relative;
+            overflow: hidden;
+        }
+        .hero::after {
+            content: '';
+            position: absolute;
+            top: -40px; right: -40px;
+            width: 140px; height: 140px;
+            background: radial-gradient(circle, rgba(79,142,247,.18) 0%, transparent 70%);
+            border-radius: 50%;
+            pointer-events: none;
         }
 
+        /* ── Glass cards ── */
         .cool-card, .dash-card {
-            background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
-            border: 1px solid var(--line);
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
             border-radius: 12px;
-            padding: .9rem 1rem;
-            box-shadow: 0 2px 10px rgba(17,35,77,.05);
-            margin-bottom: .65rem;
+            padding: 1rem 1.15rem;
+            box-shadow: var(--shadow);
+            margin-bottom: .75rem;
+            transition: border-color .2s, box-shadow .2s;
+        }
+        .cool-card:hover, .dash-card:hover {
+            border-color: rgba(79,142,247,.28);
+            box-shadow: var(--shadow), 0 0 0 1px rgba(79,142,247,.10);
         }
 
-        .stButton>button {
-            border-radius: 10px !important;
-            border: 1px solid #bfcbe6;
-            color: #1f2a44;
+        /* ── Buttons ── */
+        .stButton > button {
+            border-radius: 8px !important;
+            border: 1px solid rgba(79,142,247,.35) !important;
+            background: linear-gradient(135deg,
+                rgba(79,142,247,.12) 0%,
+                rgba(79,142,247,.06) 100%) !important;
+            color: var(--primary) !important;
+            font-weight: 600 !important;
+            letter-spacing: .01em !important;
+            transition: all .2s !important;
+        }
+        .stButton > button:hover {
+            border-color: var(--primary) !important;
+            background: rgba(79,142,247,.18) !important;
+            box-shadow: 0 0 18px rgba(79,142,247,.22) !important;
         }
 
-        .stDataFrame, .stTabs [data-baseweb="tab-panel"] {
-            border: 1px solid var(--line);
-            border-radius: 12px;
+        /* ── DataFrames & Tabs ── */
+        .stDataFrame {
+            border: 1px solid var(--card-border) !important;
+            border-radius: 12px !important;
+            overflow: hidden;
+        }
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 4px;
+            border-bottom: 1px solid var(--line);
+        }
+        .stTabs [data-baseweb="tab"] {
+            border-radius: 8px 8px 0 0;
         }
 
+        /* ── Inputs ── */
+        .stTextInput > div > div > input,
+        .stNumberInput > div > div > input,
+        .stDateInput > div > div > input {
+            background: var(--bg2) !important;
+            border-color: var(--card-border) !important;
+            border-radius: 8px !important;
+            color: var(--text) !important;
+        }
 
-
+        /* ── Sidebar logo wrap ── */
         .sidebar-logo-wrap {
-            background: #ffffff;
-            border: 1px solid var(--line);
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
             border-radius: 12px;
-            padding: .45rem;
-            margin-bottom: .9rem;
+            padding: .5rem;
+            margin-bottom: 1rem;
         }
 
-        h1,h2,h3,h4,h5 { color: var(--text) !important; }
-        p,label,.stCaption { color: var(--muted) !important; }
+        /* ── Title accent bar ── */
+        .title-accent {
+            height: 3px;
+            width: 72px;
+            border-radius: 999px;
+            background: linear-gradient(90deg, var(--primary), var(--cyan));
+            margin: .25rem 0 .6rem 0;
+            box-shadow: 0 0 12px rgba(79,142,247,.5);
+        }
+
+        /* ── Typography ── */
+        h1, h2, h3, h4, h5 { color: var(--text) !important; }
+        p, label, .stCaption { color: var(--muted) !important; }
         footer { visibility: hidden; }
         </style>
         """,
@@ -111,8 +208,8 @@ def page_hero(title: str, subtitle: str):
     st.markdown(
         f"""
         <div class='hero'>
-            <h3 style='margin:.1rem 0 .35rem 0; color:#1f2a44'>{title}</h3>
-            <div style='color:#55627d; font-size:.96rem'>{subtitle}</div>
+            <h3 style='margin:.1rem 0 .3rem 0; color:#e2e8f4; font-weight:700; letter-spacing:-.01em'>{title}</h3>
+            <div style='color:#7a8ba8; font-size:.9rem'>{subtitle}</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -276,8 +373,10 @@ def dashboard_page(conn, building: str):
     st.markdown(
         """
         <div class='hero'>
-            <h2 style='margin:0 0 .35rem 0; color:#1f2a44'>Attendance Ops Dashboard</h2>
-            <div style='color:#55627d'>Interactive command center for activity trends, upcoming deadlines, and one-click actions.</div>
+            <h2 style='margin:0 0 .3rem 0; color:#e2e8f4; font-weight:700; letter-spacing:-.02em'>
+                Attendance Ops Dashboard
+            </h2>
+            <div style='color:#7a8ba8; font-size:.9rem'>Real-time command center for activity trends, upcoming deadlines, and one-click actions.</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -400,18 +499,36 @@ def dashboard_page(conn, building: str):
 
     with right:
         st.markdown("#### Quick actions")
-        st.markdown("<div class='dash-card'><b>Review roll-offs now</b><br><span style='color:#5f7395'>Jump to reports with roll-off preset.</span></div>", unsafe_allow_html=True)
+        st.markdown(
+            "<div class='dash-card'>"
+            "<b style='color:#e2e8f4'>Review roll-offs</b>"
+            "<br><span style='color:#7a8ba8;font-size:.85rem'>Jump to reports with roll-off preset.</span>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
         if st.button("Open roll-off exports", use_container_width=True, key="dash_export"):
             st.session_state["page"] = "Exports & Forecasts"
             st.session_state["export_type"] = "upcoming 2-month roll-offs"
             st.rerun()
 
-        st.markdown("<div class='dash-card'><b>Record attendance event</b><br><span style='color:#5f7395'>Launch ledger entry workflow.</span></div>", unsafe_allow_html=True)
+        st.markdown(
+            "<div class='dash-card'>"
+            "<b style='color:#e2e8f4'>Record attendance event</b>"
+            "<br><span style='color:#7a8ba8;font-size:.85rem'>Launch ledger entry workflow.</span>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
         if st.button("Open points ledger", use_container_width=True, key="dash_ledger"):
             st.session_state["page"] = "Points Ledger"
             st.rerun()
 
-        st.markdown("<div class='dash-card'><b>Run maintenance jobs</b><br><span style='color:#5f7395'>Use dry-run and commit controls.</span></div>", unsafe_allow_html=True)
+        st.markdown(
+            "<div class='dash-card'>"
+            "<b style='color:#e2e8f4'>Run maintenance jobs</b>"
+            "<br><span style='color:#7a8ba8;font-size:.85rem'>Use dry-run and commit controls.</span>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
         if st.button("Open system updates", use_container_width=True, key="dash_sys"):
             st.session_state["page"] = "System Updates"
             st.rerun()
@@ -536,7 +653,10 @@ def manage_employees_page(conn):
             except Exception as e:
                 st.error(str(e))
 
-        st.markdown("---")
+        st.markdown(
+            "<div style='border-top:1px solid rgba(255,255,255,0.07);margin:1rem 0'></div>",
+            unsafe_allow_html=True,
+        )
         delete_confirm = st.checkbox("I understand delete permanently removes employee and history.")
         if st.button("Delete employee"):
             if not delete_confirm:
@@ -622,9 +742,18 @@ def system_updates_page(conn):
 
 def main():
     apply_theme()
-    st.title("Attendance Point Tracker")
-    st.caption("Professional attendance operations workspace")
-    st.markdown("<div style='height:4px; width:120px; border-radius:999px; background:linear-gradient(90deg,#1f7ab7,#ef3340); margin-bottom:.65rem;'></div>", unsafe_allow_html=True)
+    st.markdown(
+        """
+        <div style='margin-bottom:.4rem'>
+            <h1 style='color:#e2e8f4; font-weight:800; font-size:2rem; letter-spacing:-.025em; margin:0; padding:0'>
+                Attendance Point Tracker
+            </h1>
+            <div class='title-accent'></div>
+            <p style='color:#7a8ba8; font-size:.88rem; margin:0'>Professional attendance operations workspace</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     conn = get_conn()
 
@@ -634,15 +763,21 @@ def main():
         st.sidebar.image(str(logo_path), use_container_width=True)
         st.sidebar.markdown("</div>", unsafe_allow_html=True)
 
-    st.sidebar.subheader("Navigation")
+    st.sidebar.markdown(
+        "<div style='color:#7a8ba8;font-size:.72rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-bottom:.4rem'>Navigation</div>",
+        unsafe_allow_html=True,
+    )
     page = st.sidebar.radio(
         "Navigation menu",
         ["Dashboard", "Employees", "Points Ledger", "Manage Employees", "Exports & Forecasts", "System Updates"],
         key="page",
         label_visibility="collapsed",
     )
-    st.sidebar.markdown("### Building filter")
-    building = st.sidebar.selectbox("Building filter", ["All", *BUILDINGS], key="global_building")
+    st.sidebar.markdown(
+        "<div style='color:#7a8ba8;font-size:.72rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin:1rem 0 .4rem 0'>Building Filter</div>",
+        unsafe_allow_html=True,
+    )
+    building = st.sidebar.selectbox("Building filter", ["All", *BUILDINGS], key="global_building", label_visibility="collapsed")
 
     if page == "Dashboard":
         dashboard_page(conn, building)

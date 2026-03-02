@@ -1,15 +1,14 @@
 [theme]
-base="light"
+base="dark"
 
-# Microsoft-ish blue accent, but softened
-primaryColor="#2563EB"
+# Electric blue — primary interactive element color
+primaryColor="#4f8ef7"
 
-# Clean corporate whites with gentle pastel grays
-backgroundColor="#FFFFFF"
-secondaryBackgroundColor="#F3F6FB"
+# Deep navy backgrounds
+backgroundColor="#0d1426"
+secondaryBackgroundColor="#141e33"
 
-# Dark neutral text like Microsoft UI
-textColor="#111827"
+# Soft off-white text for readability
+textColor="#e2e8f4"
 
-# Closest Streamlit option to Microsoft UI
 font="sans serif"
