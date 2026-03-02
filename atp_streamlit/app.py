@@ -26,7 +26,19 @@ ROOT = REPO_ROOT
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from atp_core.db import connect, get_db_path
+try:
+    import atp_core.db as db
+except Exception as e:
+    st.error("Failed to import atp_core.db")
+    st.exception(e)
+    st.stop()
+
+# Show what the module actually contains (temporary debug)
+st.sidebar.write("db.py loaded from:", getattr(db, "__file__", "unknown"))
+st.sidebar.write("db exports:", [n for n in ("connect", "get_db_path", "tx") if hasattr(db, n)])
+
+connect = db.connect
+get_db_path = getattr(db, "get_db_path", lambda: "MISSING get_db_path()")
 from atp_core.schema import ensure_schema
 from atp_core.rules import REASON_OPTIONS
 from atp_core import repo, services
