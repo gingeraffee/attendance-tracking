@@ -8,6 +8,39 @@ from . import repo
 from .rules import calc_rolloff_and_perfect, step_next_perfect_attendance, step_next_rolloff
 
 
+def _is_pg(conn) -> bool:
+    return conn.__class__.__module__.startswith("psycopg2")
+
+
+def _fetchall(conn, sql: str, params=()):
+    if _is_pg(conn):
+        cur = conn.cursor()
+        cur.execute(sql.replace("?", "%s"), params)
+        rows = cur.fetchall()
+        cur.close()
+        return rows
+    return conn.execute(sql, params).fetchall()
+
+
+def _fetchone(conn, sql: str, params=()):
+    if _is_pg(conn):
+        cur = conn.cursor()
+        cur.execute(sql.replace("?", "%s"), params)
+        row = cur.fetchone()
+        cur.close()
+        return row
+    return conn.execute(sql, params).fetchone()
+
+
+def _exec(conn, sql: str, params=()):
+    if _is_pg(conn):
+        cur = conn.cursor()
+        cur.execute(sql.replace("?", "%s"), params)
+        cur.close()
+        return
+    conn.execute(sql, params)
+
+
 def _coerce_iso_date(value):
     if value is None:
         return None
@@ -53,15 +86,15 @@ def recalculate_employee_dates(conn: sqlite3.Connection, employee_id: int) -> No
         All three date fields are cleared and total is set to 0.0.
     """
     # --- Step 1: total across all history ---
-    total_row = conn.execute(
+    total_row = _fetchone(conn,
         "SELECT SUM(points) AS total FROM points_history WHERE employee_id = ?",
         (employee_id,),
-    ).fetchone()
+    )
     new_total = float(total_row["total"]) if total_row["total"] is not None else 0.0
     new_total = max(0.0, round(new_total, 1))
 
     # --- Step 2: roll-off anchor (any entry except YTD Roll-Off) ---
-    rolloff_anchor_row = conn.execute(
+    rolloff_anchor_row = _fetchone(conn,
         """
         SELECT MAX(point_date) AS last_date
           FROM points_history
@@ -69,11 +102,11 @@ def recalculate_employee_dates(conn: sqlite3.Connection, employee_id: int) -> No
            AND NOT (reason = 'YTD Roll-Off' AND flag_code = 'AUTO')
         """,
         (employee_id,),
-    ).fetchone()
+    )
     rolloff_anchor_iso = rolloff_anchor_row["last_date"] if rolloff_anchor_row else None
 
     # --- Step 3: perfect attendance anchor (positive entries only) ---
-    perfect_anchor_row = conn.execute(
+    perfect_anchor_row = _fetchone(conn,
         """
         SELECT MAX(point_date) AS last_date
           FROM points_history
@@ -81,13 +114,13 @@ def recalculate_employee_dates(conn: sqlite3.Connection, employee_id: int) -> No
            AND points > 0
         """,
         (employee_id,),
-    ).fetchone()
+    )
     perfect_anchor_iso = perfect_anchor_row["last_date"] if perfect_anchor_row else None
 
     # --- Step 4: decide what to write ---
     if not rolloff_anchor_iso and not perfect_anchor_iso:
         # No history at all — clear everything
-        conn.execute(
+        _exec(conn,
             """
             UPDATE employees
                SET point_total        = ?,
@@ -125,7 +158,7 @@ def recalculate_employee_dates(conn: sqlite3.Connection, employee_id: int) -> No
         rolloff_date_iso = None
         perfect_date_iso = None
 
-    conn.execute(
+    _exec(conn,
         """
         UPDATE employees
            SET point_total        = ?,
@@ -318,18 +351,34 @@ def apply_2mo_rolloffs(
     """
     run_date = run_date or date.today()
 
-    expired = conn.execute(
-        """
-        SELECT employee_id, first_name, last_name,
-               rolloff_date,
-               COALESCE(point_total, 0.0) AS pt,
-               NULLIF(last_point_date, '') AS last_point_iso
-          FROM employees
-         WHERE rolloff_date IS NOT NULL
-           AND date(rolloff_date) <= date(?)
-        """,
-        (run_date.isoformat(),),
-    ).fetchall()
+    if _is_pg(conn):
+        expired = _fetchall(
+            conn,
+            """
+            SELECT employee_id, first_name, last_name,
+                   rolloff_date,
+                   COALESCE(point_total, 0.0) AS pt,
+                   NULLIF(last_point_date, '') AS last_point_iso
+              FROM employees
+             WHERE rolloff_date IS NOT NULL
+               AND (rolloff_date::date) <= (%s::date)
+            """,
+            (run_date.isoformat(),),
+        )
+    else:
+        expired = _fetchall(
+            conn,
+            """
+            SELECT employee_id, first_name, last_name,
+                   rolloff_date,
+                   COALESCE(point_total, 0.0) AS pt,
+                   NULLIF(last_point_date, '') AS last_point_iso
+              FROM employees
+             WHERE rolloff_date IS NOT NULL
+               AND date(rolloff_date) <= date(?)
+            """,
+            (run_date.isoformat(),),
+        )
 
     applied = []
 
@@ -341,14 +390,14 @@ def apply_2mo_rolloffs(
 
         # perfect_date anchor: still based on last POSITIVE point entry
         # (the stored last_point_date is the rolloff anchor, which may differ)
-        perfect_anchor_row = conn.execute(
+        perfect_anchor_row = _fetchone(conn,
             """
             SELECT MAX(point_date) AS last_date
               FROM points_history
              WHERE employee_id = ? AND points > 0
             """,
             (emp_id,),
-        ).fetchone()
+        )
         perfect_iso = perfect_anchor_row["last_date"] if perfect_anchor_row else None
 
         if perfect_iso:
@@ -417,16 +466,30 @@ def advance_due_perfect_attendance_dates(
     """
     run_date = run_date or date.today()
 
-    due_rows = conn.execute(
-        """
-        SELECT employee_id, first_name, last_name, perfect_attendance
-          FROM employees
-         WHERE perfect_attendance IS NOT NULL
-           AND date(perfect_attendance) <= date(?)
-         ORDER BY date(perfect_attendance) ASC, last_name, first_name
-        """,
-        (run_date.isoformat(),),
-    ).fetchall()
+    if _is_pg(conn):
+        due_rows = _fetchall(
+            conn,
+            """
+            SELECT employee_id, first_name, last_name, perfect_attendance
+              FROM employees
+             WHERE perfect_attendance IS NOT NULL
+               AND (perfect_attendance::date) <= (%s::date)
+             ORDER BY (perfect_attendance::date) ASC, last_name, first_name
+            """,
+            (run_date.isoformat(),),
+        )
+    else:
+        due_rows = _fetchall(
+            conn,
+            """
+            SELECT employee_id, first_name, last_name, perfect_attendance
+              FROM employees
+             WHERE perfect_attendance IS NOT NULL
+               AND date(perfect_attendance) <= date(?)
+             ORDER BY date(perfect_attendance) ASC, last_name, first_name
+            """,
+            (run_date.isoformat(),),
+        )
 
     advanced = []
 
@@ -455,7 +518,8 @@ def advance_due_perfect_attendance_dates(
             continue
 
         with tx(conn):
-            conn.execute(
+            _exec(
+                conn,
                 "UPDATE employees SET perfect_attendance = ? WHERE employee_id = ?",
                 (new_due.isoformat(), int(rec["employee_id"])),
             )
@@ -485,19 +549,36 @@ def preview_ytd_rolloffs(conn, run_date: date | None = None):
     window_end = _add_month(window_start)
     label = window_start.strftime("%b %Y")
 
-    rows = conn.execute(
-        """
-        SELECT employee_id,
-               ROUND(COALESCE(SUM(points), 0.0), 3) AS net_points
-          FROM points_history
-         WHERE date(point_date) >= date(?)
-           AND date(point_date) <  date(?)
-         GROUP BY employee_id
-        HAVING net_points > 0.0
-         ORDER BY employee_id;
-        """,
-        (window_start.isoformat(), window_end.isoformat()),
-    ).fetchall()
+    if _is_pg(conn):
+        rows = _fetchall(
+            conn,
+            """
+            SELECT employee_id,
+                   ROUND((COALESCE(SUM(points), 0.0))::numeric, 3)::float8 AS net_points
+              FROM points_history
+             WHERE (point_date::date) >= (%s::date)
+               AND (point_date::date) < (%s::date)
+             GROUP BY employee_id
+            HAVING ROUND((COALESCE(SUM(points), 0.0))::numeric, 3)::float8 > 0.0
+             ORDER BY employee_id;
+            """,
+            (window_start.isoformat(), window_end.isoformat()),
+        )
+    else:
+        rows = _fetchall(
+            conn,
+            """
+            SELECT employee_id,
+                   ROUND(COALESCE(SUM(points), 0.0), 3) AS net_points
+              FROM points_history
+             WHERE date(point_date) >= date(?)
+               AND date(point_date) <  date(?)
+             GROUP BY employee_id
+            HAVING net_points > 0.0
+             ORDER BY employee_id;
+            """,
+            (window_start.isoformat(), window_end.isoformat()),
+        )
 
     return [
         (r["employee_id"], float(r["net_points"]), roll_date, label)
@@ -518,18 +599,34 @@ def apply_ytd_rolloffs(
     applied = []
 
     for employee_id, net_points, roll_date, label in items:
-        already = conn.execute(
-            """
-            SELECT 1
-              FROM points_history
-             WHERE employee_id = ?
-               AND date(point_date) = date(?)
-               AND reason = 'YTD Roll-Off'
-               AND note LIKE ?
-             LIMIT 1;
-            """,
-            (employee_id, roll_date.isoformat(), f"%{label}%"),
-        ).fetchone()
+        if _is_pg(conn):
+            already = _fetchone(
+                conn,
+                """
+                SELECT 1
+                  FROM points_history
+                 WHERE employee_id = %s
+                   AND (point_date::date) = (%s::date)
+                   AND reason = 'YTD Roll-Off'
+                   AND note LIKE %s
+                 LIMIT 1;
+                """,
+                (employee_id, roll_date.isoformat(), f"%{label}%"),
+            )
+        else:
+            already = _fetchone(
+                conn,
+                """
+                SELECT 1
+                  FROM points_history
+                 WHERE employee_id = ?
+                   AND date(point_date) = date(?)
+                   AND reason = 'YTD Roll-Off'
+                   AND note LIKE ?
+                 LIMIT 1;
+                """,
+                (employee_id, roll_date.isoformat(), f"%{label}%"),
+            )
 
         if already:
             continue
