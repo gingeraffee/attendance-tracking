@@ -33,32 +33,13 @@ except Exception as e:
     st.exception(e)
     st.stop()
 
-# Show what the module actually contains (temporary debug)
-st.sidebar.write("db.py loaded from:", getattr(db, "__file__", "unknown"))
-st.sidebar.write("db exports:", [n for n in ("connect", "get_db_path", "tx") if hasattr(db, n)])
-st.sidebar.write("Using Postgres:", bool(os.getenv("DATABASE_URL")))
-
 connect = db.connect
 get_db_path = getattr(db, "get_db_path", lambda: "MISSING get_db_path()")
 from atp_core.schema import ensure_schema
 from atp_core.rules import REASON_OPTIONS
 from atp_core import repo, services
 
-# ---- TEMP DEBUG (safe now) ---------------------------------------------------
-p = get_db_path()
-st.sidebar.write("DB path:", p)
-st.sidebar.write("CWD:", os.getcwd())
 
-pp = Path(p) if p else None
-st.sidebar.write("DB exists:", (pp.exists() if pp else False))
-st.sidebar.write("Parent exists:", (pp.parent.exists() if pp else False))
-st.sidebar.write("Writable parent:", (os.access(str(pp.parent), os.W_OK) if pp else False))
-st.sidebar.write("/var/data exists:", Path("/var/data").exists())
-st.sidebar.write("/var/data writable:", os.access("/var/data", os.W_OK) if Path("/var/data").exists() else False)
-p = Path(get_db_path())
-if p.exists():
-    st.sidebar.write("DB size:", p.stat().st_size)
-    st.sidebar.write("DB modified:", time.ctime(p.stat().st_mtime))
 # --- Helpers ------------------------------------------------------------------
 def fmt_metric_date(value):
     if value is None or value == "":
