@@ -197,6 +197,21 @@ def exec_sql(conn, sql: str, params=()):
         conn.execute(sql, params)
 
 
+def first_value(rows, default=0):
+    """Return the first scalar value from a query result for tuple/dict-like rows."""
+    if not rows:
+        return default
+
+    row = rows[0]
+    if isinstance(row, dict):
+        return next(iter(row.values()), default)
+
+    try:
+        return row[0]
+    except Exception:
+        return default
+
+
 # ── Format helpers ────────────────────────────────────────────────────────────
 def fmt_date(val) -> str:
     if not val:
@@ -330,9 +345,9 @@ def dashboard_page(conn, building: str) -> None:
         sql_rolloffs= f"SELECT employee_id, last_name, first_name, rolloff_date, point_total FROM employees WHERE employee_id IN ({ph}) AND rolloff_date IS NOT NULL AND point_total > 0 ORDER BY rolloff_date LIMIT 12"
         sql_perfect = f"SELECT employee_id, last_name, first_name, perfect_attendance FROM employees WHERE employee_id IN ({ph}) AND perfect_attendance IS NOT NULL AND date(perfect_attendance) <= date(?) ORDER BY perfect_attendance LIMIT 10"
 
-    active_n  = fetchall(conn, sql_active,  (*emp_ids, since))[0][0] or 0
-    rolloff_n = fetchall(conn, sql_roll30,  (*emp_ids, (today + timedelta(30)).isoformat()))[0][0] or 0
-    perf_n    = fetchall(conn, sql_perf60,  (*emp_ids, (today + timedelta(60)).isoformat()))[0][0] or 0
+    active_n = first_value(fetchall(conn, sql_active, (*emp_ids, since))) or 0
+    rolloff_n = first_value(fetchall(conn, sql_roll30, (*emp_ids, (today + timedelta(30)).isoformat()))) or 0
+    perf_n = first_value(fetchall(conn, sql_perf60, (*emp_ids, (today + timedelta(60)).isoformat()))) or 0
 
     # ── KPI row ──────────────────────────────────────────────────────────────
     m1, m2, m3, m4 = st.columns(4)
