@@ -1,59 +1,29 @@
-# atp_core/db.py
 import os
 import sqlite3
 from pathlib import Path
 
-def connect(db_path: str | None = None) -> sqlite3.Connection:
-    path = Path(db_path or get_db_path())
-
-    # Ensure parent directory exists
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-    except Exception as e:
-        raise RuntimeError(
-            f"Cannot create DB directory: {path.parent}\n"
-            f"ATP_DB_PATH={os.getenv('ATP_DB_PATH')}\n"
-            f"Working dir={os.getcwd()}\n"
-            f"Original error: {e}"
-        ) from e
-
-    # Connect
-    try:
-        conn = sqlite3.connect(
-            str(path),
-            detect_types=sqlite3.PARSE_DECLTYPES,
-            check_same_thread=False
-        )
-    except Exception as e:
-        raise RuntimeError(
-            f"Cannot open DB file: {path}\n"
-            f"Parent exists={path.parent.exists()} writable={os.access(str(path.parent), os.W_OK)}\n"
-            f"ATP_DB_PATH={os.getenv('ATP_DB_PATH')}\n"
-            f"Working dir={os.getcwd()}\n"
-            f"Original error: {e}"
-        ) from e
-
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON;")
-    return conn
-    return os.getenv("ATP_DB_PATH", "employeeroster.db")
+def get_db_path() -> str:
+    """
+    Return the SQLite DB path.
+    Uses ATP_DB_PATH if set (Render persistent disk).
+    Falls back to repo-root employeeroster.db for local dev.
+    Treats blank env var as unset.
+    """
+    p = (os.getenv("ATP_DB_PATH") or "").strip()
+    if p:
+        return p
+    repo_root = Path(__file__).resolve().parents[1]
+    return str(repo_root / "employeeroster.db")
 
 def connect(db_path: str | None = None) -> sqlite3.Connection:
-    raw = db_path or get_db_path()
-    path = Path(raw)
+    """
+    Connect to SQLite database, ensuring parent directory exists.
+    """
+    path_str = (db_path or get_db_path())
+    path = Path(path_str)
 
-    # Debug-friendly checks
-    parent = path.parent
-    try:
-        parent.mkdir(parents=True, exist_ok=True)
-    except Exception as e:
-        raise RuntimeError(
-            f"mkdir failed for parent={parent} (raw path={raw}). "
-            f"Parent exists={parent.exists()} is_dir={parent.is_dir()} "
-            f"/var/data exists={Path('/var/data').exists()} "
-            f"ATP_DB_PATH={os.getenv('ATP_DB_PATH')!r}. "
-            f"Error={repr(e)}"
-        ) from e
+    # Ensure parent directory exists (SQLite won't create directories)
+    path.parent.mkdir(parents=True, exist_ok=True)
 
     conn = sqlite3.connect(
         str(path),
