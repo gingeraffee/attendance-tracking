@@ -28,99 +28,65 @@ def apply_theme():
         """
         <style>
         :root {
-            --bg: #f2f5fb;
-            --surface: #ffffff;
-            --surface-soft: #f8faff;
-            --line: #d9e2f0;
-            --text: #15243d;
-            --muted: #5f7395;
-            --navy-1: #0f1f3d;
-            --navy-2: #1b2f54;
-            --primary: #3f6fe8;
-            --accent: #1dc8b0;
+            --text: #1f2a44;
+            --muted: #55627d;
+            --line: #e6eaf2;
+            --metric: #f3f6fb;
+            --hero-a: #f6f9ff;
+            --hero-b: #eef3ff;
+            --primary: #2f5ed7;
         }
 
         .stApp {
-            background: radial-gradient(1000px 420px at 8% -8%, rgba(63,111,232,.08), transparent 42%), var(--bg);
+            background: #ffffff;
             color: var(--text);
         }
 
-        .block-container { max-width: 1500px; padding-top: 1.1rem; }
+        .block-container { padding-top: 1.2rem; padding-bottom: 2rem; max-width: 1460px; }
 
         section[data-testid="stSidebar"] {
-            background: linear-gradient(180deg, var(--navy-1) 0%, var(--navy-2) 100%);
-            border-right: 1px solid #304a79;
             width: 320px !important;
-        }
-        section[data-testid="stSidebar"] * { color: #eaf1ff !important; }
-
-        /* make sidebar controls stand out */
-        section[data-testid="stSidebar"] [data-testid="stSelectbox"] > div > div,
-        section[data-testid="stSidebar"] [data-testid="stSelectbox"] [data-baseweb="select"],
-        section[data-testid="stSidebar"] [data-testid="stSelectbox"] input {
-            background: #f3f7ff !important;
-            color: #1a2943 !important;
-            border-radius: 10px !important;
-            border: 2px solid #5f8dff !important;
-            box-shadow: 0 0 0 2px rgba(95,141,255,.18);
-        }
-
-        .hero {
-            background: linear-gradient(120deg, #ecf3ff, #f4fbff);
-            border: 1px solid #c9daf8;
-            border-left: 5px solid var(--primary);
-            border-radius: 16px;
-            padding: 1.15rem 1.3rem;
-            box-shadow: 0 8px 22px rgba(28,54,102,.08);
-            margin-bottom: .95rem;
-        }
-
-        .cool-card {
-            background: var(--surface);
-            border: 1px solid var(--line);
-            border-radius: 14px;
-            padding: .95rem 1rem;
-            box-shadow: 0 8px 20px rgba(17,41,84,.06);
-            margin-bottom: .75rem;
-        }
-
-        .dash-card {
-            background: linear-gradient(180deg, #ffffff, #f8fbff);
-            border: 1px solid #d4e0f5;
-            border-radius: 14px;
-            padding: .9rem 1rem;
-            margin-bottom: .65rem;
-            box-shadow: 0 8px 18px rgba(17,41,84,.06);
+            border-right: 1px solid var(--line);
         }
 
         div[data-testid="stMetric"] {
-            background: #fff;
-            border: 1px solid #d9e3f4;
-            border-top: 3px solid var(--primary);
-            border-radius: 12px;
-            padding: 12px 12px;
+            background: var(--metric);
+            padding: 14px 14px 10px 14px;
+            border-radius: 14px;
+            border: 1px solid var(--line);
         }
-        div[data-testid="stMetricLabel"] { color: var(--muted); }
-        div[data-testid="stMetricValue"] { color: var(--text); }
+
+        .hero {
+            background: linear-gradient(120deg, var(--hero-a), var(--hero-b));
+            border: 1px solid #dce5f7;
+            border-left: 5px solid var(--primary);
+            border-radius: 14px;
+            padding: 1.05rem 1.2rem;
+            margin-bottom: .9rem;
+        }
+
+        .cool-card, .dash-card {
+            background: #ffffff;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            padding: .9rem 1rem;
+            box-shadow: 0 2px 10px rgba(17,35,77,.05);
+            margin-bottom: .65rem;
+        }
 
         .stButton>button {
-            border-radius: 10px;
-            border: 1px solid #4f74db;
-            background: linear-gradient(120deg, #3d67dd, #39b9ad);
-            color: #fff;
-            font-weight: 600;
+            border-radius: 10px !important;
+            border: 1px solid #cfd8eb;
         }
-        .stButton>button:hover { filter: brightness(1.05); }
 
         .stDataFrame, .stTabs [data-baseweb="tab-panel"] {
             border: 1px solid var(--line);
             border-radius: 12px;
-            background: var(--surface);
         }
 
         h1,h2,h3,h4,h5 { color: var(--text) !important; }
         p,label,.stCaption { color: var(--muted) !important; }
-        [data-testid="stSidebarNav"] { display:none; }
+        footer { visibility: hidden; }
         </style>
         """,
         unsafe_allow_html=True,
@@ -131,8 +97,8 @@ def page_hero(title: str, subtitle: str):
     st.markdown(
         f"""
         <div class='hero'>
-            <h3 style='margin:.1rem 0 .35rem 0; color:#ffffff'>{title}</h3>
-            <div style='color:#d7e2ff; font-size:.96rem'>{subtitle}</div>
+            <h3 style='margin:.1rem 0 .35rem 0; color:#1f2a44'>{title}</h3>
+            <div style='color:#55627d; font-size:.96rem'>{subtitle}</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -296,8 +262,8 @@ def dashboard_page(conn, building: str):
     st.markdown(
         """
         <div class='hero'>
-            <h2 style='margin:0 0 .35rem 0; color:#142647'>Attendance Ops Dashboard</h2>
-            <div style='color:#4f6488'>Interactive command center for activity trends, upcoming deadlines, and one-click actions.</div>
+            <h2 style='margin:0 0 .35rem 0; color:#1f2a44'>Attendance Ops Dashboard</h2>
+            <div style='color:#55627d'>Interactive command center for activity trends, upcoming deadlines, and one-click actions.</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -420,18 +386,18 @@ def dashboard_page(conn, building: str):
 
     with right:
         st.markdown("#### Quick actions")
-        st.markdown("<div class='dash-card'><b>Review roll-offs now</b><br><span style='color:#a8b8d8'>Jump to reports with roll-off preset.</span></div>", unsafe_allow_html=True)
+        st.markdown("<div class='dash-card'><b>Review roll-offs now</b><br><span style='color:#5f7395'>Jump to reports with roll-off preset.</span></div>", unsafe_allow_html=True)
         if st.button("Open roll-off exports", use_container_width=True, key="dash_export"):
             st.session_state["page"] = "Exports & Forecasts"
             st.session_state["export_type"] = "upcoming 2-month roll-offs"
             st.rerun()
 
-        st.markdown("<div class='dash-card'><b>Record attendance event</b><br><span style='color:#a8b8d8'>Launch ledger entry workflow.</span></div>", unsafe_allow_html=True)
+        st.markdown("<div class='dash-card'><b>Record attendance event</b><br><span style='color:#5f7395'>Launch ledger entry workflow.</span></div>", unsafe_allow_html=True)
         if st.button("Open points ledger", use_container_width=True, key="dash_ledger"):
             st.session_state["page"] = "Points Ledger"
             st.rerun()
 
-        st.markdown("<div class='dash-card'><b>Run maintenance jobs</b><br><span style='color:#a8b8d8'>Use dry-run and commit controls.</span></div>", unsafe_allow_html=True)
+        st.markdown("<div class='dash-card'><b>Run maintenance jobs</b><br><span style='color:#5f7395'>Use dry-run and commit controls.</span></div>", unsafe_allow_html=True)
         if st.button("Open system updates", use_container_width=True, key="dash_sys"):
             st.session_state["page"] = "System Updates"
             st.rerun()
@@ -655,7 +621,7 @@ def main():
         label_visibility="collapsed",
     )
     st.sidebar.markdown("### Building filter")
-    building = st.sidebar.selectbox("Building filter", ["All", *BUILDINGS], key="global_building", label_visibility="collapsed")
+    building = st.sidebar.selectbox("Building filter", ["All", *BUILDINGS], key="global_building")
 
     if page == "Dashboard":
         dashboard_page(conn, building)
