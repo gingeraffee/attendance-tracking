@@ -20,7 +20,7 @@ from atp_core import repo, services
 from atp_core.rules import REASON_OPTIONS
 
 
-BUILDINGS = ["Building A", "Building B", "Building C"]
+BUILDINGS = ["API Scottsboro", "API Memphis", "AAP"]
 
 
 def apply_theme():
