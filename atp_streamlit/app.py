@@ -76,6 +76,79 @@ def get_conn():
     ensure_schema(conn)
     return conn
 
+
+def _is_pg_conn(conn) -> bool:
+    return conn.__class__.__module__.startswith("psycopg2")
+
+
+def _fetchall_sql(conn, sql: str, params=()):
+    if _is_pg_conn(conn):
+        cur = conn.cursor()
+        cur.execute(sql.replace("?", "%s"), params)
+        rows = cur.fetchall()
+        cur.close()
+        return rows
+    return conn.execute(sql, params).fetchall()
+
+
+def _exec_sql(conn, sql: str, params=()):
+    if _is_pg_conn(conn):
+        cur = conn.cursor()
+        cur.execute(sql.replace("?", "%s"), params)
+        cur.close()
+        return
+    conn.execute(sql, params)
+
+
+
+def _fetchone_sql(conn, sql: str, params=()):
+    if _is_pg_conn(conn):
+        cur = conn.cursor()
+        cur.execute(sql.replace("?", "%s"), params)
+        row = cur.fetchone()
+        cur.close()
+        return row
+    return conn.execute(sql, params).fetchone()
+
+
+def _first_workday_of_month(d: date) -> date:
+    cur = d.replace(day=1)
+    while cur.weekday() >= 5:  # 5=Saturday, 6=Sunday
+        cur = cur.replace(day=cur.day + 1)
+    return cur
+
+
+def _ytd_rolloff_already_applied(conn, employee_id: int, roll_date: date, label: str) -> bool:
+    if _is_pg_conn(conn):
+        row = _fetchone_sql(
+            conn,
+            """
+            SELECT 1
+              FROM points_history
+             WHERE employee_id = %s
+               AND (point_date::date) = (%s::date)
+               AND reason = 'YTD Roll-Off'
+               AND note LIKE %s
+             LIMIT 1;
+            """,
+            (int(employee_id), roll_date.isoformat(), f"%{label}%"),
+        )
+    else:
+        row = _fetchone_sql(
+            conn,
+            """
+            SELECT 1
+              FROM points_history
+             WHERE employee_id = ?
+               AND date(point_date) = date(?)
+               AND reason = 'YTD Roll-Off'
+               AND note LIKE ?
+             LIMIT 1;
+            """,
+            (int(employee_id), roll_date.isoformat(), f"%{label}%"),
+        )
+    return bool(row)
+
 def load_employees():
     conn = get_conn()
     rows = repo.search_employees(conn, q="", limit=150)
@@ -323,7 +396,8 @@ if selected_emp_id:
 
             if save_clicked:
                 try:
-                    conn.execute(
+                    _exec_sql(
+                        conn,
                         """
                         UPDATE employees
                            SET last_point_date    = ?,
@@ -387,16 +461,19 @@ with st.sidebar.expander("Delete employee", expanded=False):
     if selected_emp_id:
         st.caption(f"Selected Employee #: {selected_emp_id}")
     st.warning("Deleting an employee also deletes all of their point history.")
-    with st.form("delete_employee_form"):
-        delete_emp_id = st.number_input(
-            "Employee # to delete",
-            min_value=1,
-            step=1,
-            format="%d",
-            value=int(selected_emp_id) if selected_emp_id else 1,
-        )
-        confirm_delete = st.checkbox("I understand this action cannot be undone.")
-        delete_emp_submit = st.form_submit_button("Delete Employee")
+    delete_emp_id = st.number_input(
+        "Employee # to delete",
+        min_value=1,
+        step=1,
+        format="%d",
+        value=int(selected_emp_id) if selected_emp_id else 1,
+        key="delete_employee_id",
+    )
+    confirm_delete = st.checkbox(
+        "I understand this action cannot be undone.",
+        key="confirm_delete_employee",
+    )
+    delete_emp_submit = st.button("Delete Employee", key="btn_delete_employee")
 
     if delete_emp_submit:
         if not confirm_delete:
@@ -743,42 +820,82 @@ with tab_reports:
     if st.button("Generate 30-Day Point History CSV", key="btn_30day"):
         cutoff = (today - timedelta(days=30)).isoformat()
 
-        rows = conn.execute(
-            """
-            WITH recent_emp AS (
-                SELECT DISTINCT employee_id
-                  FROM points_history
-                 WHERE date(point_date) >= date(?)
-            ),
-            ordered AS (
+        if _is_pg_conn(conn):
+            rows = _fetchall_sql(
+                conn,
+                """
+                WITH recent_emp AS (
+                    SELECT DISTINCT employee_id
+                      FROM points_history
+                     WHERE (point_date::date) >= (%s::date)
+                ),
+                ordered AS (
+                    SELECT
+                        p.id,
+                        p.employee_id,
+                        e.first_name,
+                        e.last_name,
+                        p.point_date,
+                        COALESCE(p.points, 0.0)   AS points,
+                        COALESCE(p.reason, '')    AS reason,
+                        COALESCE(p.note, '')      AS note,
+                        COALESCE(p.flag_code, '') AS flag_code,
+                        SUM(COALESCE(p.points, 0.0)) OVER (
+                            PARTITION BY p.employee_id
+                            ORDER BY (p.point_date::date), p.id
+                            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                        ) AS point_total
+                    FROM points_history p
+                    JOIN employees e ON e.employee_id = p.employee_id
+                    WHERE p.employee_id IN (SELECT employee_id FROM recent_emp)
+                )
                 SELECT
-                    p.id,
-                    p.employee_id,
-                    e.first_name,
-                    e.last_name,
-                    p.point_date,
-                    COALESCE(p.points, 0.0)   AS points,
-                    COALESCE(p.reason, '')    AS reason,
-                    COALESCE(p.note, '')      AS note,
-                    COALESCE(p.flag_code, '') AS flag_code,
-                    SUM(COALESCE(p.points, 0.0)) OVER (
-                        PARTITION BY p.employee_id
-                        ORDER BY date(p.point_date), p.id
-                        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-                    ) AS point_total
-                FROM points_history p
-                JOIN employees e ON e.employee_id = p.employee_id
-                WHERE p.employee_id IN (SELECT employee_id FROM recent_emp)
+                    employee_id, first_name, last_name,
+                    point_date, points, reason, note, point_total, flag_code
+                FROM ordered
+                WHERE (point_date::date) >= (%s::date)
+                ORDER BY (point_date::date) DESC, id DESC;
+                """,
+                (cutoff, cutoff),
             )
-            SELECT
-                employee_id, first_name, last_name,
-                point_date, points, reason, note, point_total, flag_code
-            FROM ordered
-            WHERE date(point_date) >= date(?)
-            ORDER BY date(point_date) DESC, id DESC;
-            """,
-            (cutoff, cutoff),
-        ).fetchall()
+        else:
+            rows = _fetchall_sql(
+                conn,
+                """
+                WITH recent_emp AS (
+                    SELECT DISTINCT employee_id
+                      FROM points_history
+                     WHERE date(point_date) >= date(?)
+                ),
+                ordered AS (
+                    SELECT
+                        p.id,
+                        p.employee_id,
+                        e.first_name,
+                        e.last_name,
+                        p.point_date,
+                        COALESCE(p.points, 0.0)   AS points,
+                        COALESCE(p.reason, '')    AS reason,
+                        COALESCE(p.note, '')      AS note,
+                        COALESCE(p.flag_code, '') AS flag_code,
+                        SUM(COALESCE(p.points, 0.0)) OVER (
+                            PARTITION BY p.employee_id
+                            ORDER BY date(p.point_date), p.id
+                            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                        ) AS point_total
+                    FROM points_history p
+                    JOIN employees e ON e.employee_id = p.employee_id
+                    WHERE p.employee_id IN (SELECT employee_id FROM recent_emp)
+                )
+                SELECT
+                    employee_id, first_name, last_name,
+                    point_date, points, reason, note, point_total, flag_code
+                FROM ordered
+                WHERE date(point_date) >= date(?)
+                ORDER BY date(point_date) DESC, id DESC;
+                """,
+                (cutoff, cutoff),
+            )
 
         df = pd.DataFrame([dict(r) for r in rows])
         if df.empty:
@@ -812,33 +929,51 @@ with tab_reports:
 
     with c1:
         st.markdown("#### Preview Roll Offs")
-        st.caption("Employees with a future roll-off date, sorted earliest first.")
+        st.caption("Shows missed/due and upcoming roll-off dates.")
 
-        rows_r = conn.execute(
-            """
-            SELECT employee_id, first_name, last_name, rolloff_date,
-                   COALESCE(point_total, 0.0) AS pt
-              FROM employees
-             WHERE rolloff_date IS NOT NULL
-               AND date(rolloff_date) >= date('now')
-               AND COALESCE(point_total, 0.0) > 0
-             ORDER BY date(rolloff_date) ASC, last_name, first_name;
-            """
-        ).fetchall()
+        # Intentionally no "future-only" date filter here:
+        # this report must include missed/due roll-offs as well as upcoming ones.
+        if _is_pg_conn(conn):
+            rows_r = _fetchall_sql(
+                conn,
+                """
+                SELECT employee_id, first_name, last_name, rolloff_date,
+                       COALESCE(point_total, 0.0) AS pt
+                  FROM employees
+                 WHERE rolloff_date IS NOT NULL
+                   AND COALESCE(point_total, 0.0) > 0
+                 ORDER BY (rolloff_date::date) ASC, last_name, first_name;
+                """,
+            )
+        else:
+            rows_r = _fetchall_sql(
+                conn,
+                """
+                SELECT employee_id, first_name, last_name, rolloff_date,
+                       COALESCE(point_total, 0.0) AS pt
+                  FROM employees
+                 WHERE rolloff_date IS NOT NULL
+                   AND COALESCE(point_total, 0.0) > 0
+                 ORDER BY date(rolloff_date) ASC, last_name, first_name;
+                """,
+            )
 
         df_r = pd.DataFrame([dict(r) for r in rows_r])
         if df_r.empty:
-            st.info("No upcoming roll-offs found.")
+            st.info("No missed/due or upcoming roll-offs found.")
         else:
-            df_r["rolloff_date"] = pd.to_datetime(
-                df_r["rolloff_date"], errors="coerce"
-            ).dt.strftime("%m/%d/%Y")
+            raw_dates = pd.to_datetime(df_r["rolloff_date"], errors="coerce")
+            df_r["rolloff_date"] = raw_dates.dt.strftime("%m/%d/%Y")
+            df_r["status"] = raw_dates.apply(
+                lambda d: "Missed / Due" if pd.notna(d) and d.date() <= today else "Upcoming"
+            )
 
             df_out_r = pd.DataFrame({
                 "Employee #": df_r["employee_id"].astype(str),
                 "First Name": df_r["first_name"],
                 "Last Name": df_r["last_name"],
                 "Roll-Off Date": df_r["rolloff_date"],
+                "Status": df_r["status"],
                 "Points": df_r["pt"].apply(lambda v: f"-{float(v):.1f}"),
                 "Reason": "2 Month Roll Off",
                 "Note": "",
@@ -857,30 +992,50 @@ with tab_reports:
         st.markdown("#### Preview Perfect Attendance")
         st.caption("Employees with an upcoming perfect attendance bonus date.")
 
-        rows_p = conn.execute(
-            """
-            SELECT employee_id, first_name, last_name,
-                   perfect_attendance AS pa_date,
-                   COALESCE(point_total, 0.0) AS pt
-              FROM employees
-             WHERE perfect_attendance IS NOT NULL
-               AND date(perfect_attendance) >= date('now')
-             ORDER BY date(perfect_attendance) ASC, last_name, first_name;
-            """
-        ).fetchall()
+        # Intentionally no "future-only" date filter here:
+        # this report must include missed/due perfect-attendance dates as well as upcoming ones.
+        if _is_pg_conn(conn):
+            rows_p = _fetchall_sql(
+                conn,
+                """
+                SELECT employee_id, first_name, last_name,
+                       perfect_attendance AS pa_date,
+                       COALESCE(point_total, 0.0) AS pt
+                  FROM employees
+                 WHERE perfect_attendance IS NOT NULL
+                 ORDER BY (perfect_attendance::date) ASC, last_name, first_name;
+                """,
+            )
+        else:
+            rows_p = _fetchall_sql(
+                conn,
+                """
+                SELECT employee_id, first_name, last_name,
+                       perfect_attendance AS pa_date,
+                       COALESCE(point_total, 0.0) AS pt
+                  FROM employees
+                 WHERE perfect_attendance IS NOT NULL
+                 ORDER BY date(perfect_attendance) ASC, last_name, first_name;
+                """,
+            )
 
         df_p = pd.DataFrame([dict(r) for r in rows_p])
         if df_p.empty:
-            st.info("No upcoming perfect attendance dates found.")
+            st.info("No missed/due or upcoming perfect attendance dates found.")
         else:
             df_p = df_p.copy()
-            df_p["pa_date"] = pd.to_datetime(df_p["pa_date"], errors="coerce")
+            raw_pa = pd.to_datetime(df_p["pa_date"], errors="coerce")
+            df_p["pa_date"] = raw_pa
+            df_p["status"] = raw_pa.apply(
+                lambda d: "Missed / Due" if pd.notna(d) and d.date() <= today else "Upcoming"
+            )
 
             df_out_p = pd.DataFrame({
                 "Employee #": df_p["employee_id"].astype("string"),
                 "First Name": df_p["first_name"],
                 "Last Name": df_p["last_name"],
                 "Perfect Attendance Date": df_p["pa_date"].dt.strftime("%m/%d/%Y"),
+                "Status": df_p["status"],
                 "Point": "",
                 "Reason": "$75 Perfect Attendance Bonus",
                 "Note": "",
@@ -895,6 +1050,49 @@ with tab_reports:
                 "text/csv", key="dl_preview_pa",
             )
 
+    st.markdown("#### Preview YTD Roll Offs")
+    st.caption("Shows missed/due and upcoming YTD roll-off opportunities by monthly cycle.")
+
+    month_offsets = [-2, -1, 0, 1]
+    ytd_preview_rows = []
+
+    for offset in month_offsets:
+        y = today.year + ((today.month - 1 + offset) // 12)
+        m = ((today.month - 1 + offset) % 12) + 1
+        cycle_month = date(y, m, 1)
+        cycle_run_date = _first_workday_of_month(cycle_month)
+
+        cycle_items = services.preview_ytd_rolloffs(conn, run_date=cycle_run_date)
+        for employee_id, net_points, roll_date, label in cycle_items:
+            already = _ytd_rolloff_already_applied(conn, int(employee_id), roll_date, label)
+            status = "Applied" if already else ("Missed / Due" if cycle_run_date <= today else "Upcoming")
+            ytd_preview_rows.append(
+                {
+                    "Employee #": str(employee_id),
+                    "Cycle Month": cycle_month.strftime("%b %Y"),
+                    "Run Date": cycle_run_date.strftime("%m/%d/%Y"),
+                    "Roll-Off Date": roll_date.strftime("%m/%d/%Y"),
+                    "Status": status,
+                    "Points": f"-{float(net_points):.1f}",
+                    "Reason": "YTD Roll-Off",
+                    "Note": f"YTD roll-off for {label}",
+                    "Flag Code": "AUTO",
+                }
+            )
+
+    if not ytd_preview_rows:
+        st.info("No missed/due or upcoming YTD roll-offs found for recent cycles.")
+    else:
+        df_ytd_preview = pd.DataFrame(ytd_preview_rows)
+        st.dataframe(df_ytd_preview, use_container_width=True, hide_index=True)
+        st.download_button(
+            "Download CSV",
+            df_ytd_preview.to_csv(index=False).encode("utf-8"),
+            "preview_ytd_rolloffs_all_statuses.csv",
+            "text/csv",
+            key="dl_preview_ytd_all_statuses",
+        )
+
     st.divider()
 
     # ============================================================
@@ -902,6 +1100,15 @@ with tab_reports:
     # ============================================================
     st.markdown("### Actions (Modifies Database)")
     st.caption("These buttons write changes to the database and generate a CSV of what changed.")
+
+    monthly_run_default = _first_workday_of_month(today)
+    monthly_run_date = st.date_input(
+        "Monthly update run date (first work day)",
+        value=monthly_run_default,
+        format="MM/DD/YYYY",
+        key="monthly_run_date",
+        help="Use the first work day of the month (Mon-Fri).",
+    )
 
     # ---- Perform 2 Month Roll Off ----
     st.markdown("#### Perform 2 Month Roll Off")
@@ -917,7 +1124,7 @@ with tab_reports:
     )
 
     if st.button("Perform 2 Month Roll Off (Commit)", key="btn_commit_rolloff") and confirm_roll:
-        applied = services.apply_2mo_rolloffs(conn, run_date=today, dry_run=False)
+        applied = services.apply_2mo_rolloffs(conn, run_date=monthly_run_date, dry_run=False)
 
         if not applied:
             st.info("No roll-offs were applied (nothing due today or earlier, or point totals already at 0).")
@@ -927,7 +1134,7 @@ with tab_reports:
                     "Employee #": str(r["employee_id"]),
                     "First Name": r["first_name"],
                     "Last Name": r["last_name"],
-                    "Roll-Off Date": today.strftime("%Y-%m-%d"),
+                    "Roll-Off Date": monthly_run_date.strftime("%Y-%m-%d"),
                     "Points Removed": r["points_removed"],
                     "New Total": r["new_total"],
                     "Reason": "2 Month Roll Off",
@@ -946,6 +1153,84 @@ with tab_reports:
 
     st.divider()
 
+    # ---- Annual (YTD) Roll Off ----
+    st.markdown("#### Annual Roll Off (YTD)")
+    st.caption(
+        "Shows employees with net-positive points in last year's same month window "
+        "that are due for YTD roll-off now (including missed/due if not yet applied)."
+    )
+
+    ytd_items = services.preview_ytd_rolloffs(conn, run_date=monthly_run_date)
+    if not ytd_items:
+        st.info("No annual (YTD) roll-offs are due.")
+    else:
+        ytd_rows = []
+        emp_cache: dict[int, dict] = {}
+        for employee_id, net_points, roll_date, label in ytd_items:
+            emp_id = int(employee_id)
+            if _ytd_rolloff_already_applied(conn, emp_id, roll_date, label):
+                continue
+            if emp_id not in emp_cache:
+                emp_row = repo.get_employee(conn, emp_id)
+                emp_cache[emp_id] = dict(emp_row) if emp_row else {}
+            emp = emp_cache[emp_id]
+            ytd_rows.append(
+                {
+                    "Employee #": str(employee_id),
+                    "First Name": emp.get("first_name", ""),
+                    "Last Name": emp.get("last_name", ""),
+                    "Roll-Off Date": roll_date.strftime("%m/%d/%Y"),
+                    "Points": f"-{float(net_points):.1f}",
+                    "Reason": "YTD Roll-Off",
+                    "Note": f"YTD roll-off for {label}",
+                    "Flag Code": "AUTO",
+                }
+            )
+        if not ytd_rows:
+            st.info("No annual (YTD) roll-offs are currently due (already applied items excluded).")
+        else:
+            df_ytd = pd.DataFrame(ytd_rows)
+            st.dataframe(df_ytd, use_container_width=True, hide_index=True)
+            st.download_button(
+                "Download CSV",
+                df_ytd.to_csv(index=False).encode("utf-8"),
+                "preview_ytd_rolloffs.csv",
+                "text/csv",
+                key="dl_preview_ytd_rolloffs",
+            )
+
+    confirm_ytd = st.checkbox(
+        "I understand this will write annual (YTD) roll-off entries to the database.",
+        key="confirm_ytd_rolloff",
+    )
+    if st.button("Perform Annual Roll Off (Commit)", key="btn_commit_ytd_rolloff") and confirm_ytd:
+        applied_ytd = services.apply_ytd_rolloffs(conn, run_date=monthly_run_date, dry_run=False)
+        if not applied_ytd:
+            st.info("No annual (YTD) roll-offs were applied.")
+        else:
+            df_applied_ytd = pd.DataFrame(
+                [
+                    {
+                        "Employee #": str(employee_id),
+                        "Points Removed": f"-{float(net_points):.1f}",
+                        "Roll-Off Date": roll_date.strftime("%m/%d/%Y"),
+                        "Label": label,
+                    }
+                    for employee_id, net_points, roll_date, label in applied_ytd
+                ]
+            )
+            st.success(f"Applied annual (YTD) roll-offs for {len(df_applied_ytd)} employee(s).")
+            st.dataframe(df_applied_ytd, use_container_width=True, hide_index=True)
+            st.download_button(
+                "Download CSV",
+                df_applied_ytd.to_csv(index=False).encode("utf-8"),
+                "apply_ytd_rolloffs.csv",
+                "text/csv",
+                key="dl_apply_ytd_rolloffs",
+            )
+
+    st.divider()
+
     # ---- Perfect Attendance Status ----
     st.markdown("#### Perfect Attendance Status")
     st.caption(
@@ -954,17 +1239,32 @@ with tab_reports:
         "perfect attendance bonus is due on or before today."
     )
 
-    due_pa = conn.execute(
-        """
-        SELECT employee_id, first_name, last_name,
-               perfect_attendance AS pa_date,
-               COALESCE(point_total, 0.0) AS pt
-          FROM employees
-         WHERE perfect_attendance IS NOT NULL
-           AND date(perfect_attendance) <= date('now')
-         ORDER BY date(perfect_attendance) ASC, last_name, first_name;
-        """
-    ).fetchall()
+    if _is_pg_conn(conn):
+        due_pa = _fetchall_sql(
+            conn,
+            """
+            SELECT employee_id, first_name, last_name,
+                   perfect_attendance AS pa_date,
+                   COALESCE(point_total, 0.0) AS pt
+              FROM employees
+             WHERE perfect_attendance IS NOT NULL
+               AND (perfect_attendance::date) <= CURRENT_DATE
+             ORDER BY (perfect_attendance::date) ASC, last_name, first_name;
+            """,
+        )
+    else:
+        due_pa = _fetchall_sql(
+            conn,
+            """
+            SELECT employee_id, first_name, last_name,
+                   perfect_attendance AS pa_date,
+                   COALESCE(point_total, 0.0) AS pt
+              FROM employees
+             WHERE perfect_attendance IS NOT NULL
+               AND date(perfect_attendance) <= date('now')
+             ORDER BY date(perfect_attendance) ASC, last_name, first_name;
+            """,
+        )
 
     if not due_pa:
         st.info("No perfect attendance bonuses are due as of today.")
@@ -990,7 +1290,7 @@ with tab_reports:
         )
 
         if st.button("Advance Due Perfect Attendance Dates", key="btn_adv_pa_due"):
-            advanced = services.advance_due_perfect_attendance_dates(conn, run_date=today, dry_run=False)
+            advanced = services.advance_due_perfect_attendance_dates(conn, run_date=monthly_run_date, dry_run=False)
             if not advanced:
                 st.info("No perfect attendance dates were advanced.")
             else:
@@ -1061,15 +1361,28 @@ with tab_reports:
             emp = dict(emp_row) if emp_row else None
 
             if emp:
-                history_rows = conn.execute(
-                    """
-                    SELECT point_date, points, reason, note, flag_code
-                      FROM points_history
-                     WHERE employee_id = ?
-                     ORDER BY date(point_date), id;
-                    """,
-                    (report_emp_id,),
-                ).fetchall()
+                if _is_pg_conn(conn):
+                    history_rows = _fetchall_sql(
+                        conn,
+                        """
+                        SELECT point_date, points, reason, note, flag_code
+                          FROM points_history
+                         WHERE employee_id = %s
+                         ORDER BY (point_date::date), id;
+                        """,
+                        (report_emp_id,),
+                    )
+                else:
+                    history_rows = _fetchall_sql(
+                        conn,
+                        """
+                        SELECT point_date, points, reason, note, flag_code
+                          FROM points_history
+                         WHERE employee_id = ?
+                         ORDER BY date(point_date), id;
+                        """,
+                        (report_emp_id,),
+                    )
                 history_list = [dict(r) for r in history_rows]
 
                 pdf_bytes = build_point_history_pdf(emp, history_list)
