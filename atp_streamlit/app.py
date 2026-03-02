@@ -5,6 +5,7 @@ from datetime import date, datetime
 import sys
 from pathlib import Path
 import io
+import os
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import inch
@@ -228,9 +229,36 @@ footer { visibility: hidden; }
     unsafe_allow_html=True,
 )
 
-# --- Connection ---------------------------------------------------------------
-conn = get_conn()
+def _probe_fs():
+    p = os.getenv("ATP_DB_PATH", "")
+    db = Path(p) if p else None
+    st.sidebar.subheader("DB Probe")
+    st.sidebar.write("ATP_DB_PATH:", p)
+    st.sidebar.write("CWD:", os.getcwd())
+    st.sidebar.write("/var exists:", Path("/var").exists())
+    st.sidebar.write("/var/data exists:", Path("/var/data").exists())
+    st.sidebar.write("/var/data is_dir:", Path("/var/data").is_dir())
+    st.sidebar.write("/var/data writable:", os.access("/var/data", os.W_OK) if Path("/var/data").exists() else False)
 
+    try:
+        st.sidebar.write("/var/data listing:", [x.name for x in Path("/var/data").glob("*")][:50])
+    except Exception as e:
+        st.sidebar.write("/var/data listing error:", repr(e))
+
+    if db is not None:
+        st.sidebar.write("Resolved DB parent:", str(db.parent))
+        st.sidebar.write("DB parent exists:", db.parent.exists())
+        st.sidebar.write("DB parent writable:", os.access(str(db.parent), os.W_OK) if db.parent.exists() else False)
+
+_probe_fs()
+
+# --- Connection ---------------------------------------------------------------
+try:
+    conn = get_conn()
+except Exception as e:
+    st.error("Database connection failed.")
+    st.exception(e)
+    st.stop()
 # --- Header -------------------------------------------------------------------
 st.title("Points Database")
 st.caption("Internal HR Tool • Attendance Tracking")
