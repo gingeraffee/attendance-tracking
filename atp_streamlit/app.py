@@ -20,6 +20,7 @@ st.set_page_config(
 # ---- Path setup (MUST come before importing atp_core) -------------------------
 APP_DIR = Path(__file__).resolve().parent          # .../attendance-tracking/atp_streamlit
 REPO_ROOT = APP_DIR.parent                         # .../attendance-tracking
+ROOT = REPO_ROOT
 
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
