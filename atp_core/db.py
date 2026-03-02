@@ -3,28 +3,21 @@ import sqlite3
 from pathlib import Path
 from contextlib import contextmanager
 
-def _get_database_url() -> str:
-    # Streamlit secrets appear as env vars too
+def _database_url() -> str:
     return (os.getenv("DATABASE_URL") or "").strip()
 
 def _sqlite_path() -> str:
-    # Local fallback only
     repo_root = Path(__file__).resolve().parents[1]
     return str(repo_root / "employeeroster.db")
 
 def connect():
-    """
-    Returns a DB connection.
-    - If DATABASE_URL is set => Postgres (persistent).
-    - Else => SQLite (local dev fallback).
-    """
-    db_url = _get_database_url()
-    if db_url:
+    url = _database_url()
+    if url:
         import psycopg2
-        conn = psycopg2.connect(db_url)
-        return conn
+        from psycopg2.extras import RealDictCursor
+        return psycopg2.connect(url, cursor_factory=RealDictCursor)
 
-    # SQLite fallback
+    # Local fallback only
     path = Path(_sqlite_path())
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path), detect_types=sqlite3.PARSE_DECLTYPES, check_same_thread=False)
