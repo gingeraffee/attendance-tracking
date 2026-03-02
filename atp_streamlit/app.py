@@ -28,43 +28,43 @@ def apply_theme():
         """
         <style>
         :root {
-            --bg:           #0f2044;
-            --bg2:          #172a55;
-            --bg3:          #1e3465;
-            --text:         #e2e8f4;
-            --muted:        #7a8ba8;
-            --line:         rgba(255,255,255,0.07);
+            --bg:           #f0f4fa;
+            --bg2:          #ffffff;
+            --bg3:          #e8edf6;
+            --text:         #1a2744;
+            --muted:        #5c6f8c;
+            --line:         rgba(0,0,0,0.07);
             --primary:      #4f8ef7;
-            --primary-soft: rgba(79,142,247,0.14);
-            --cyan:         #00d4ff;
-            --green:        #00c896;
-            --amber:        #ffb020;
-            --red:          #ff5b6b;
-            --card-bg:      rgba(255,255,255,0.034);
-            --card-border:  rgba(255,255,255,0.08);
-            --shadow:       0 4px 28px rgba(0,0,0,0.45);
+            --primary-soft: rgba(79,142,247,0.10);
+            --cyan:         #00b8e6;
+            --green:        #00a87a;
+            --amber:        #e6960a;
+            --red:          #e0394a;
+            --card-bg:      #ffffff;
+            --card-border:  rgba(0,0,0,0.07);
+            --shadow:       0 2px 14px rgba(0,0,0,0.07);
         }
 
-        /* ── Base ── */
+        /* ── Base (main content area) ── */
         .stApp {
-            background:
-                radial-gradient(ellipse at 18% 0%,   rgba(79,142,247,.10)  0%, transparent 55%),
-                radial-gradient(ellipse at 82% 100%,  rgba(0,212,255,.07)   0%, transparent 55%),
-                linear-gradient(180deg, #0f2044 0%, #112248 100%);
+            background: #f0f4fa;
             color: var(--text);
         }
 
         .block-container { padding-top: 2.8rem; padding-bottom: 2.5rem; max-width: 1460px; }
 
-        /* ── Sidebar ── */
+        /* ── Sidebar — stays dark ── */
         section[data-testid="stSidebar"] {
             width: 300px !important;
             background: linear-gradient(180deg, #0d1c3d 0%, #0f2044 100%) !important;
-            border-right: 1px solid var(--line);
+            border-right: 1px solid rgba(255,255,255,0.07);
+        }
+
+        section[data-testid="stSidebar"] * {
+            color: #c8d3e8 !important;
         }
 
         section[data-testid="stSidebar"] h3 {
-            color: var(--muted) !important;
             font-size: .72rem !important;
             font-weight: 700 !important;
             letter-spacing: .1em !important;
@@ -73,11 +73,11 @@ def apply_theme():
 
         /* ── Metric cards ── */
         div[data-testid="stMetric"] {
-            background: linear-gradient(135deg, var(--bg3) 0%, var(--bg2) 100%);
+            background: #ffffff;
             padding: 16px 18px 12px 18px;
             border-radius: 14px;
             border: 1px solid var(--card-border);
-            box-shadow: var(--shadow), inset 0 1px 0 rgba(255,255,255,0.05);
+            box-shadow: var(--shadow);
         }
 
         div[data-testid="stMetric"] label {
@@ -98,9 +98,9 @@ def apply_theme():
         /* ── Hero banner ── */
         .hero {
             background: linear-gradient(135deg,
-                rgba(79,142,247,.10) 0%,
-                rgba(0,212,255,.05) 100%);
-            border: 1px solid rgba(79,142,247,.22);
+                rgba(79,142,247,.07) 0%,
+                rgba(0,184,230,.04) 100%);
+            border: 1px solid rgba(79,142,247,.18);
             border-left: 3px solid var(--primary);
             border-radius: 14px;
             padding: 1.2rem 1.5rem;
@@ -113,14 +113,14 @@ def apply_theme():
             position: absolute;
             top: -40px; right: -40px;
             width: 140px; height: 140px;
-            background: radial-gradient(circle, rgba(79,142,247,.18) 0%, transparent 70%);
+            background: radial-gradient(circle, rgba(79,142,247,.10) 0%, transparent 70%);
             border-radius: 50%;
             pointer-events: none;
         }
 
-        /* ── Glass cards ── */
+        /* ── Cards ── */
         .cool-card, .dash-card {
-            background: var(--card-bg);
+            background: #ffffff;
             border: 1px solid var(--card-border);
             border-radius: 12px;
             padding: 1rem 1.15rem;
@@ -129,17 +129,17 @@ def apply_theme():
             transition: border-color .2s, box-shadow .2s;
         }
         .cool-card:hover, .dash-card:hover {
-            border-color: rgba(79,142,247,.28);
-            box-shadow: var(--shadow), 0 0 0 1px rgba(79,142,247,.10);
+            border-color: rgba(79,142,247,.3);
+            box-shadow: 0 4px 20px rgba(79,142,247,.10);
         }
 
         /* ── Buttons ── */
         .stButton > button {
             border-radius: 8px !important;
-            border: 1px solid rgba(79,142,247,.35) !important;
+            border: 1px solid rgba(79,142,247,.4) !important;
             background: linear-gradient(135deg,
-                rgba(79,142,247,.12) 0%,
-                rgba(79,142,247,.06) 100%) !important;
+                rgba(79,142,247,.09) 0%,
+                rgba(79,142,247,.04) 100%) !important;
             color: var(--primary) !important;
             font-weight: 600 !important;
             letter-spacing: .01em !important;
@@ -147,8 +147,8 @@ def apply_theme():
         }
         .stButton > button:hover {
             border-color: var(--primary) !important;
-            background: rgba(79,142,247,.18) !important;
-            box-shadow: 0 0 18px rgba(79,142,247,.22) !important;
+            background: rgba(79,142,247,.14) !important;
+            box-shadow: 0 0 16px rgba(79,142,247,.18) !important;
         }
 
         /* ── DataFrames & Tabs ── */
@@ -169,16 +169,16 @@ def apply_theme():
         .stTextInput > div > div > input,
         .stNumberInput > div > div > input,
         .stDateInput > div > div > input {
-            background: var(--bg2) !important;
-            border-color: var(--card-border) !important;
+            background: #f5f7fc !important;
+            border-color: rgba(0,0,0,0.10) !important;
             border-radius: 8px !important;
             color: var(--text) !important;
         }
 
         /* ── Sidebar logo wrap ── */
         .sidebar-logo-wrap {
-            background: var(--card-bg);
-            border: 1px solid var(--card-border);
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.10);
             border-radius: 12px;
             padding: .5rem;
             margin-bottom: 1rem;
@@ -191,7 +191,7 @@ def apply_theme():
             border-radius: 999px;
             background: linear-gradient(90deg, var(--primary), var(--cyan));
             margin: .25rem 0 .6rem 0;
-            box-shadow: 0 0 12px rgba(79,142,247,.5);
+            box-shadow: 0 0 10px rgba(79,142,247,.35);
         }
 
         /* ── Typography ── */
@@ -208,8 +208,8 @@ def page_hero(title: str, subtitle: str):
     st.markdown(
         f"""
         <div class='hero'>
-            <h3 style='margin:.1rem 0 .3rem 0; color:#e2e8f4; font-weight:700; letter-spacing:-.01em'>{title}</h3>
-            <div style='color:#7a8ba8; font-size:.9rem'>{subtitle}</div>
+            <h3 style='margin:.1rem 0 .3rem 0; color:#1a2744; font-weight:700; letter-spacing:-.01em'>{title}</h3>
+            <div style='color:#5c6f8c; font-size:.9rem'>{subtitle}</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -373,10 +373,10 @@ def dashboard_page(conn, building: str):
     st.markdown(
         """
         <div class='hero'>
-            <h2 style='margin:0 0 .3rem 0; color:#e2e8f4; font-weight:700; letter-spacing:-.02em'>
+            <h2 style='margin:0 0 .3rem 0; color:#1a2744; font-weight:700; letter-spacing:-.02em'>
                 Attendance Ops Dashboard
             </h2>
-            <div style='color:#7a8ba8; font-size:.9rem'>Real-time command center for activity trends, upcoming deadlines, and one-click actions.</div>
+            <div style='color:#5c6f8c; font-size:.9rem'>Real-time command center for activity trends, upcoming deadlines, and one-click actions.</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -502,8 +502,8 @@ def dashboard_page(conn, building: str):
         st.markdown("#### Quick actions")
         st.markdown(
             "<div class='dash-card'>"
-            "<b style='color:#e2e8f4'>Review roll-offs</b>"
-            "<br><span style='color:#7a8ba8;font-size:.85rem'>Jump to reports with roll-off preset.</span>"
+            "<b style='color:#1a2744'>Review roll-offs</b>"
+            "<br><span style='color:#5c6f8c;font-size:.85rem'>Jump to reports with roll-off preset.</span>"
             "</div>",
             unsafe_allow_html=True,
         )
@@ -514,8 +514,8 @@ def dashboard_page(conn, building: str):
 
         st.markdown(
             "<div class='dash-card'>"
-            "<b style='color:#e2e8f4'>Record attendance event</b>"
-            "<br><span style='color:#7a8ba8;font-size:.85rem'>Launch ledger entry workflow.</span>"
+            "<b style='color:#1a2744'>Record attendance event</b>"
+            "<br><span style='color:#5c6f8c;font-size:.85rem'>Launch ledger entry workflow.</span>"
             "</div>",
             unsafe_allow_html=True,
         )
@@ -525,8 +525,8 @@ def dashboard_page(conn, building: str):
 
         st.markdown(
             "<div class='dash-card'>"
-            "<b style='color:#e2e8f4'>Run maintenance jobs</b>"
-            "<br><span style='color:#7a8ba8;font-size:.85rem'>Use dry-run and commit controls.</span>"
+            "<b style='color:#1a2744'>Run maintenance jobs</b>"
+            "<br><span style='color:#5c6f8c;font-size:.85rem'>Use dry-run and commit controls.</span>"
             "</div>",
             unsafe_allow_html=True,
         )
@@ -655,7 +655,7 @@ def manage_employees_page(conn):
                 st.error(str(e))
 
         st.markdown(
-            "<div style='border-top:1px solid rgba(255,255,255,0.07);margin:1rem 0'></div>",
+            "<div style='border-top:1px solid rgba(0,0,0,0.07);margin:1rem 0'></div>",
             unsafe_allow_html=True,
         )
         delete_confirm = st.checkbox("I understand delete permanently removes employee and history.")
@@ -746,11 +746,11 @@ def main():
     st.markdown(
         """
         <div style='margin-bottom:.4rem'>
-            <h1 style='color:#e2e8f4; font-weight:800; font-size:2rem; letter-spacing:-.025em; margin:0; padding:0'>
+            <h1 style='color:#1a2744; font-weight:800; font-size:2rem; letter-spacing:-.025em; margin:0; padding:0'>
                 Attendance Point Tracker
             </h1>
             <div class='title-accent'></div>
-            <p style='color:#7a8ba8; font-size:.88rem; margin:0'>Professional attendance operations workspace</p>
+            <p style='color:#5c6f8c; font-size:.88rem; margin:0'>Professional attendance operations workspace</p>
         </div>
         """,
         unsafe_allow_html=True,
