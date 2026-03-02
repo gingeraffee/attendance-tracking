@@ -7,6 +7,14 @@ from .db import tx
 from . import repo
 from .rules import calc_rolloff_and_perfect, step_next_perfect_attendance, step_next_rolloff
 
+
+def _coerce_iso_date(value):
+    if value is None:
+        return None
+    if hasattr(value, "year") and hasattr(value, "month") and hasattr(value, "day"):
+        return value
+    return datetime.strptime(str(value), "%Y-%m-%d").date()
+
 # ---------------------------------------------------------------------------
 # Core recalculation — the single function called after EVERY history change
 # ---------------------------------------------------------------------------
@@ -328,7 +336,7 @@ def apply_2mo_rolloffs(
     for rec in expired:
         emp_id = int(rec["employee_id"])
         current_total = float(rec["pt"] or 0.0)
-        next_roll = datetime.strptime(rec["rolloff_date"], "%Y-%m-%d").date()
+        next_roll = _coerce_iso_date(rec["rolloff_date"])
         last_point_iso = rec["last_point_iso"]
 
         # perfect_date anchor: still based on last POSITIVE point entry
@@ -344,7 +352,7 @@ def apply_2mo_rolloffs(
         perfect_iso = perfect_anchor_row["last_date"] if perfect_anchor_row else None
 
         if perfect_iso:
-            perfect_date = datetime.strptime(perfect_iso, "%Y-%m-%d").date()
+            perfect_date = _coerce_iso_date(perfect_iso)
             from .rules import three_months_then_first
             perfect_milestone = three_months_then_first(perfect_date)
         else:
@@ -423,7 +431,7 @@ def advance_due_perfect_attendance_dates(
     advanced = []
 
     for rec in due_rows:
-        old_due = datetime.strptime(rec["perfect_attendance"], "%Y-%m-%d").date()
+        old_due = _coerce_iso_date(rec["perfect_attendance"])
         new_due = old_due
         steps = 0
 

@@ -17,7 +17,7 @@ def get_db_path() -> str:
     If using SQLite, return the file path.
     """
     if _database_url():
-        return "postgresql://<DATABASE_URL set in Streamlit secrets>"
+        return "postgresql://<DATABASE_URL set>"
     return _sqlite_path()
 
 def connect():
