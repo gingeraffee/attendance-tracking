@@ -12,7 +12,7 @@ from reportlab.lib.units import inch
 
 # MUST be the first Streamlit command
 st.set_page_config(
-    page_title="Point System",
+    page_title="Point System 2026",
     page_icon="📅",
     layout="wide",
 )
