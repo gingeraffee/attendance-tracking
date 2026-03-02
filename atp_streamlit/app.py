@@ -1142,10 +1142,18 @@ with tab_reports:
         st.info("No annual (YTD) roll-offs are due.")
     else:
         ytd_rows = []
+        emp_cache: dict[int, dict] = {}
         for employee_id, net_points, roll_date, label in ytd_items:
+            emp_id = int(employee_id)
+            if emp_id not in emp_cache:
+                emp_row = repo.get_employee(conn, emp_id)
+                emp_cache[emp_id] = dict(emp_row) if emp_row else {}
+            emp = emp_cache[emp_id]
             ytd_rows.append(
                 {
                     "Employee #": str(employee_id),
+                    "First Name": emp.get("first_name", ""),
+                    "Last Name": emp.get("last_name", ""),
                     "Roll-Off Date": roll_date.strftime("%m/%d/%Y"),
                     "Points": f"-{float(net_points):.1f}",
                     "Reason": "YTD Roll-Off",
