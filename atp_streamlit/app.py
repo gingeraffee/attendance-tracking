@@ -99,6 +99,24 @@ def _exec_sql(conn, sql: str, params=()):
         return
     conn.execute(sql, params)
 
+
+
+def _fetchone_sql(conn, sql: str, params=()):
+    if _is_pg_conn(conn):
+        cur = conn.cursor()
+        cur.execute(sql.replace("?", "%s"), params)
+        row = cur.fetchone()
+        cur.close()
+        return row
+    return conn.execute(sql, params).fetchone()
+
+
+def _first_workday_of_month(d: date) -> date:
+    cur = d.replace(day=1)
+    while cur.weekday() >= 5:  # 5=Saturday, 6=Sunday
+        cur = cur.replace(day=cur.day + 1)
+    return cur
+
 def load_employees():
     conn = get_conn()
     rows = repo.search_employees(conn, q="", limit=150)
@@ -878,6 +896,8 @@ with tab_reports:
         st.markdown("#### Preview Roll Offs")
         st.caption("Shows missed/due and upcoming roll-off dates.")
 
+        # Intentionally no "future-only" date filter here:
+        # this report must include missed/due roll-offs as well as upcoming ones.
         if _is_pg_conn(conn):
             rows_r = _fetchall_sql(
                 conn,
@@ -937,6 +957,8 @@ with tab_reports:
         st.markdown("#### Preview Perfect Attendance")
         st.caption("Employees with an upcoming perfect attendance bonus date.")
 
+        # Intentionally no "future-only" date filter here:
+        # this report must include missed/due perfect-attendance dates as well as upcoming ones.
         if _is_pg_conn(conn):
             rows_p = _fetchall_sql(
                 conn,
@@ -946,7 +968,6 @@ with tab_reports:
                        COALESCE(point_total, 0.0) AS pt
                   FROM employees
                  WHERE perfect_attendance IS NOT NULL
-                   AND (perfect_attendance::date) >= CURRENT_DATE
                  ORDER BY (perfect_attendance::date) ASC, last_name, first_name;
                 """,
             )
@@ -959,23 +980,27 @@ with tab_reports:
                        COALESCE(point_total, 0.0) AS pt
                   FROM employees
                  WHERE perfect_attendance IS NOT NULL
-                   AND date(perfect_attendance) >= date('now')
                  ORDER BY date(perfect_attendance) ASC, last_name, first_name;
                 """,
             )
 
         df_p = pd.DataFrame([dict(r) for r in rows_p])
         if df_p.empty:
-            st.info("No upcoming perfect attendance dates found.")
+            st.info("No missed/due or upcoming perfect attendance dates found.")
         else:
             df_p = df_p.copy()
-            df_p["pa_date"] = pd.to_datetime(df_p["pa_date"], errors="coerce")
+            raw_pa = pd.to_datetime(df_p["pa_date"], errors="coerce")
+            df_p["pa_date"] = raw_pa
+            df_p["status"] = raw_pa.apply(
+                lambda d: "Missed / Due" if pd.notna(d) and d.date() <= today else "Upcoming"
+            )
 
             df_out_p = pd.DataFrame({
                 "Employee #": df_p["employee_id"].astype("string"),
                 "First Name": df_p["first_name"],
                 "Last Name": df_p["last_name"],
                 "Perfect Attendance Date": df_p["pa_date"].dt.strftime("%m/%d/%Y"),
+                "Status": df_p["status"],
                 "Point": "",
                 "Reason": "$75 Perfect Attendance Bonus",
                 "Note": "",
@@ -990,6 +1015,61 @@ with tab_reports:
                 "text/csv", key="dl_preview_pa",
             )
 
+    st.markdown("#### Preview YTD Roll Offs")
+    st.caption("Shows missed/due and upcoming YTD roll-off opportunities by monthly cycle.")
+
+    month_offsets = [-2, -1, 0, 1]
+    ytd_preview_rows = []
+
+    for offset in month_offsets:
+        y = today.year + ((today.month - 1 + offset) // 12)
+        m = ((today.month - 1 + offset) % 12) + 1
+        cycle_month = date(y, m, 1)
+        cycle_run_date = _first_workday_of_month(cycle_month)
+
+        cycle_items = services.preview_ytd_rolloffs(conn, run_date=cycle_run_date)
+        for employee_id, net_points, roll_date, label in cycle_items:
+            already = _fetchone_sql(
+                conn,
+                """
+                SELECT 1
+                  FROM points_history
+                 WHERE employee_id = ?
+                   AND point_date = ?
+                   AND reason = 'YTD Roll-Off'
+                   AND note LIKE ?
+                 LIMIT 1;
+                """,
+                (int(employee_id), roll_date.isoformat(), f"%{label}%"),
+            )
+            status = "Applied" if already else ("Missed / Due" if cycle_run_date <= today else "Upcoming")
+            ytd_preview_rows.append(
+                {
+                    "Employee #": str(employee_id),
+                    "Cycle Month": cycle_month.strftime("%b %Y"),
+                    "Run Date": cycle_run_date.strftime("%m/%d/%Y"),
+                    "Roll-Off Date": roll_date.strftime("%m/%d/%Y"),
+                    "Status": status,
+                    "Points": f"-{float(net_points):.1f}",
+                    "Reason": "YTD Roll-Off",
+                    "Note": f"YTD roll-off for {label}",
+                    "Flag Code": "AUTO",
+                }
+            )
+
+    if not ytd_preview_rows:
+        st.info("No missed/due or upcoming YTD roll-offs found for recent cycles.")
+    else:
+        df_ytd_preview = pd.DataFrame(ytd_preview_rows)
+        st.dataframe(df_ytd_preview, use_container_width=True, hide_index=True)
+        st.download_button(
+            "Download CSV",
+            df_ytd_preview.to_csv(index=False).encode("utf-8"),
+            "preview_ytd_rolloffs_all_statuses.csv",
+            "text/csv",
+            key="dl_preview_ytd_all_statuses",
+        )
+
     st.divider()
 
     # ============================================================
@@ -997,6 +1077,15 @@ with tab_reports:
     # ============================================================
     st.markdown("### Actions (Modifies Database)")
     st.caption("These buttons write changes to the database and generate a CSV of what changed.")
+
+    monthly_run_default = _first_workday_of_month(today)
+    monthly_run_date = st.date_input(
+        "Monthly update run date (first work day)",
+        value=monthly_run_default,
+        format="MM/DD/YYYY",
+        key="monthly_run_date",
+        help="Use the first work day of the month (Mon-Fri).",
+    )
 
     # ---- Perform 2 Month Roll Off ----
     st.markdown("#### Perform 2 Month Roll Off")
@@ -1012,7 +1101,7 @@ with tab_reports:
     )
 
     if st.button("Perform 2 Month Roll Off (Commit)", key="btn_commit_rolloff") and confirm_roll:
-        applied = services.apply_2mo_rolloffs(conn, run_date=today, dry_run=False)
+        applied = services.apply_2mo_rolloffs(conn, run_date=monthly_run_date, dry_run=False)
 
         if not applied:
             st.info("No roll-offs were applied (nothing due today or earlier, or point totals already at 0).")
@@ -1022,7 +1111,7 @@ with tab_reports:
                     "Employee #": str(r["employee_id"]),
                     "First Name": r["first_name"],
                     "Last Name": r["last_name"],
-                    "Roll-Off Date": today.strftime("%Y-%m-%d"),
+                    "Roll-Off Date": monthly_run_date.strftime("%Y-%m-%d"),
                     "Points Removed": r["points_removed"],
                     "New Total": r["new_total"],
                     "Reason": "2 Month Roll Off",
@@ -1048,7 +1137,7 @@ with tab_reports:
         "that are due for YTD roll-off now (including missed/due if not yet applied)."
     )
 
-    ytd_items = services.preview_ytd_rolloffs(conn, run_date=today)
+    ytd_items = services.preview_ytd_rolloffs(conn, run_date=monthly_run_date)
     if not ytd_items:
         st.info("No annual (YTD) roll-offs are due.")
     else:
@@ -1079,7 +1168,7 @@ with tab_reports:
         key="confirm_ytd_rolloff",
     )
     if st.button("Perform Annual Roll Off (Commit)", key="btn_commit_ytd_rolloff") and confirm_ytd:
-        applied_ytd = services.apply_ytd_rolloffs(conn, run_date=today, dry_run=False)
+        applied_ytd = services.apply_ytd_rolloffs(conn, run_date=monthly_run_date, dry_run=False)
         if not applied_ytd:
             st.info("No annual (YTD) roll-offs were applied.")
         else:
@@ -1165,7 +1254,7 @@ with tab_reports:
         )
 
         if st.button("Advance Due Perfect Attendance Dates", key="btn_adv_pa_due"):
-            advanced = services.advance_due_perfect_attendance_dates(conn, run_date=today, dry_run=False)
+            advanced = services.advance_due_perfect_attendance_dates(conn, run_date=monthly_run_date, dry_run=False)
             if not advanced:
                 st.info("No perfect attendance dates were advanced.")
             else:
