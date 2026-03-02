@@ -117,6 +117,38 @@ def _first_workday_of_month(d: date) -> date:
         cur = cur.replace(day=cur.day + 1)
     return cur
 
+
+def _ytd_rolloff_already_applied(conn, employee_id: int, roll_date: date, label: str) -> bool:
+    if _is_pg_conn(conn):
+        row = _fetchone_sql(
+            conn,
+            """
+            SELECT 1
+              FROM points_history
+             WHERE employee_id = %s
+               AND (point_date::date) = (%s::date)
+               AND reason = 'YTD Roll-Off'
+               AND note LIKE %s
+             LIMIT 1;
+            """,
+            (int(employee_id), roll_date.isoformat(), f"%{label}%"),
+        )
+    else:
+        row = _fetchone_sql(
+            conn,
+            """
+            SELECT 1
+              FROM points_history
+             WHERE employee_id = ?
+               AND date(point_date) = date(?)
+               AND reason = 'YTD Roll-Off'
+               AND note LIKE ?
+             LIMIT 1;
+            """,
+            (int(employee_id), roll_date.isoformat(), f"%{label}%"),
+        )
+    return bool(row)
+
 def load_employees():
     conn = get_conn()
     rows = repo.search_employees(conn, q="", limit=150)
@@ -1029,19 +1061,7 @@ with tab_reports:
 
         cycle_items = services.preview_ytd_rolloffs(conn, run_date=cycle_run_date)
         for employee_id, net_points, roll_date, label in cycle_items:
-            already = _fetchone_sql(
-                conn,
-                """
-                SELECT 1
-                  FROM points_history
-                 WHERE employee_id = ?
-                   AND point_date = ?
-                   AND reason = 'YTD Roll-Off'
-                   AND note LIKE ?
-                 LIMIT 1;
-                """,
-                (int(employee_id), roll_date.isoformat(), f"%{label}%"),
-            )
+            already = _ytd_rolloff_already_applied(conn, int(employee_id), roll_date, label)
             status = "Applied" if already else ("Missed / Due" if cycle_run_date <= today else "Upcoming")
             ytd_preview_rows.append(
                 {
@@ -1145,6 +1165,8 @@ with tab_reports:
         emp_cache: dict[int, dict] = {}
         for employee_id, net_points, roll_date, label in ytd_items:
             emp_id = int(employee_id)
+            if _ytd_rolloff_already_applied(conn, emp_id, roll_date, label):
+                continue
             if emp_id not in emp_cache:
                 emp_row = repo.get_employee(conn, emp_id)
                 emp_cache[emp_id] = dict(emp_row) if emp_row else {}
@@ -1161,15 +1183,18 @@ with tab_reports:
                     "Flag Code": "AUTO",
                 }
             )
-        df_ytd = pd.DataFrame(ytd_rows)
-        st.dataframe(df_ytd, use_container_width=True, hide_index=True)
-        st.download_button(
-            "Download CSV",
-            df_ytd.to_csv(index=False).encode("utf-8"),
-            "preview_ytd_rolloffs.csv",
-            "text/csv",
-            key="dl_preview_ytd_rolloffs",
-        )
+        if not ytd_rows:
+            st.info("No annual (YTD) roll-offs are currently due (already applied items excluded).")
+        else:
+            df_ytd = pd.DataFrame(ytd_rows)
+            st.dataframe(df_ytd, use_container_width=True, hide_index=True)
+            st.download_button(
+                "Download CSV",
+                df_ytd.to_csv(index=False).encode("utf-8"),
+                "preview_ytd_rolloffs.csv",
+                "text/csv",
+                key="dl_preview_ytd_rolloffs",
+            )
 
     confirm_ytd = st.checkbox(
         "I understand this will write annual (YTD) roll-off entries to the database.",
