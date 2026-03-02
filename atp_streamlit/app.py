@@ -319,7 +319,7 @@ def dashboard_page(conn, building: str) -> None:
         sql_perf60  = f"SELECT COUNT(*) AS cnt FROM employees WHERE employee_id IN ({ph}) AND perfect_attendance IS NOT NULL AND (perfect_attendance::date) <= (%s::date)"
         sql_trend   = f"SELECT (point_date::date)::text AS d, COUNT(*) AS n FROM points_history WHERE employee_id IN ({ph}) AND points > 0 AND (point_date::date) >= (%s::date) GROUP BY 1 ORDER BY 1"
         sql_leaders = f"SELECT employee_id, last_name, first_name, COALESCE(\"Location\",'') AS loc, COALESCE(point_total,0) AS pts FROM employees WHERE employee_id IN ({ph}) ORDER BY pts DESC, last_name LIMIT %s"
-        sql_rolloffs= f"SELECT employee_id, last_name, first_name, rolloff_date, point_total FROM employees WHERE employee_id IN ({ph}) AND rolloff_date IS NOT NULL AND point_total > 0 ORDER BY rolloff_date LIMIT 12"
+        sql_rolloffs= f"SELECT employee_id, last_name, first_name, rolloff_date, point_total FROM employees WHERE employee_id IN ({ph}) AND rolloff_date IS NOT NULL AND point_total > 0 AND (rolloff_date::date) >= (%s::date) ORDER BY rolloff_date LIMIT 12"
         sql_perfect = f"SELECT employee_id, last_name, first_name, perfect_attendance FROM employees WHERE employee_id IN ({ph}) AND perfect_attendance IS NOT NULL AND (perfect_attendance::date) <= (%s::date) ORDER BY perfect_attendance LIMIT 10"
     else:
         sql_active  = f"SELECT COUNT(DISTINCT employee_id) AS cnt FROM points_history WHERE employee_id IN ({ph}) AND points > 0 AND date(point_date) >= date(?)"
@@ -327,7 +327,7 @@ def dashboard_page(conn, building: str) -> None:
         sql_perf60  = f"SELECT COUNT(*) AS cnt FROM employees WHERE employee_id IN ({ph}) AND perfect_attendance IS NOT NULL AND date(perfect_attendance) <= date(?)"
         sql_trend   = f"SELECT date(point_date) AS d, COUNT(*) AS n FROM points_history WHERE employee_id IN ({ph}) AND points > 0 AND date(point_date) >= date(?) GROUP BY 1 ORDER BY 1"
         sql_leaders = f"SELECT employee_id, last_name, first_name, COALESCE(\"Location\",'') AS loc, COALESCE(point_total,0) AS pts FROM employees WHERE employee_id IN ({ph}) ORDER BY pts DESC, last_name LIMIT ?"
-        sql_rolloffs= f"SELECT employee_id, last_name, first_name, rolloff_date, point_total FROM employees WHERE employee_id IN ({ph}) AND rolloff_date IS NOT NULL AND point_total > 0 ORDER BY rolloff_date LIMIT 12"
+        sql_rolloffs= f"SELECT employee_id, last_name, first_name, rolloff_date, point_total FROM employees WHERE employee_id IN ({ph}) AND rolloff_date IS NOT NULL AND point_total > 0 AND date(rolloff_date) >= date(?) ORDER BY rolloff_date LIMIT 12"
         sql_perfect = f"SELECT employee_id, last_name, first_name, perfect_attendance FROM employees WHERE employee_id IN ({ph}) AND perfect_attendance IS NOT NULL AND date(perfect_attendance) <= date(?) ORDER BY perfect_attendance LIMIT 10"
 
     # Access scalars by column name (works for both sqlite3.Row and pg dict rows)
@@ -381,8 +381,8 @@ def dashboard_page(conn, building: str) -> None:
     with col_right:
         section_label("Upcoming Roll-offs")
 
-        # 2-month roll-offs (from rolloff_date column) ── always -1.0 pts
-        rolloffs_2mo = [dict(r) for r in fetchall(conn, sql_rolloffs, emp_ids)]
+        # 2-month roll-offs — only future dates (rolloff_date >= today)
+        rolloffs_2mo = [dict(r) for r in fetchall(conn, sql_rolloffs, (*emp_ids, today.isoformat()))]
 
         # YTD roll-off previews — amount varies by prior-year month points
         emp_set    = set(emp_ids)
