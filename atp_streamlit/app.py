@@ -28,9 +28,9 @@ def apply_theme():
         """
         <style>
         :root {
-            --bg:           #0d1426;
-            --bg2:          #141e33;
-            --bg3:          #1c2a42;
+            --bg:           #0f2044;
+            --bg2:          #172a55;
+            --bg3:          #1e3465;
             --text:         #e2e8f4;
             --muted:        #7a8ba8;
             --line:         rgba(255,255,255,0.07);
@@ -48,18 +48,18 @@ def apply_theme():
         /* ── Base ── */
         .stApp {
             background:
-                radial-gradient(ellipse at 18% 0%,   rgba(79,142,247,.07)  0%, transparent 55%),
-                radial-gradient(ellipse at 82% 100%,  rgba(0,212,255,.05)   0%, transparent 55%),
-                linear-gradient(180deg, #0d1426 0%, #0e1529 100%);
+                radial-gradient(ellipse at 18% 0%,   rgba(79,142,247,.10)  0%, transparent 55%),
+                radial-gradient(ellipse at 82% 100%,  rgba(0,212,255,.07)   0%, transparent 55%),
+                linear-gradient(180deg, #0f2044 0%, #112248 100%);
             color: var(--text);
         }
 
-        .block-container { padding-top: 1.2rem; padding-bottom: 2.5rem; max-width: 1460px; }
+        .block-container { padding-top: 2.8rem; padding-bottom: 2.5rem; max-width: 1460px; }
 
         /* ── Sidebar ── */
         section[data-testid="stSidebar"] {
             width: 300px !important;
-            background: linear-gradient(180deg, #101828 0%, #0d1426 100%) !important;
+            background: linear-gradient(180deg, #0d1c3d 0%, #0f2044 100%) !important;
             border-right: 1px solid var(--line);
         }
 
@@ -492,6 +492,7 @@ def dashboard_page(conn, building: str):
             st.caption("No employees match current filters.")
         else:
             display = leaders.copy()
+            display["employee_id"] = display["employee_id"].astype(str)
             display["employee"] = display["last_name"].astype(str) + ", " + display["first_name"].astype(str)
             display = display[["employee_id", "employee", "location", "point_total"]]
             display.columns = ["Employee #", "Employee", "Building", "Point Total"]
@@ -545,7 +546,7 @@ def employees_page(conn, building: str):
         return
 
     df = pd.DataFrame(rows)
-    df["employee_id"] = df["employee_id"].astype(int)
+    df["employee_id"] = df["employee_id"].astype(str)
     st.dataframe(df[["employee_id", "last_name", "first_name", "location", "is_active"]], use_container_width=True, hide_index=True)
 
     emp_options = [(int(r["employee_id"]), f"{r['employee_id']} — {r['last_name']}, {r['first_name']}") for r in rows]
