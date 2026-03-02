@@ -36,7 +36,6 @@ def connect(db_path: str | None = None) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON;")
     return conn
-=======
     return os.getenv("ATP_DB_PATH", "employeeroster.db")
 
 def connect(db_path: str | None = None) -> sqlite3.Connection:
@@ -64,4 +63,3 @@ def connect(db_path: str | None = None) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON;")
     return conn
->>>>>>> 1bc5795a2361090cb84bf1cd45319c917e4e6d18
