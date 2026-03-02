@@ -197,6 +197,21 @@ def exec_sql(conn, sql: str, params=()):
         conn.execute(sql, params)
 
 
+def first_value(rows, default=0):
+    """Return the first scalar value from a query result for tuple/dict-like rows."""
+    if not rows:
+        return default
+
+    row = rows[0]
+    if isinstance(row, dict):
+        return next(iter(row.values()), default)
+
+    try:
+        return row[0]
+    except Exception:
+        return default
+
+
 # ── Format helpers ────────────────────────────────────────────────────────────
 def fmt_date(val) -> str:
     if not val:
