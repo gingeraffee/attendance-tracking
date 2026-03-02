@@ -1,3 +1,6 @@
+"""Attendance Point Tracker — Streamlit Web App
+Full remodel: clean layout, status badges, live countdown, improved workflows.
+"""
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
@@ -7,7 +10,12 @@ import sys
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="Attendance Point Tracker", page_icon="📋", layout="wide")
+st.set_page_config(
+    page_title="Attendance Point Tracker",
+    page_icon="📋",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
 APP_DIR = Path(__file__).resolve().parent
 REPO_ROOT = APP_DIR.parent
@@ -19,211 +27,147 @@ from atp_core.schema import ensure_schema
 from atp_core import repo, services
 from atp_core.rules import REASON_OPTIONS
 
-
 BUILDINGS = ["Building A", "Building B", "Building C"]
 
 
-def apply_theme():
+# ── Theme ─────────────────────────────────────────────────────────────────────
+def apply_theme() -> None:
     st.markdown(
-        """
-        <style>
-        :root {
-            --bg:           #f0f4fa;
-            --bg2:          #ffffff;
-            --bg3:          #e8edf6;
-            --text:         #1a2744;
-            --muted:        #5c6f8c;
-            --line:         rgba(0,0,0,0.07);
-            --primary:      #4f8ef7;
-            --primary-soft: rgba(79,142,247,0.10);
-            --cyan:         #00b8e6;
-            --green:        #00a87a;
-            --amber:        #e6960a;
-            --red:          #e0394a;
-            --card-bg:      #ffffff;
-            --card-border:  rgba(0,0,0,0.07);
-            --shadow:       0 2px 14px rgba(0,0,0,0.07);
-        }
+        """<style>
+:root {
+    --bg:       #f0f4fa;
+    --surface:  #ffffff;
+    --surface2: #f4f7fd;
+    --border:   rgba(0,0,0,.07);
+    --shadow:   0 2px 16px rgba(15,32,68,.07);
+    --text:     #1a2744;
+    --muted:    #5c6f8c;
+    --faint:    #8fa0b8;
+    --blue:     #4f8ef7;
+    --cyan:     #00b8e6;
+    --green:    #00a87a;
+    --amber:    #e6960a;
+    --red:      #e0394a;
+}
 
-        /* ── Base (main content area) ── */
-        .stApp {
-            background: #f0f4fa;
-            color: var(--text);
-        }
+/* ── Base ── */
+.stApp { background: var(--bg); color: var(--text); }
+.block-container { padding-top: 2rem; padding-bottom: 3rem; max-width: 1440px; }
+footer, #MainMenu { visibility: hidden; }
 
-        .block-container { padding-top: 2.8rem; padding-bottom: 2.5rem; max-width: 1460px; }
+/* ── Sidebar (stays dark) ── */
+section[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #0d1b3a 0%, #0f2044 100%) !important;
+    border-right: 1px solid rgba(255,255,255,.06);
+    width: 276px !important;
+}
+section[data-testid="stSidebar"] * { color: #bfcde6 !important; }
 
-        /* ── Sidebar — stays dark ── */
-        section[data-testid="stSidebar"] {
-            width: 300px !important;
-            background: linear-gradient(180deg, #0d1c3d 0%, #0f2044 100%) !important;
-            border-right: 1px solid rgba(255,255,255,0.07);
-        }
+/* ── Metric tiles ── */
+div[data-testid="stMetric"] {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 1.1rem 1.25rem .85rem 1.25rem;
+    box-shadow: var(--shadow);
+}
+div[data-testid="stMetric"] label {
+    color: var(--muted) !important;
+    font-size: .72rem !important;
+    font-weight: 700 !important;
+    letter-spacing: .08em !important;
+    text-transform: uppercase !important;
+}
+div[data-testid="stMetric"] [data-testid="stMetricValue"] {
+    color: var(--text) !important;
+    font-size: 2rem !important;
+    font-weight: 800 !important;
+    letter-spacing: -.03em !important;
+}
 
-        section[data-testid="stSidebar"] * {
-            color: #c8d3e8 !important;
-        }
+/* ── Buttons ── */
+.stButton > button {
+    border-radius: 8px !important;
+    font-weight: 600 !important;
+    border: 1px solid rgba(79,142,247,.35) !important;
+    background: linear-gradient(135deg, rgba(79,142,247,.09), rgba(79,142,247,.04)) !important;
+    color: var(--blue) !important;
+    transition: all .18s !important;
+}
+.stButton > button:hover {
+    border-color: var(--blue) !important;
+    background: rgba(79,142,247,.14) !important;
+    box-shadow: 0 0 14px rgba(79,142,247,.18) !important;
+}
 
-        section[data-testid="stSidebar"] h3 {
-            font-size: .72rem !important;
-            font-weight: 700 !important;
-            letter-spacing: .1em !important;
-            text-transform: uppercase;
-        }
+/* ── DataFrames / Tabs / Inputs ── */
+.stDataFrame { border: 1px solid var(--border) !important; border-radius: 12px !important; overflow: hidden; }
+.stTabs [data-baseweb="tab-list"] { gap: 4px; border-bottom: 1px solid var(--border); background: transparent; }
+.stTabs [data-baseweb="tab"] { border-radius: 8px 8px 0 0; }
+.stTextInput  > div > div > input,
+.stNumberInput > div > div > input,
+.stDateInput  > div > div > input {
+    background: var(--surface2) !important;
+    border-color: var(--border) !important;
+    border-radius: 8px !important;
+    color: var(--text) !important;
+}
+h1,h2,h3,h4,h5,h6 { color: var(--text) !important; }
+p, label { color: var(--muted) !important; }
 
-        /* ── Metric cards ── */
-        div[data-testid="stMetric"] {
-            background: #ffffff;
-            padding: 16px 18px 12px 18px;
-            border-radius: 14px;
-            border: 1px solid var(--card-border);
-            box-shadow: var(--shadow);
-        }
+/* ── Page heading ── */
+.page-heading { margin-bottom: 1.4rem; }
+.page-heading h1 {
+    font-size: 1.6rem; font-weight: 800; color: var(--text);
+    margin: 0 0 .15rem 0; letter-spacing: -.025em;
+}
+.page-heading p { color: var(--muted); font-size: .87rem; margin: 0; }
+.accent-bar {
+    width: 44px; height: 3px; border-radius: 99px;
+    background: linear-gradient(90deg, var(--blue), var(--cyan));
+    margin: .25rem 0 .4rem 0;
+    box-shadow: 0 0 10px rgba(79,142,247,.30);
+}
 
-        div[data-testid="stMetric"] label {
-            color: var(--muted) !important;
-            font-size: .78rem !important;
-            font-weight: 600 !important;
-            letter-spacing: .05em !important;
-            text-transform: uppercase !important;
-        }
+/* ── Cards ── */
+.card    { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 1.2rem 1.4rem; box-shadow: var(--shadow); margin-bottom: .9rem; }
+.card-sm { background: var(--surface); border: 1px solid var(--border); border-radius: 10px;  padding: .8rem 1rem;   box-shadow: var(--shadow); }
 
-        div[data-testid="stMetric"] [data-testid="stMetricValue"] {
-            color: var(--text) !important;
-            font-size: 2rem !important;
-            font-weight: 700 !important;
-            letter-spacing: -.02em !important;
-        }
+/* ── Section label ── */
+.section-label {
+    font-size: .71rem; font-weight: 700; letter-spacing: .10em;
+    text-transform: uppercase; color: var(--muted); margin: 0 0 .55rem 0;
+}
 
-        /* ── Hero banner ── */
-        .hero {
-            background: linear-gradient(135deg,
-                rgba(79,142,247,.07) 0%,
-                rgba(0,184,230,.04) 100%);
-            border: 1px solid rgba(79,142,247,.18);
-            border-left: 3px solid var(--primary);
-            border-radius: 14px;
-            padding: 1.2rem 1.5rem;
-            margin-bottom: 1rem;
-            position: relative;
-            overflow: hidden;
-        }
-        .hero::after {
-            content: '';
-            position: absolute;
-            top: -40px; right: -40px;
-            width: 140px; height: 140px;
-            background: radial-gradient(circle, rgba(79,142,247,.10) 0%, transparent 70%);
-            border-radius: 50%;
-            pointer-events: none;
-        }
+/* ── Divider ── */
+.divider { height: 1px; background: var(--border); margin: 1.25rem 0; }
 
-        /* ── Cards ── */
-        .cool-card, .dash-card {
-            background: #ffffff;
-            border: 1px solid var(--card-border);
-            border-radius: 12px;
-            padding: 1rem 1.15rem;
-            box-shadow: var(--shadow);
-            margin-bottom: .75rem;
-            transition: border-color .2s, box-shadow .2s;
-        }
-        .cool-card:hover, .dash-card:hover {
-            border-color: rgba(79,142,247,.3);
-            box-shadow: 0 4px 20px rgba(79,142,247,.10);
-        }
+/* ── Info / warn / danger boxes ── */
+.info-box   { background: rgba(79,142,247,.06);  border:1px solid rgba(79,142,247,.18);  border-left:3px solid var(--blue);  border-radius:8px; padding:.75rem 1rem; color:var(--text); font-size:.88rem; }
+.warn-box   { background: rgba(230,150,10,.06);  border:1px solid rgba(230,150,10,.18);  border-left:3px solid var(--amber); border-radius:8px; padding:.75rem 1rem; color:var(--text); font-size:.88rem; }
+.danger-box { background: rgba(224,57,74,.06);   border:1px solid rgba(224,57,74,.18);   border-left:3px solid var(--red);   border-radius:8px; padding:.75rem 1rem; color:var(--text); font-size:.88rem; }
 
-        /* ── Buttons ── */
-        .stButton > button {
-            border-radius: 8px !important;
-            border: 1px solid rgba(79,142,247,.4) !important;
-            background: linear-gradient(135deg,
-                rgba(79,142,247,.09) 0%,
-                rgba(79,142,247,.04) 100%) !important;
-            color: var(--primary) !important;
-            font-weight: 600 !important;
-            letter-spacing: .01em !important;
-            transition: all .2s !important;
-        }
-        .stButton > button:hover {
-            border-color: var(--primary) !important;
-            background: rgba(79,142,247,.14) !important;
-            box-shadow: 0 0 16px rgba(79,142,247,.18) !important;
-        }
+/* ── Upcoming list rows ── */
+.list-row {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: .65rem 1rem; margin-bottom: .38rem;
+}
 
-        /* ── DataFrames & Tabs ── */
-        .stDataFrame {
-            border: 1px solid var(--card-border) !important;
-            border-radius: 12px !important;
-            overflow: hidden;
-        }
-        .stTabs [data-baseweb="tab-list"] {
-            gap: 4px;
-            border-bottom: 1px solid var(--line);
-        }
-        .stTabs [data-baseweb="tab"] {
-            border-radius: 8px 8px 0 0;
-        }
-
-        /* ── Inputs ── */
-        .stTextInput > div > div > input,
-        .stNumberInput > div > div > input,
-        .stDateInput > div > div > input {
-            background: #f5f7fc !important;
-            border-color: rgba(0,0,0,0.10) !important;
-            border-radius: 8px !important;
-            color: var(--text) !important;
-        }
-
-        /* ── Sidebar logo wrap ── */
-        .sidebar-logo-wrap {
-            background: rgba(255,255,255,0.06);
-            border: 1px solid rgba(255,255,255,0.10);
-            border-radius: 12px;
-            padding: .5rem;
-            margin-bottom: 1rem;
-        }
-
-        /* ── Title accent bar ── */
-        .title-accent {
-            height: 3px;
-            width: 72px;
-            border-radius: 999px;
-            background: linear-gradient(90deg, var(--primary), var(--cyan));
-            margin: .25rem 0 .6rem 0;
-            box-shadow: 0 0 10px rgba(79,142,247,.35);
-        }
-
-        /* ── Typography ── */
-        h1, h2, h3, h4, h5 { color: var(--text) !important; }
-        p, label, .stCaption { color: var(--muted) !important; }
-        footer { visibility: hidden; }
-        </style>
-        """,
+/* ── Sidebar brand ── */
+.sidebar-brand { padding: .75rem 0 1rem 0; border-bottom: 1px solid rgba(255,255,255,.07); margin-bottom: 1rem; }
+.sidebar-brand .name { font-size: 1.05rem; font-weight: 800; color: #e2e8f4 !important; letter-spacing: -.01em; }
+.sidebar-brand .sub  { font-size: .72rem; color: #4a5f80 !important; margin-top: .1rem; }
+.sidebar-nav-label   {
+    font-size: .65rem !important; font-weight: 700 !important; letter-spacing: .12em !important;
+    text-transform: uppercase !important; color: #3d5270 !important;
+    margin: 1rem 0 .3rem 0 !important; display: block;
+}
+</style>""",
         unsafe_allow_html=True,
     )
 
 
-def page_hero(title: str, subtitle: str):
-    st.markdown(
-        f"""
-        <div class='hero'>
-            <h3 style='margin:.1rem 0 .3rem 0; color:#1a2744; font-weight:700; letter-spacing:-.01em'>{title}</h3>
-            <div style='color:#5c6f8c; font-size:.9rem'>{subtitle}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def card_start():
-    st.markdown("<div class='cool-card'>", unsafe_allow_html=True)
-
-
-def card_end():
-    st.markdown("</div>", unsafe_allow_html=True)
-
-
+# ── DB helpers ────────────────────────────────────────────────────────────────
 def get_conn():
     conn = db.connect()
     ensure_schema(conn)
@@ -234,7 +178,7 @@ def is_pg(conn) -> bool:
     return conn.__class__.__module__.startswith("psycopg2")
 
 
-def fetchall_sql(conn, sql: str, params=()):
+def fetchall(conn, sql: str, params=()):
     if is_pg(conn):
         cur = conn.cursor()
         cur.execute(sql.replace("?", "%s"), params)
@@ -249,11 +193,12 @@ def exec_sql(conn, sql: str, params=()):
         cur = conn.cursor()
         cur.execute(sql.replace("?", "%s"), params)
         cur.close()
-        return
-    conn.execute(sql, params)
+    else:
+        conn.execute(sql, params)
 
 
-def fmt_date(val):
+# ── Format helpers ────────────────────────────────────────────────────────────
+def fmt_date(val) -> str:
     if not val:
         return "—"
     if hasattr(val, "strftime"):
@@ -264,6 +209,74 @@ def fmt_date(val):
         return str(val)
 
 
+def days_until(val) -> int | None:
+    if not val:
+        return None
+    try:
+        d = val if hasattr(val, "toordinal") else date.fromisoformat(str(val))
+        return (d - date.today()).days
+    except Exception:
+        return None
+
+
+def pt_badge(pts) -> str:
+    """Colored HTML pill for a point total."""
+    pts = float(pts or 0)
+    if pts == 0:
+        c, bg, b, lbl = "#00a87a", "rgba(0,168,122,.10)",  "rgba(0,168,122,.25)",  "0 pts"
+    elif pts < 2:
+        c, bg, b, lbl = "#e6960a", "rgba(230,150,10,.10)", "rgba(230,150,10,.25)", f"{pts:.1f} pts"
+    else:
+        c, bg, b, lbl = "#e0394a", "rgba(224,57,74,.10)",  "rgba(224,57,74,.25)",  f"{pts:.1f} pts"
+    return (
+        f"<span style='display:inline-block;padding:2px 10px;border-radius:99px;"
+        f"font-size:.78rem;font-weight:700;color:{c};background:{bg};"
+        f"border:1px solid {b}'>{lbl}</span>"
+    )
+
+
+def days_badge(days) -> str:
+    """Colored HTML pill for days countdown."""
+    s = "display:inline-block;padding:2px 8px;border-radius:6px;font-size:.78rem;font-weight:700;"
+    if days is None:
+        return f"<span style='{s}color:#8fa0b8'>—</span>"
+    if days < 0:
+        return f"<span style='{s}color:#e0394a;background:rgba(224,57,74,.09);border:1px solid rgba(224,57,74,.20)'>overdue {abs(days)}d</span>"
+    if days == 0:
+        return f"<span style='{s}color:#e0394a;background:rgba(224,57,74,.09);border:1px solid rgba(224,57,74,.20)'>today</span>"
+    if days <= 14:
+        return f"<span style='{s}color:#e6960a;background:rgba(230,150,10,.09);border:1px solid rgba(230,150,10,.20)'>{days}d</span>"
+    return f"<span style='{s}color:#5c6f8c;background:rgba(92,111,140,.07);border:1px solid rgba(92,111,140,.17)'>{days}d</span>"
+
+
+def info_box(msg: str) -> None:
+    st.markdown(f"<div class='info-box'>{msg}</div>", unsafe_allow_html=True)
+
+
+def warn_box(msg: str) -> None:
+    st.markdown(f"<div class='warn-box'>{msg}</div>", unsafe_allow_html=True)
+
+
+def page_heading(title: str, sub: str) -> None:
+    st.markdown(
+        f"<div class='page-heading'><h1>{title}</h1>"
+        f"<div class='accent-bar'></div><p>{sub}</p></div>",
+        unsafe_allow_html=True,
+    )
+
+
+def section_label(text: str) -> None:
+    st.markdown(f"<div class='section-label'>{text}</div>", unsafe_allow_html=True)
+
+
+def divider() -> None:
+    st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
+
+
+def to_csv(df: pd.DataFrame) -> bytes:
+    return df.to_csv(index=False).encode("utf-8")
+
+
 def load_employees(conn, q: str = "", building: str = "All") -> list[dict]:
     rows = [dict(r) for r in repo.search_employees(conn, q=q, limit=3000)]
     if building != "All":
@@ -271,514 +284,667 @@ def load_employees(conn, q: str = "", building: str = "All") -> list[dict]:
     return rows
 
 
-def to_csv_bytes(df: pd.DataFrame) -> bytes:
-    return df.to_csv(index=False).encode("utf-8")
+# ── Dashboard ─────────────────────────────────────────────────────────────────
+def dashboard_page(conn, building: str) -> None:
+    page_heading(
+        "Dashboard",
+        "Real-time overview of attendance activity, upcoming actions, and point leaders.",
+    )
 
-
-def run_export_query(conn, export_type: str, building: str, start_date: date, end_date: date) -> pd.DataFrame:
-    if export_type == "30-day point history":
-        if is_pg(conn):
-            sql = """
-            SELECT e.employee_id, e.first_name, e.last_name, COALESCE(e."Location", '') AS location,
-                   p.point_date, p.points, p.reason, COALESCE(p.note, '') AS note
-              FROM points_history p
-              JOIN employees e ON e.employee_id = p.employee_id
-             WHERE (p.point_date::date) BETWEEN (%s::date) AND (%s::date)
-            """
-        else:
-            sql = """
-            SELECT e.employee_id, e.first_name, e.last_name, COALESCE(e."Location", '') AS location,
-                   p.point_date, p.points, p.reason, COALESCE(p.note, '') AS note
-              FROM points_history p
-              JOIN employees e ON e.employee_id = p.employee_id
-             WHERE date(p.point_date) BETWEEN date(?) AND date(?)
-            """
-        params = [start_date.isoformat(), end_date.isoformat()]
-
-    elif export_type == "upcoming 2-month roll-offs":
-        if is_pg(conn):
-            sql = """
-            SELECT employee_id, first_name, last_name, COALESCE("Location", '') AS location,
-                   point_total, rolloff_date
-              FROM employees
-             WHERE rolloff_date IS NOT NULL
-               AND (rolloff_date::date) BETWEEN (%s::date) AND (%s::date)
-            """
-        else:
-            sql = """
-            SELECT employee_id, first_name, last_name, COALESCE("Location", '') AS location,
-                   point_total, rolloff_date
-              FROM employees
-             WHERE rolloff_date IS NOT NULL
-               AND date(rolloff_date) BETWEEN date(?) AND date(?)
-            """
-        params = [start_date.isoformat(), end_date.isoformat()]
-
-    elif export_type == "upcoming perfect attendance":
-        if is_pg(conn):
-            sql = """
-            SELECT employee_id, first_name, last_name, COALESCE("Location", '') AS location,
-                   point_total, perfect_attendance
-              FROM employees
-             WHERE perfect_attendance IS NOT NULL
-               AND (perfect_attendance::date) BETWEEN (%s::date) AND (%s::date)
-            """
-        else:
-            sql = """
-            SELECT employee_id, first_name, last_name, COALESCE("Location", '') AS location,
-                   point_total, perfect_attendance
-              FROM employees
-             WHERE perfect_attendance IS NOT NULL
-               AND date(perfect_attendance) BETWEEN date(?) AND date(?)
-            """
-        params = [start_date.isoformat(), end_date.isoformat()]
-    else:
-        year_start = date(date.today().year, 1, 1)
-        if is_pg(conn):
-            sql = """
-            SELECT e.employee_id, e.first_name, e.last_name, COALESCE(e."Location", '') AS location,
-                   p.point_date, p.points, p.reason, COALESCE(p.note, '') AS note
-              FROM points_history p
-              JOIN employees e ON e.employee_id = p.employee_id
-             WHERE p.reason = 'YTD Roll-Off'
-               AND (p.point_date::date) >= (%s::date)
-            """
-        else:
-            sql = """
-            SELECT e.employee_id, e.first_name, e.last_name, COALESCE(e."Location", '') AS location,
-                   p.point_date, p.points, p.reason, COALESCE(p.note, '') AS note
-              FROM points_history p
-              JOIN employees e ON e.employee_id = p.employee_id
-             WHERE p.reason = 'YTD Roll-Off'
-               AND date(p.point_date) >= date(?)
-            """
-        params = [year_start.isoformat()]
-
-    if building != "All":
-        sql += " AND COALESCE(e.\"Location\", '') = ?" if " JOIN employees e" in sql else " AND COALESCE(\"Location\", '') = ?"
-        params.append(building)
-
-    sql += " ORDER BY last_name, first_name"
-    return pd.DataFrame([dict(r) for r in fetchall_sql(conn, sql, tuple(params))])
-
-
-def dashboard_page(conn, building: str):
+    today = date.today()
     employees = load_employees(conn, building=building)
     emp_ids = [int(e["employee_id"]) for e in employees]
 
     if not emp_ids:
-        st.info("No employees found for this building filter.")
+        info_box("No employees found for this building filter.")
         return
 
+    ph = ",".join(["?" if not is_pg(conn) else "%s"] * len(emp_ids))
+
+    # ── Window selector ──────────────────────────────────────────────────────
+    win_label = st.selectbox(
+        "Activity window",
+        ["7 days", "14 days", "30 days", "60 days"],
+        index=2,
+        label_visibility="collapsed",
+        key="dash_win",
+    )
+    win_days = int(win_label.split()[0])
+    since = (today - timedelta(days=win_days)).isoformat()
+
+    # ── KPI queries ──────────────────────────────────────────────────────────
+    if is_pg(conn):
+        sql_active  = f"SELECT COUNT(DISTINCT employee_id) FROM points_history WHERE employee_id IN ({ph}) AND points > 0 AND (point_date::date) >= (%s::date)"
+        sql_roll30  = f"SELECT COUNT(*) FROM employees WHERE employee_id IN ({ph}) AND rolloff_date IS NOT NULL AND (rolloff_date::date) <= (%s::date) AND point_total > 0"
+        sql_perf60  = f"SELECT COUNT(*) FROM employees WHERE employee_id IN ({ph}) AND perfect_attendance IS NOT NULL AND (perfect_attendance::date) <= (%s::date)"
+        sql_trend   = f"SELECT (point_date::date)::text AS d, COUNT(*) AS n FROM points_history WHERE employee_id IN ({ph}) AND points > 0 AND (point_date::date) >= (%s::date) GROUP BY 1 ORDER BY 1"
+        sql_leaders = f"SELECT employee_id, last_name, first_name, COALESCE(\"Location\",'') AS loc, COALESCE(point_total,0) AS pts FROM employees WHERE employee_id IN ({ph}) ORDER BY pts DESC, last_name LIMIT %s"
+        sql_rolloffs= f"SELECT employee_id, last_name, first_name, rolloff_date, point_total FROM employees WHERE employee_id IN ({ph}) AND rolloff_date IS NOT NULL AND point_total > 0 ORDER BY rolloff_date LIMIT 12"
+        sql_perfect = f"SELECT employee_id, last_name, first_name, perfect_attendance FROM employees WHERE employee_id IN ({ph}) AND perfect_attendance IS NOT NULL AND (perfect_attendance::date) <= (%s::date) ORDER BY perfect_attendance LIMIT 10"
+    else:
+        sql_active  = f"SELECT COUNT(DISTINCT employee_id) FROM points_history WHERE employee_id IN ({ph}) AND points > 0 AND date(point_date) >= date(?)"
+        sql_roll30  = f"SELECT COUNT(*) FROM employees WHERE employee_id IN ({ph}) AND rolloff_date IS NOT NULL AND date(rolloff_date) <= date(?) AND point_total > 0"
+        sql_perf60  = f"SELECT COUNT(*) FROM employees WHERE employee_id IN ({ph}) AND perfect_attendance IS NOT NULL AND date(perfect_attendance) <= date(?)"
+        sql_trend   = f"SELECT date(point_date) AS d, COUNT(*) AS n FROM points_history WHERE employee_id IN ({ph}) AND points > 0 AND date(point_date) >= date(?) GROUP BY 1 ORDER BY 1"
+        sql_leaders = f"SELECT employee_id, last_name, first_name, COALESCE(\"Location\",'') AS loc, COALESCE(point_total,0) AS pts FROM employees WHERE employee_id IN ({ph}) ORDER BY pts DESC, last_name LIMIT ?"
+        sql_rolloffs= f"SELECT employee_id, last_name, first_name, rolloff_date, point_total FROM employees WHERE employee_id IN ({ph}) AND rolloff_date IS NOT NULL AND point_total > 0 ORDER BY rolloff_date LIMIT 12"
+        sql_perfect = f"SELECT employee_id, last_name, first_name, perfect_attendance FROM employees WHERE employee_id IN ({ph}) AND perfect_attendance IS NOT NULL AND date(perfect_attendance) <= date(?) ORDER BY perfect_attendance LIMIT 10"
+
+    active_n  = fetchall(conn, sql_active,  (*emp_ids, since))[0][0] or 0
+    rolloff_n = fetchall(conn, sql_roll30,  (*emp_ids, (today + timedelta(30)).isoformat()))[0][0] or 0
+    perf_n    = fetchall(conn, sql_perf60,  (*emp_ids, (today + timedelta(60)).isoformat()))[0][0] or 0
+
+    # ── KPI row ──────────────────────────────────────────────────────────────
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric(f"Incidents ({win_days}d)", int(active_n))
+    m2.metric("Roll-offs Due ≤30d", int(rolloff_n))
+    m3.metric("Perfect Att. Due ≤60d", int(perf_n))
+    m4.metric("Total Employees", len(emp_ids))
+
+    st.markdown("<div style='height:.6rem'></div>", unsafe_allow_html=True)
+
+    col_left, col_right = st.columns([1.6, 1], gap="large")
+
+    # ── Trend chart + leaderboard ────────────────────────────────────────────
+    with col_left:
+        section_label(f"Incident Trend — last {win_days} days")
+        trend = fetchall(conn, sql_trend, (*emp_ids, since))
+        if trend:
+            df_t = pd.DataFrame(trend, columns=["Date", "Incidents"])
+            df_t["Date"] = pd.to_datetime(df_t["Date"])
+            st.line_chart(df_t.set_index("Date")["Incidents"], color="#4f8ef7", height=220)
+        else:
+            info_box("No incidents recorded in the selected window.")
+
+        st.markdown("<div style='height:.65rem'></div>", unsafe_allow_html=True)
+
+        lbl_col, n_col = st.columns([3, 1])
+        with lbl_col:
+            section_label("Top Employees by Point Total")
+        with n_col:
+            top_n = st.slider("Top", 5, 25, 10, step=5, label_visibility="collapsed", key="dash_n")
+
+        leaders = fetchall(conn, sql_leaders, (*emp_ids, top_n))
+        if leaders:
+            df_l = pd.DataFrame(
+                [{"Emp #": r[0], "Name": f"{r[1]}, {r[2]}", "Building": r[3] or "—", "Points": float(r[4] or 0)}
+                 for r in leaders]
+            )
+            st.dataframe(df_l, use_container_width=True, hide_index=True)
+        else:
+            info_box("No employees currently have outstanding points.")
+
+    # ── Upcoming roll-offs + perfect attendance ───────────────────────────────
+    with col_right:
+        section_label("Upcoming Roll-offs")
+        rolloffs = fetchall(conn, sql_rolloffs, emp_ids)
+        if rolloffs:
+            html = []
+            for r in rolloffs:
+                days = days_until(r[3])
+                html.append(
+                    f"<div class='list-row'>"
+                    f"<div style='display:flex;justify-content:space-between;align-items:center'>"
+                    f"<div><span style='font-weight:600;font-size:.9rem;color:#1a2744'>{r[1]}, {r[2]}</span>"
+                    f"<span style='color:#8fa0b8;font-size:.78rem;margin-left:.4rem'>#{r[0]}</span></div>"
+                    f"<div style='display:flex;gap:.3rem;align-items:center'>{pt_badge(r[4])}{days_badge(days)}</div>"
+                    f"</div>"
+                    f"<div style='font-size:.75rem;color:#8fa0b8;margin-top:.18rem'>Due {fmt_date(r[3])}</div>"
+                    f"</div>"
+                )
+            st.markdown("".join(html), unsafe_allow_html=True)
+        else:
+            info_box("No roll-offs are currently pending.")
+
+        divider()
+
+        section_label("Perfect Attendance Due ≤60 Days")
+        perfects = fetchall(conn, sql_perfect, (*emp_ids, (today + timedelta(60)).isoformat()))
+        if perfects:
+            html = []
+            for r in perfects:
+                days = days_until(r[3])
+                html.append(
+                    f"<div class='list-row'>"
+                    f"<div style='display:flex;justify-content:space-between;align-items:center'>"
+                    f"<span style='font-weight:600;font-size:.9rem;color:#1a2744'>{r[1]}, {r[2]}</span>"
+                    f"{days_badge(days)}"
+                    f"</div>"
+                    f"<div style='font-size:.75rem;color:#8fa0b8;margin-top:.18rem'>Eligible {fmt_date(r[3])}</div>"
+                    f"</div>"
+                )
+            st.markdown("".join(html), unsafe_allow_html=True)
+        else:
+            info_box("No perfect attendance milestones in the next 60 days.")
+
+
+# ── Employees ─────────────────────────────────────────────────────────────────
+def employees_page(conn, building: str) -> None:
+    page_heading("Employees", "Look up employees and review current attendance status.")
+
+    q = st.text_input(
+        "Search", placeholder="Name or employee # …", label_visibility="collapsed"
+    )
+    rows = load_employees(conn, q=q, building=building)
+
+    if not rows:
+        info_box("No matching employees found.")
+        return
+
+    # Results table
+    df = pd.DataFrame(rows)[["employee_id", "last_name", "first_name", "location", "is_active"]]
+    df.columns = ["Emp #", "Last Name", "First Name", "Building", "Active"]
+    df["Emp #"] = df["Emp #"].astype(str)
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+    divider()
+
+    # Detail view
+    opts = [
+        (int(r["employee_id"]), f"#{r['employee_id']} — {r['last_name']}, {r['first_name']}")
+        for r in rows
+    ]
+    selected = st.selectbox("View details for", opts, format_func=lambda x: x[1], label_visibility="collapsed")
+    emp_id = selected[0]
+    emp = dict(repo.get_employee(conn, emp_id))
+
+    pts = float(emp.get("point_total") or 0)
+    loc = emp.get("Location") or emp.get("location") or "—"
+    active_flag = emp.get("is_active", 1)
+
+    active_badge = (
+        "<span style='display:inline-block;padding:2px 9px;border-radius:99px;font-size:.78rem;font-weight:700;"
+        "color:#00a87a;background:rgba(0,168,122,.10);border:1px solid rgba(0,168,122,.25)'>Active</span>"
+        if active_flag else
+        "<span style='display:inline-block;padding:2px 9px;border-radius:99px;font-size:.78rem;font-weight:700;"
+        "color:#8fa0b8;background:rgba(143,160,184,.10);border:1px solid rgba(143,160,184,.25)'>Inactive</span>"
+    )
     st.markdown(
-        """
-        <div class='hero'>
-            <h2 style='margin:0 0 .3rem 0; color:#1a2744; font-weight:700; letter-spacing:-.02em'>
-                Attendance Ops Dashboard
-            </h2>
-            <div style='color:#5c6f8c; font-size:.9rem'>Real-time command center for activity trends, upcoming deadlines, and one-click actions.</div>
-        </div>
-        """,
+        f"<div class='card'>"
+        f"<div style='display:flex;justify-content:space-between;align-items:flex-start'>"
+        f"<div><h2 style='margin:0;font-size:1.3rem;font-weight:800;color:#1a2744'>"
+        f"{emp.get('last_name')}, {emp.get('first_name')}</h2>"
+        f"<div style='color:#5c6f8c;font-size:.85rem;margin-top:.2rem'>"
+        f"Employee #{emp_id} &nbsp;·&nbsp; {loc}</div></div>"
+        f"<div style='display:flex;gap:.4rem;align-items:center'>{pt_badge(pts)} {active_badge}</div>"
+        f"</div></div>",
         unsafe_allow_html=True,
     )
 
-    controls = st.columns([1.25, 1, 1], gap="small")
-    with controls[0]:
-        window_label = st.selectbox("Activity window", ["7 days", "14 days", "30 days", "60 days"], index=2)
-    with controls[1]:
-        show_only_flagged = st.toggle("Only flagged (≥2 points)", value=False)
-    with controls[2]:
-        top_n = st.slider("Leaderboard size", min_value=5, max_value=25, value=10, step=5)
-
-    days = int(window_label.split()[0])
-    start_date = date.today() - timedelta(days=days)
-    placeholders = ",".join(["%s" if is_pg(conn) else "?"] * len(emp_ids))
-
-    # KPI counts
-    if is_pg(conn):
-        sql_recent = f"""
-            SELECT COUNT(DISTINCT employee_id) AS active
-            FROM points_history
-            WHERE employee_id IN ({placeholders})
-              AND points > 0
-              AND (point_date::date) >= (%s::date)
-        """
-    else:
-        sql_recent = f"""
-            SELECT COUNT(DISTINCT employee_id) AS active
-            FROM points_history
-            WHERE employee_id IN ({placeholders})
-              AND points > 0
-              AND date(point_date) >= date(?)
-        """
-
-    active_recent = int(fetchall_sql(conn, sql_recent, (*emp_ids, start_date.isoformat()))[0]["active"] or 0)
-
-    def count_due(col: str, days_out: int):
-        due_date = (date.today() + timedelta(days=days_out)).isoformat()
-        if is_pg(conn):
-            sql = f"SELECT COUNT(*) AS c FROM employees WHERE employee_id IN ({placeholders}) AND {col} IS NOT NULL AND ({col}::date) <= (%s::date)"
-        else:
-            sql = f"SELECT COUNT(*) AS c FROM employees WHERE employee_id IN ({placeholders}) AND {col} IS NOT NULL AND date({col}) <= date(?)"
-        return int(fetchall_sql(conn, sql, (*emp_ids, due_date))[0]["c"] or 0)
-
-    roll30 = count_due("rolloff_date", 30)
-    perf60 = count_due("perfect_attendance", 60)
-
-    if is_pg(conn):
-        trend_sql = f"""
-            SELECT (point_date::date)::text AS d, COUNT(*) AS events
-            FROM points_history
-            WHERE employee_id IN ({placeholders})
-              AND (point_date::date) >= (%s::date)
-            GROUP BY (point_date::date)
-            ORDER BY (point_date::date)
-        """
-    else:
-        trend_sql = f"""
-            SELECT date(point_date) AS d, COUNT(*) AS events
-            FROM points_history
-            WHERE employee_id IN ({placeholders})
-              AND date(point_date) >= date(?)
-            GROUP BY date(point_date)
-            ORDER BY date(point_date)
-        """
-    trend_df = pd.DataFrame([dict(r) for r in fetchall_sql(conn, trend_sql, (*emp_ids, start_date.isoformat()))])
-
-    # leaderboard
-    if is_pg(conn):
-        leader_sql = f"""
-            SELECT e.employee_id, e.first_name, e.last_name, COALESCE(e."Location", '') AS location,
-                   COALESCE(e.point_total,0) AS point_total
-            FROM employees e
-            WHERE e.employee_id IN ({placeholders})
-            ORDER BY COALESCE(e.point_total,0) DESC, e.last_name, e.first_name
-            LIMIT %s
-        """
-        leader_params = (*emp_ids, int(top_n))
-    else:
-        leader_sql = f"""
-            SELECT e.employee_id, e.first_name, e.last_name, COALESCE(e."Location", '') AS location,
-                   COALESCE(e.point_total,0) AS point_total
-            FROM employees e
-            WHERE e.employee_id IN ({placeholders})
-            ORDER BY COALESCE(e.point_total,0) DESC, e.last_name, e.first_name
-            LIMIT ?
-        """
-        leader_params = (*emp_ids, int(top_n))
-
-    leaders = pd.DataFrame([dict(r) for r in fetchall_sql(conn, leader_sql, leader_params)])
-    if show_only_flagged and not leaders.empty:
-        leaders = leaders[pd.to_numeric(leaders["point_total"], errors="coerce").fillna(0) >= 2]
-
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric(f"Active in {days} days", active_recent)
-    m2.metric("Roll-offs due ≤30d", roll30)
-    m3.metric("Perfect attendance ≤60d", perf60)
-    m4.metric("Total employees", len(emp_ids))
-
-    left, right = st.columns([1.65, 1], gap="large")
-    with left:
-        st.markdown("#### Activity trend")
-        if trend_df.empty:
-            st.caption("No activity for selected window.")
-        else:
-            trend_df["d"] = pd.to_datetime(trend_df["d"], errors="coerce")
-            trend_df = trend_df.sort_values("d")
-            st.line_chart(trend_df.set_index("d")["events"], color="#4f7dff", height=270)
-
-        st.markdown("#### Top employees by points")
-        if leaders.empty:
-            st.caption("No employees match current filters.")
-        else:
-            display = leaders.copy()
-            display["employee_id"] = display["employee_id"].astype(str)
-            display["employee"] = display["last_name"].astype(str) + ", " + display["first_name"].astype(str)
-            display = display[["employee_id", "employee", "location", "point_total"]]
-            display.columns = ["Employee #", "Employee", "Building", "Point Total"]
-            st.dataframe(display, use_container_width=True, hide_index=True)
-
-    with right:
-        st.markdown("#### Quick actions")
-        st.markdown(
-            "<div class='dash-card'>"
-            "<b style='color:#1a2744'>Review roll-offs</b>"
-            "<br><span style='color:#5c6f8c;font-size:.85rem'>Jump to reports with roll-off preset.</span>"
-            "</div>",
-            unsafe_allow_html=True,
-        )
-        if st.button("Open roll-off exports", use_container_width=True, key="dash_export"):
-            st.session_state["page"] = "Exports & Forecasts"
-            st.session_state["export_type"] = "upcoming 2-month roll-offs"
-            st.rerun()
-
-        st.markdown(
-            "<div class='dash-card'>"
-            "<b style='color:#1a2744'>Record attendance event</b>"
-            "<br><span style='color:#5c6f8c;font-size:.85rem'>Launch ledger entry workflow.</span>"
-            "</div>",
-            unsafe_allow_html=True,
-        )
-        if st.button("Open points ledger", use_container_width=True, key="dash_ledger"):
-            st.session_state["page"] = "Points Ledger"
-            st.rerun()
-
-        st.markdown(
-            "<div class='dash-card'>"
-            "<b style='color:#1a2744'>Run maintenance jobs</b>"
-            "<br><span style='color:#5c6f8c;font-size:.85rem'>Use dry-run and commit controls.</span>"
-            "</div>",
-            unsafe_allow_html=True,
-        )
-        if st.button("Open system updates", use_container_width=True, key="dash_sys"):
-            st.session_state["page"] = "System Updates"
-            st.rerun()
-
-
-
-def employees_page(conn, building: str):
-    page_hero("Employees", "Lookup people quickly and view status without accidental edits.")
-    card_start()
-    q = st.text_input("Search by employee #, last name, or first name")
-    rows = load_employees(conn, q=q, building=building)
-    if not rows:
-        st.info("No matching employees.")
-        return
-
-    df = pd.DataFrame(rows)
-    df["employee_id"] = df["employee_id"].astype(str)
-    st.dataframe(df[["employee_id", "last_name", "first_name", "location", "is_active"]], use_container_width=True, hide_index=True)
-
-    emp_options = [(int(r["employee_id"]), f"{r['employee_id']} — {r['last_name']}, {r['first_name']}") for r in rows]
-    selected = st.selectbox("Select employee", emp_options, format_func=lambda x: x[1])
-    emp_id = selected[0]
-
-    emp = dict(repo.get_employee(conn, emp_id))
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Current Point Total", f"{float(emp.get('point_total') or 0):.1f}")
-    c2.metric("Next Roll-Off", fmt_date(emp.get("rolloff_date")))
+    c1.metric("Point Total", f"{pts:.1f}")
+    c2.metric("Next Roll-off", fmt_date(emp.get("rolloff_date")))
     c3.metric("Perfect Attendance", fmt_date(emp.get("perfect_attendance")))
-    c4.metric("Last Point Change", fmt_date(emp.get("last_point_date")))
+    c4.metric("Last Point Entry", fmt_date(emp.get("last_point_date")))
 
-    hist = pd.DataFrame([dict(r) for r in repo.get_points_history(conn, emp_id, limit=25)])
-    st.markdown("#### Recent point history")
-    if hist.empty:
-        st.caption("No history yet.")
+    divider()
+    section_label("Point History (last 50 entries)")
+    hist = [dict(r) for r in repo.get_points_history(conn, emp_id, limit=50)]
+    if hist:
+        df_h = pd.DataFrame(hist)[["point_date", "points", "reason", "note", "point_total"]]
+        df_h.columns = ["Date", "Points", "Reason", "Note", "Running Total"]
+        df_h["Date"] = df_h["Date"].apply(fmt_date)
+        st.dataframe(df_h, use_container_width=True, hide_index=True)
     else:
-        st.dataframe(hist[["point_date", "points", "reason", "note", "point_total"]], use_container_width=True, hide_index=True)
-    card_end()
+        info_box("No history entries yet for this employee.")
 
 
-def points_ledger_page(conn, building: str):
-    page_hero("Points Ledger", "Record attendance transactions with clean, auditable history.")
-    card_start()
+# ── Points Ledger ─────────────────────────────────────────────────────────────
+def points_ledger_page(conn, building: str) -> None:
+    page_heading("Points Ledger", "Record attendance transactions and maintain a complete audit trail.")
+
     employees = load_employees(conn, building=building)
     if not employees:
-        st.info("No employees available.")
+        warn_box("No active employees found for this building filter.")
         return
 
-    opts = [(int(e["employee_id"]), f"{e['employee_id']} — {e['last_name']}, {e['first_name']}") for e in employees]
+    opts = [
+        (int(e["employee_id"]), f"#{e['employee_id']} — {e['last_name']}, {e['first_name']}")
+        for e in employees
+    ]
     selected = st.selectbox("Employee", opts, format_func=lambda x: x[1])
     emp_id = selected[0]
+    emp = dict(repo.get_employee(conn, emp_id))
+    pts = float(emp.get("point_total") or 0)
 
-    with st.form("ledger_entry"):
-        p_date = st.date_input("Transaction date", value=date.today())
-        points = st.number_input("Points (+ add, - remove)", step=0.5, value=0.5)
-        reason = st.selectbox("Reason", REASON_OPTIONS)
-        note = st.text_input("Reason details")
-        submitted = st.form_submit_button("Post transaction")
+    # Status strip
+    st.markdown(
+        f"<div style='display:grid;grid-template-columns:repeat(4,1fr);gap:.7rem;margin:.55rem 0 1.2rem 0'>"
+        f"<div class='card-sm'>"
+        f"<div style='font-size:.67rem;font-weight:700;letter-spacing:.09em;text-transform:uppercase;"
+        f"color:#5c6f8c;margin-bottom:.3rem'>Points</div>{pt_badge(pts)}</div>"
+        f"<div class='card-sm'>"
+        f"<div style='font-size:.67rem;font-weight:700;letter-spacing:.09em;text-transform:uppercase;"
+        f"color:#5c6f8c;margin-bottom:.3rem'>Next Roll-off</div>"
+        f"<div style='font-size:.9rem;font-weight:700;color:#1a2744'>{fmt_date(emp.get('rolloff_date'))}</div></div>"
+        f"<div class='card-sm'>"
+        f"<div style='font-size:.67rem;font-weight:700;letter-spacing:.09em;text-transform:uppercase;"
+        f"color:#5c6f8c;margin-bottom:.3rem'>Perfect Att.</div>"
+        f"<div style='font-size:.9rem;font-weight:700;color:#1a2744'>{fmt_date(emp.get('perfect_attendance'))}</div></div>"
+        f"<div class='card-sm'>"
+        f"<div style='font-size:.67rem;font-weight:700;letter-spacing:.09em;text-transform:uppercase;"
+        f"color:#5c6f8c;margin-bottom:.3rem'>Last Entry</div>"
+        f"<div style='font-size:.9rem;font-weight:700;color:#1a2744'>{fmt_date(emp.get('last_point_date'))}</div></div>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
 
-    if submitted:
-        try:
-            preview = services.preview_add_point(emp_id, p_date, points, reason, note)
-            services.add_point(conn, preview)
-            st.success("Ledger entry saved.")
-            st.rerun()
-        except Exception as e:
-            st.error(str(e))
+    col_form, col_hist = st.columns([1, 2], gap="large")
 
-    hist = pd.DataFrame([dict(r) for r in repo.get_points_history(conn, emp_id, limit=100)])
-    st.markdown("#### Ledger history")
-    if hist.empty:
-        st.caption("No ledger history.")
-    else:
-        st.dataframe(hist[["id", "point_date", "points", "reason", "note", "point_total"]], use_container_width=True, hide_index=True)
-        if st.button("Undo last change"):
-            try:
-                last = hist.iloc[0]
-                services.delete_point_history_entry(conn, point_id=int(last["id"]), employee_id=emp_id)
-                st.success("Last ledger change was removed.")
-                st.rerun()
-            except Exception as e:
-                st.error(str(e))
-    card_end()
+    with col_form:
+        section_label("New Transaction")
+        with st.form("ledger_entry", clear_on_submit=True):
+            p_date  = st.date_input("Date", value=date.today())
+            points  = st.number_input("Points (+ add / − remove)", step=0.5, value=0.5, min_value=-20.0, max_value=20.0)
+            reason  = st.selectbox("Reason", REASON_OPTIONS)
+            note    = st.text_input("Note (optional)")
+            submit  = st.form_submit_button("Post Transaction", use_container_width=True)
 
-
-def manage_employees_page(conn):
-    page_hero("Manage Employees", "HR maintenance tools for onboarding, edits, archive, and cleanup.")
-    a, b = st.tabs(["Add", "Edit/Archive"])
-
-    with a:
-        with st.form("add_employee"):
-            emp_id = st.number_input("Employee #", min_value=1, step=1)
-            first = st.text_input("First name")
-            last = st.text_input("Last name")
-            location = st.selectbox("Building", ["", *BUILDINGS])
-            submitted = st.form_submit_button("Add employee")
-        if submitted:
-            try:
-                services.create_employee(conn, int(emp_id), last, first, location)
-                conn.commit()
-                st.success("Employee added.")
-            except Exception as e:
-                st.error(str(e))
-
-    with b:
-        rows = [dict(r) for r in repo.search_employees(conn, q="", active_only=False, limit=3000)]
-        options = [(int(r["employee_id"]), f"{r['employee_id']} — {r['last_name']}, {r['first_name']}") for r in rows]
-        selected = st.selectbox("Employee to edit", options, format_func=lambda x: x[1])
-        emp = dict(repo.get_employee(conn, selected[0]))
-
-        with st.form("edit_employee"):
-            first = st.text_input("First name", value=emp.get("first_name") or "")
-            last = st.text_input("Last name", value=emp.get("last_name") or "")
-            location = st.selectbox("Building", ["", *BUILDINGS], index=max(["", *BUILDINGS].index(emp.get("location") or "") if (emp.get("location") or "") in ["", *BUILDINGS] else 0, 0))
-            active = st.checkbox("Active", value=bool(emp.get("is_active", 1)))
-            submitted = st.form_submit_button("Save changes")
-
-        if submitted:
-            try:
-                exec_sql(conn, "UPDATE employees SET first_name = ?, last_name = ?, \"Location\" = ?, is_active = ? WHERE employee_id = ?", (first.strip(), last.strip(), location or None, 1 if active else 0, selected[0]))
-                conn.commit()
-                st.success("Employee updated.")
-            except Exception as e:
-                st.error(str(e))
-
-        st.markdown(
-            "<div style='border-top:1px solid rgba(0,0,0,0.07);margin:1rem 0'></div>",
-            unsafe_allow_html=True,
-        )
-        delete_confirm = st.checkbox("I understand delete permanently removes employee and history.")
-        if st.button("Delete employee"):
-            if not delete_confirm:
-                st.error("Check confirmation first.")
+        if submit:
+            if p_date > date.today():
+                st.error("Date cannot be in the future.")
             else:
                 try:
-                    services.delete_employee(conn, selected[0])
+                    preview = services.preview_add_point(emp_id, p_date, points, reason, note)
+                    services.add_point(conn, preview)
+                    st.success(f"Posted {points:+.1f} pts on {fmt_date(p_date)}.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+
+    with col_hist:
+        section_label("Transaction History")
+        hist = [dict(r) for r in repo.get_points_history(conn, emp_id, limit=100)]
+        if hist:
+            df_h = pd.DataFrame(hist)[["id", "point_date", "points", "reason", "note", "point_total"]]
+            df_h.columns = ["ID", "Date", "Pts", "Reason", "Note", "Running Total"]
+            df_h["Date"] = df_h["Date"].apply(fmt_date)
+            st.dataframe(df_h.drop(columns=["ID"]), use_container_width=True, hide_index=True, height=430)
+            if st.button("Undo Last Entry", key="undo_last"):
+                try:
+                    services.delete_point_history_entry(conn, point_id=int(df_h.iloc[0]["ID"]), employee_id=emp_id)
+                    st.success("Last entry removed.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+        else:
+            info_box("No history entries for this employee yet.")
+
+
+# ── Manage Employees ──────────────────────────────────────────────────────────
+def manage_employees_page(conn) -> None:
+    page_heading("Manage Employees", "Onboard new employees, update details, archive, or permanently delete records.")
+
+    BLDG_OPTS = ["", *BUILDINGS]
+    tab_add, tab_edit = st.tabs(["Add Employee", "Edit / Archive / Delete"])
+
+    # ── Add ──────────────────────────────────────────────────────────────────
+    with tab_add:
+        st.markdown("<div style='height:.5rem'></div>", unsafe_allow_html=True)
+        col_form, col_info = st.columns([1, 1], gap="large")
+
+        with col_form:
+            with st.form("add_employee", clear_on_submit=True):
+                emp_id   = st.number_input("Employee #", min_value=1, step=1)
+                first    = st.text_input("First Name")
+                last     = st.text_input("Last Name")
+                location = st.selectbox("Building", BLDG_OPTS)
+                added    = st.form_submit_button("Add Employee", use_container_width=True)
+
+            if added:
+                if not first.strip() or not last.strip():
+                    st.error("First and last name are required.")
+                else:
+                    try:
+                        services.create_employee(conn, int(emp_id), last.strip(), first.strip(), location or None)
+                        conn.commit()
+                        st.success(f"Employee #{int(emp_id)} — {last}, {first} added.")
+                    except Exception as exc:
+                        st.error(str(exc))
+
+        with col_info:
+            st.markdown("<div style='height:2.5rem'></div>", unsafe_allow_html=True)
+            st.markdown(
+                "<div class='info-box'><b>New employee checklist</b><br>"
+                "• Employee # must be unique across all locations<br>"
+                "• Building can be set now or updated later via the Edit tab<br>"
+                "• All policy dates are blank until the first point entry is posted</div>",
+                unsafe_allow_html=True,
+            )
+
+    # ── Edit / Archive / Delete ───────────────────────────────────────────────
+    with tab_edit:
+        st.markdown("<div style='height:.5rem'></div>", unsafe_allow_html=True)
+        all_rows = [dict(r) for r in repo.search_employees(conn, q="", active_only=False, limit=3000)]
+        if not all_rows:
+            info_box("No employees in the database yet.")
+            return
+
+        opts = [
+            (
+                int(r["employee_id"]),
+                f"#{r['employee_id']} — {r['last_name']}, {r['first_name']}"
+                + (" (inactive)" if not r.get("is_active", 1) else ""),
+            )
+            for r in all_rows
+        ]
+        sel = st.selectbox("Select employee", opts, format_func=lambda x: x[1], label_visibility="collapsed")
+        emp = dict(repo.get_employee(conn, sel[0]))
+        loc_val = emp.get("Location") or emp.get("location") or ""
+        loc_idx = BLDG_OPTS.index(loc_val) if loc_val in BLDG_OPTS else 0
+
+        col_edit, col_del = st.columns([1, 1], gap="large")
+
+        with col_edit:
+            section_label("Edit Details")
+            with st.form("edit_employee"):
+                first_e = st.text_input("First Name", value=emp.get("first_name") or "")
+                last_e  = st.text_input("Last Name",  value=emp.get("last_name") or "")
+                bldg_e  = st.selectbox("Building", BLDG_OPTS, index=loc_idx)
+                act_e   = st.checkbox("Active", value=bool(emp.get("is_active", 1)))
+                saved   = st.form_submit_button("Save Changes", use_container_width=True)
+
+            if saved:
+                try:
+                    exec_sql(
+                        conn,
+                        'UPDATE employees SET first_name=?, last_name=?, "Location"=?, is_active=? WHERE employee_id=?',
+                        (first_e.strip(), last_e.strip(), bldg_e or None, 1 if act_e else 0, sel[0]),
+                    )
                     conn.commit()
-                    st.success("Employee deleted.")
-                except Exception as e:
-                    st.error(str(e))
+                    st.success("Changes saved.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+
+        with col_del:
+            section_label("Danger Zone")
+            st.markdown(
+                "<div class='danger-box'>Permanently removes this employee "
+                "<b>and all their point history</b>. This cannot be undone.</div>",
+                unsafe_allow_html=True,
+            )
+            st.markdown("<div style='height:.6rem'></div>", unsafe_allow_html=True)
+            confirmed = st.checkbox(f"I understand — permanently delete #{sel[0]}")
+            if confirmed:
+                if st.button("Delete Employee", key="del_emp"):
+                    try:
+                        services.delete_employee(conn, sel[0])
+                        conn.commit()
+                        st.success(f"Employee #{sel[0]} deleted.")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(str(exc))
 
 
-def exports_page(conn, building: str):
-    page_hero("Exports & Forecasts", "Generate operational files and forward-looking attendance lists.")
-    card_start()
-    export_type = st.selectbox(
-        "Export type",
-        ["30-day point history", "upcoming 2-month roll-offs", "upcoming perfect attendance", "upcoming annual roll-off"],
-        key="export_type",
+# ── Exports & Forecasts ───────────────────────────────────────────────────────
+EXPORT_LABELS = {
+    "30-day point history":        "30-Day Point History",
+    "upcoming 2-month roll-offs":  "Upcoming 2-Month Roll-offs",
+    "upcoming perfect attendance": "Upcoming Perfect Attendance",
+    "upcoming annual roll-off":    "Annual YTD Roll-off Entries",
+}
+
+
+def run_export_query(conn, export_type: str, building: str, start_date: date, end_date: date) -> pd.DataFrame:
+    pg = is_pg(conn)
+
+    if export_type == "30-day point history":
+        if pg:
+            sql = """SELECT e.employee_id, e.last_name, e.first_name, COALESCE(e."Location",'') AS location,
+                            p.point_date, p.points, p.reason, COALESCE(p.note,'') AS note
+                       FROM points_history p JOIN employees e ON e.employee_id=p.employee_id
+                      WHERE (p.point_date::date) BETWEEN (%s::date) AND (%s::date)"""
+        else:
+            sql = """SELECT e.employee_id, e.last_name, e.first_name, COALESCE(e."Location",'') AS location,
+                            p.point_date, p.points, p.reason, COALESCE(p.note,'') AS note
+                       FROM points_history p JOIN employees e ON e.employee_id=p.employee_id
+                      WHERE date(p.point_date) BETWEEN date(?) AND date(?)"""
+        params = [start_date.isoformat(), end_date.isoformat()]
+
+    elif export_type == "upcoming 2-month roll-offs":
+        if pg:
+            sql = """SELECT employee_id, last_name, first_name, COALESCE("Location",'') AS location,
+                            point_total, rolloff_date
+                       FROM employees WHERE rolloff_date IS NOT NULL
+                         AND (rolloff_date::date) BETWEEN (%s::date) AND (%s::date)"""
+        else:
+            sql = """SELECT employee_id, last_name, first_name, COALESCE("Location",'') AS location,
+                            point_total, rolloff_date
+                       FROM employees WHERE rolloff_date IS NOT NULL
+                         AND date(rolloff_date) BETWEEN date(?) AND date(?)"""
+        params = [start_date.isoformat(), end_date.isoformat()]
+
+    elif export_type == "upcoming perfect attendance":
+        if pg:
+            sql = """SELECT employee_id, last_name, first_name, COALESCE("Location",'') AS location,
+                            point_total, perfect_attendance
+                       FROM employees WHERE perfect_attendance IS NOT NULL
+                         AND (perfect_attendance::date) BETWEEN (%s::date) AND (%s::date)"""
+        else:
+            sql = """SELECT employee_id, last_name, first_name, COALESCE("Location",'') AS location,
+                            point_total, perfect_attendance
+                       FROM employees WHERE perfect_attendance IS NOT NULL
+                         AND date(perfect_attendance) BETWEEN date(?) AND date(?)"""
+        params = [start_date.isoformat(), end_date.isoformat()]
+
+    else:  # annual roll-off
+        year_start = date(date.today().year, 1, 1)
+        if pg:
+            sql = """SELECT e.employee_id, e.last_name, e.first_name, COALESCE(e."Location",'') AS location,
+                            p.point_date, p.points, p.reason, COALESCE(p.note,'') AS note
+                       FROM points_history p JOIN employees e ON e.employee_id=p.employee_id
+                      WHERE p.reason='YTD Roll-Off' AND p.flag_code='AUTO'
+                        AND (p.point_date::date) >= (%s::date)"""
+        else:
+            sql = """SELECT e.employee_id, e.last_name, e.first_name, COALESCE(e."Location",'') AS location,
+                            p.point_date, p.points, p.reason, COALESCE(p.note,'') AS note
+                       FROM points_history p JOIN employees e ON e.employee_id=p.employee_id
+                      WHERE p.reason='YTD Roll-Off' AND p.flag_code='AUTO'
+                        AND date(p.point_date) >= date(?)"""
+        params = [year_start.isoformat()]
+
+    if building != "All":
+        e_ref = 'e."Location"' if " JOIN employees e" in sql else '"Location"'
+        sql += f" AND COALESCE({e_ref},'') = ?"
+        params.append(building)
+
+    sql += " ORDER BY last_name, first_name"
+    return pd.DataFrame([dict(r) for r in fetchall(conn, sql, tuple(params))])
+
+
+def exports_page(conn, building: str) -> None:
+    page_heading(
+        "Exports & Forecasts",
+        "Generate and download operational reports for roll-offs, perfect attendance, and point history.",
     )
-    c1, c2 = st.columns(2)
-    with c1:
-        start_date = st.date_input("Start date", value=date.today() - timedelta(days=30))
-    with c2:
-        end_date = st.date_input("End date", value=date.today() + timedelta(days=60))
 
-    df = run_export_query(conn, export_type, building, start_date, end_date)
-    if df.empty:
-        st.info("No rows found for current filters.")
-        return
+    col_ctrl, col_data = st.columns([1, 2.8], gap="large")
 
-    st.dataframe(df, use_container_width=True, hide_index=True)
-    st.download_button("Download CSV", data=to_csv_bytes(df), file_name=f"{export_type.replace(' ', '_')}.csv", mime="text/csv")
-    card_end()
+    with col_ctrl:
+        section_label("Report Settings")
+        export_type = st.radio(
+            "Report type",
+            list(EXPORT_LABELS.keys()),
+            format_func=lambda k: EXPORT_LABELS[k],
+            key="export_type",
+            label_visibility="collapsed",
+        )
+        st.markdown("<div style='height:.4rem'></div>", unsafe_allow_html=True)
+        start_date = st.date_input("From", value=date.today() - timedelta(days=30))
+        end_date   = st.date_input("To",   value=date.today() + timedelta(days=60))
+        run = st.button("Run Report", use_container_width=True)
+
+    with col_data:
+        if run:
+            df = run_export_query(conn, export_type, building, start_date, end_date)
+            st.session_state["last_export"] = (export_type, df)
+
+        if "last_export" in st.session_state:
+            label, df = st.session_state["last_export"]
+            section_label(EXPORT_LABELS.get(label, label))
+            if df.empty:
+                info_box("No records found for the selected date range and building filter.")
+            else:
+                st.dataframe(df, use_container_width=True, hide_index=True, height=500)
+                st.download_button(
+                    "Download CSV",
+                    data=to_csv(df),
+                    file_name=f"atp_{label.replace(' ', '_')}_{date.today()}.csv",
+                    mime="text/csv",
+                )
+        else:
+            st.markdown("<div style='height:1rem'></div>", unsafe_allow_html=True)
+            info_box("Choose a report type and date range, then click <b>Run Report</b>.")
 
 
-def system_updates_page(conn):
-    page_hero("System Updates", "Run controlled maintenance jobs with dry-run and confirmation guardrails.")
-    card_start()
-    run_date = st.date_input("Run jobs through date", value=date.today())
-    dry_run = st.toggle("Dry run", value=True)
-    confirm = st.checkbox("I understand this updates the database.")
+# ── System Updates ────────────────────────────────────────────────────────────
+def system_updates_page(conn) -> None:
+    page_heading(
+        "System Updates",
+        "Run automated maintenance jobs: 2-month roll-offs, perfect attendance advancement, and YTD roll-offs.",
+    )
 
     if "maintenance_log" not in st.session_state:
         st.session_state["maintenance_log"] = []
 
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("Process roll-offs due through today"):
-            if not dry_run and not confirm:
-                st.error("You must confirm before running database updates.")
-            else:
+    col_ctrl, col_results = st.columns([1, 2.2], gap="large")
+
+    with col_ctrl:
+        section_label("Job Controls")
+        run_date = st.date_input("Run jobs through date", value=date.today())
+        dry_run  = st.toggle("Dry run (preview only)", value=True)
+
+        if dry_run:
+            st.markdown("<div class='info-box' style='margin:.6rem 0'>Dry run — no data will be changed.</div>", unsafe_allow_html=True)
+            ok = True
+        else:
+            st.markdown("<div class='warn-box' style='margin:.6rem 0'>Live mode — changes will be written to the database.</div>", unsafe_allow_html=True)
+            ok = st.checkbox("I confirm — apply changes to the database")
+
+        st.markdown("<div style='height:.5rem'></div>", unsafe_allow_html=True)
+        btn_roll = st.button("Run 2-Month Roll-offs",      use_container_width=True, disabled=not ok)
+        btn_perf = st.button("Advance Perfect Attendance", use_container_width=True, disabled=not ok)
+        btn_ytd  = st.button("Apply YTD Roll-offs",        use_container_width=True, disabled=not ok)
+
+        st.markdown(
+            "<div style='margin-top:.9rem;font-size:.79rem;color:#8fa0b8'>"
+            "<b style='color:#5c6f8c'>2-Month Roll-offs</b> — removes 1 pt per overdue period, "
+            "advances the roll-off date.<br><br>"
+            "<b style='color:#5c6f8c'>Perfect Attendance</b> — advances eligible milestone dates "
+            "by one month per overdue period. No points are removed.<br><br>"
+            "<b style='color:#5c6f8c'>YTD Roll-offs</b> — applies a rolling 12-month net point "
+            "reduction. Does not move roll-off or perfect attendance anchors.</div>",
+            unsafe_allow_html=True,
+        )
+
+    with col_results:
+        if btn_roll and ok:
+            try:
                 rows = services.apply_2mo_rolloffs(conn, run_date=run_date, dry_run=dry_run)
-                st.success(f"Processed {len(rows)} employees.")
-                st.session_state["maintenance_log"].append({"timestamp": datetime.now().isoformat(timespec="seconds"), "job": "2-month roll-off", "dry_run": dry_run, "count": len(rows)})
+                st.session_state["maintenance_log"].append({
+                    "Time": datetime.now().strftime("%H:%M:%S"),
+                    "Job": "2-Month Roll-offs",
+                    "Dry Run": dry_run,
+                    "Affected": len(rows),
+                })
                 if rows:
                     df = pd.DataFrame(rows)
+                    st.success(f"{'Preview:' if dry_run else 'Applied:'} {len(rows)} employee(s) affected.")
                     st.dataframe(df, use_container_width=True, hide_index=True)
-                    st.download_button("Download impacted employees CSV", data=to_csv_bytes(df), file_name="rolloff_impacted.csv", mime="text/csv")
+                    st.download_button("Download CSV", to_csv(df), file_name=f"rolloffs_{run_date}.csv", mime="text/csv", key="dl_roll")
+                else:
+                    info_box("No 2-month roll-offs are due as of the selected date.")
+            except Exception as exc:
+                st.error(str(exc))
 
-    with c2:
-        if st.button("Advance perfect attendance date where eligible"):
-            if not dry_run and not confirm:
-                st.error("You must confirm before running database updates.")
-            else:
+        if btn_perf and ok:
+            try:
                 rows = services.advance_due_perfect_attendance_dates(conn, run_date=run_date, dry_run=dry_run)
-                st.success(f"Processed {len(rows)} employees.")
-                st.session_state["maintenance_log"].append({"timestamp": datetime.now().isoformat(timespec="seconds"), "job": "perfect attendance advance", "dry_run": dry_run, "count": len(rows)})
+                st.session_state["maintenance_log"].append({
+                    "Time": datetime.now().strftime("%H:%M:%S"),
+                    "Job": "Perfect Attendance",
+                    "Dry Run": dry_run,
+                    "Affected": len(rows),
+                })
                 if rows:
                     df = pd.DataFrame(rows)
+                    st.success(f"{'Preview:' if dry_run else 'Applied:'} {len(rows)} employee(s) affected.")
                     st.dataframe(df, use_container_width=True, hide_index=True)
-                    st.download_button("Download impacted employees CSV", data=to_csv_bytes(df), file_name="perfect_attendance_impacted.csv", mime="text/csv")
+                    st.download_button("Download CSV", to_csv(df), file_name=f"perfect_att_{run_date}.csv", mime="text/csv", key="dl_perf")
+                else:
+                    info_box("No perfect attendance dates are due for advancement.")
+            except Exception as exc:
+                st.error(str(exc))
 
-    log_df = pd.DataFrame(st.session_state["maintenance_log"])
-    st.markdown("#### Run log")
-    if log_df.empty:
-        st.caption("No jobs run in this session.")
-    else:
-        st.dataframe(log_df, use_container_width=True, hide_index=True)
-    card_end()
+        if btn_ytd and ok:
+            try:
+                rows = services.apply_ytd_rolloffs(conn, run_date=run_date, dry_run=dry_run)
+                st.session_state["maintenance_log"].append({
+                    "Time": datetime.now().strftime("%H:%M:%S"),
+                    "Job": "YTD Roll-offs",
+                    "Dry Run": dry_run,
+                    "Affected": len(rows),
+                })
+                if rows:
+                    try:
+                        df = pd.DataFrame(
+                            [{"Employee ID": r[0], "Net Points": r[1], "Roll Date": r[2]} for r in rows]
+                        )
+                    except Exception:
+                        df = pd.DataFrame(rows)
+                    st.success(f"{'Preview:' if dry_run else 'Applied:'} {len(rows)} YTD entry(ies).")
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+                    st.download_button("Download CSV", to_csv(df), file_name=f"ytd_rolloffs_{run_date}.csv", mime="text/csv", key="dl_ytd")
+                else:
+                    info_box("No YTD roll-offs are applicable for the selected date.")
+            except Exception as exc:
+                st.error(str(exc))
+
+        if st.session_state["maintenance_log"]:
+            divider()
+            section_label("Session Run Log")
+            st.dataframe(
+                pd.DataFrame(st.session_state["maintenance_log"]),
+                use_container_width=True,
+                hide_index=True,
+            )
 
 
-def main():
+# ── Main ──────────────────────────────────────────────────────────────────────
+def main() -> None:
     apply_theme()
-    st.markdown(
-        """
-        <div style='margin-bottom:.4rem'>
-            <h1 style='color:#1a2744; font-weight:800; font-size:2rem; letter-spacing:-.025em; margin:0; padding:0'>
-                Attendance Point Tracker
-            </h1>
-            <div class='title-accent'></div>
-            <p style='color:#5c6f8c; font-size:.88rem; margin:0'>Professional attendance operations workspace</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
     conn = get_conn()
 
     logo_path = REPO_ROOT / "assets" / "logo.png"
-    if logo_path.exists():
-        st.sidebar.markdown("<div class='sidebar-logo-wrap'>", unsafe_allow_html=True)
-        st.sidebar.image(str(logo_path), use_container_width=True)
-        st.sidebar.markdown("</div>", unsafe_allow_html=True)
 
-    st.sidebar.markdown(
-        "<div style='color:#7a8ba8;font-size:.72rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-bottom:.4rem'>Navigation</div>",
-        unsafe_allow_html=True,
-    )
-    page = st.sidebar.radio(
-        "Navigation menu",
-        ["Dashboard", "Employees", "Points Ledger", "Manage Employees", "Exports & Forecasts", "System Updates"],
-        key="page",
-        label_visibility="collapsed",
-    )
-    st.sidebar.markdown(
-        "<div style='color:#7a8ba8;font-size:.72rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin:1rem 0 .4rem 0'>Building Filter</div>",
-        unsafe_allow_html=True,
-    )
-    building = st.sidebar.selectbox("Building filter", ["All", *BUILDINGS], key="global_building", label_visibility="collapsed")
+    with st.sidebar:
+        if logo_path.exists():
+            st.image(str(logo_path), use_container_width=True)
+        else:
+            st.markdown(
+                "<div class='sidebar-brand'>"
+                "<div class='name'>Attendance Tracker</div>"
+                "<div class='sub'>Point Management System</div>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+
+        st.markdown("<span class='sidebar-nav-label'>Navigation</span>", unsafe_allow_html=True)
+        page = st.radio(
+            "nav",
+            ["Dashboard", "Employees", "Points Ledger", "Manage Employees", "Exports & Forecasts", "System Updates"],
+            key="page",
+            label_visibility="collapsed",
+        )
+
+        st.markdown("<span class='sidebar-nav-label'>Building Filter</span>", unsafe_allow_html=True)
+        building = st.selectbox(
+            "building",
+            ["All", *BUILDINGS],
+            key="global_building",
+            label_visibility="collapsed",
+        )
 
     if page == "Dashboard":
         dashboard_page(conn, building)
