@@ -408,13 +408,17 @@ def dashboard_page(conn, building: str) -> None:
                 eid = int(p[0])
                 if eid not in emp_set:
                     continue
+                roll_date_str = str(p[2]) if len(p) > 2 else ""
+                # Skip overdue YTD entries — past dates need System Updates, not this list
+                if roll_date_str and roll_date_str < today.isoformat():
+                    continue
                 e = emp_lookup.get(eid, {})
                 ytd_entries.append({
                     "employee_id": eid,
                     "last_name":   e.get("last_name", ""),
                     "first_name":  e.get("first_name", ""),
                     "point_total": e.get("point_total", 0),
-                    "rolloff_date": str(p[2]) if len(p) > 2 else "",
+                    "rolloff_date": roll_date_str,
                     "type":   "YTD Roll-Off",
                     "amount": float(p[1] or 0),
                 })
