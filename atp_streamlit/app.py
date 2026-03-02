@@ -34,11 +34,14 @@ else:
     st.sidebar.write("DB exists:", pp.exists())
     st.sidebar.write("Parent exists:", pp.parent.exists())
     st.sidebar.write("Writable parent:", os.access(str(pp.parent), os.W_OK))
+    
 # --- Path setup / imports -----------------------------------------------------
-APP_DIR = Path(__file__).resolve().parent
-ROOT = APP_DIR.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+# ---- Path setup (MUST come before importing atp_core) -------------------------
+APP_DIR = Path(__file__).resolve().parent          # .../attendance-tracking/atp_streamlit
+REPO_ROOT = APP_DIR.parent                         # .../attendance-tracking
+
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from atp_core.db import connect, get_db_path
 from atp_core.schema import ensure_schema
