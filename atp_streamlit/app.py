@@ -28,73 +28,75 @@ def apply_theme():
         """
         <style>
         :root {
-            --bg: #0b1220;
-            --panel: #121b2e;
-            --panel-2: #17233a;
-            --line: #263653;
-            --text: #ecf2ff;
-            --muted: #9fb1d6;
-            --primary: #4f7dff;
-            --accent: #1dd3b0;
-            --danger: #ff4f70;
+            --bg: #f2f5fb;
+            --surface: #ffffff;
+            --surface-soft: #f8faff;
+            --line: #d9e2f0;
+            --text: #15243d;
+            --muted: #5f7395;
+            --navy-1: #0f1f3d;
+            --navy-2: #1b2f54;
+            --primary: #3f6fe8;
+            --accent: #1dc8b0;
         }
 
         .stApp {
-            background:
-              radial-gradient(1200px 500px at 12% -5%, rgba(79,125,255,.20), transparent 45%),
-              radial-gradient(1000px 450px at 95% 0%, rgba(29,211,176,.18), transparent 45%),
-              linear-gradient(180deg, #0a1020 0%, #0c1528 55%, #0a1222 100%);
+            background: radial-gradient(1000px 420px at 8% -8%, rgba(63,111,232,.08), transparent 42%), var(--bg);
             color: var(--text);
         }
 
         .block-container { max-width: 1500px; padding-top: 1.1rem; }
 
         section[data-testid="stSidebar"] {
-            background: linear-gradient(180deg, #0d172e 0%, #111f3c 60%, #0f1932 100%);
-            border-right: 1px solid #25395b;
+            background: linear-gradient(180deg, var(--navy-1) 0%, var(--navy-2) 100%);
+            border-right: 1px solid #304a79;
             width: 320px !important;
         }
-        section[data-testid="stSidebar"] * { color: var(--text) !important; }
+        section[data-testid="stSidebar"] * { color: #eaf1ff !important; }
 
-        .sidebar-shell {
-            background: linear-gradient(145deg, rgba(255,255,255,.06), rgba(255,255,255,.03));
-            border: 1px solid rgba(172,194,238,.25);
-            border-radius: 14px;
-            padding: .85rem;
-            margin-bottom: .9rem;
-            box-shadow: 0 10px 26px rgba(0,0,0,.28);
+        /* make sidebar controls stand out */
+        section[data-testid="stSidebar"] [data-testid="stSelectbox"] > div > div,
+        section[data-testid="stSidebar"] [data-testid="stSelectbox"] [data-baseweb="select"],
+        section[data-testid="stSidebar"] [data-testid="stSelectbox"] input {
+            background: #f3f7ff !important;
+            color: #1a2943 !important;
+            border-radius: 10px !important;
+            border: 2px solid #5f8dff !important;
+            box-shadow: 0 0 0 2px rgba(95,141,255,.18);
         }
 
         .hero {
-            background: linear-gradient(120deg, rgba(76,119,255,.22), rgba(31,201,182,.16));
-            border: 1px solid rgba(162,187,255,.35);
-            border-radius: 18px;
+            background: linear-gradient(120deg, #ecf3ff, #f4fbff);
+            border: 1px solid #c9daf8;
+            border-left: 5px solid var(--primary);
+            border-radius: 16px;
             padding: 1.15rem 1.3rem;
-            box-shadow: 0 14px 34px rgba(2,7,20,.35);
+            box-shadow: 0 8px 22px rgba(28,54,102,.08);
             margin-bottom: .95rem;
         }
 
         .cool-card {
-            background: linear-gradient(180deg, rgba(21,31,53,.90), rgba(16,25,44,.94));
+            background: var(--surface);
             border: 1px solid var(--line);
             border-radius: 14px;
             padding: .95rem 1rem;
-            box-shadow: 0 8px 20px rgba(3,8,24,.25);
+            box-shadow: 0 8px 20px rgba(17,41,84,.06);
             margin-bottom: .75rem;
         }
 
         .dash-card {
-            background: linear-gradient(180deg, rgba(23,35,58,.95), rgba(17,27,46,.98));
-            border: 1px solid var(--line);
+            background: linear-gradient(180deg, #ffffff, #f8fbff);
+            border: 1px solid #d4e0f5;
             border-radius: 14px;
             padding: .9rem 1rem;
             margin-bottom: .65rem;
-            box-shadow: 0 8px 22px rgba(5,11,26,.22);
+            box-shadow: 0 8px 18px rgba(17,41,84,.06);
         }
 
         div[data-testid="stMetric"] {
-            background: linear-gradient(180deg, rgba(24,36,61,.95), rgba(18,29,50,.98));
-            border: 1px solid var(--line);
+            background: #fff;
+            border: 1px solid #d9e3f4;
+            border-top: 3px solid var(--primary);
             border-radius: 12px;
             padding: 12px 12px;
         }
@@ -103,17 +105,17 @@ def apply_theme():
 
         .stButton>button {
             border-radius: 10px;
-            border: 1px solid #4e70c9;
-            background: linear-gradient(120deg, #315ee8, #22bca8);
+            border: 1px solid #4f74db;
+            background: linear-gradient(120deg, #3d67dd, #39b9ad);
             color: #fff;
             font-weight: 600;
         }
-        .stButton>button:hover { filter: brightness(1.06); }
+        .stButton>button:hover { filter: brightness(1.05); }
 
         .stDataFrame, .stTabs [data-baseweb="tab-panel"] {
             border: 1px solid var(--line);
             border-radius: 12px;
-            background: rgba(16,25,44,.62);
+            background: var(--surface);
         }
 
         h1,h2,h3,h4,h5 { color: var(--text) !important; }
@@ -294,8 +296,8 @@ def dashboard_page(conn, building: str):
     st.markdown(
         """
         <div class='hero'>
-            <h2 style='margin:0 0 .35rem 0'>Attendance Ops Dashboard</h2>
-            <div>Interactive command center for activity trends, upcoming deadlines, and one-click actions.</div>
+            <h2 style='margin:0 0 .35rem 0; color:#142647'>Attendance Ops Dashboard</h2>
+            <div style='color:#4f6488'>Interactive command center for activity trends, upcoming deadlines, and one-click actions.</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -645,27 +647,6 @@ def main():
 
     conn = get_conn()
 
-    logo_path = REPO_ROOT / "assets" / "logo.png"
-    logo_html = f"<img src='file://{logo_path}' style='max-width:170px;width:100%;display:block;margin:auto;'>" if logo_path.exists() else "<h3 style='text-align:center;margin:0'>ATP</h3>"
-    st.sidebar.markdown(
-        f"""
-        <div class='sidebar-shell'>
-          {logo_html}
-          <div style='text-align:center; margin-top:.4rem; font-size:.78rem; color:#bfd0f7;'>HR ATTENDANCE COMMAND</div>
-          <div style='text-align:center; margin-top:.25rem; font-weight:700;'>👤 Operations Team</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    rows_all = load_employees(conn, building="All")
-    active_count = sum(1 for r in rows_all if int(r.get("is_active", 1)) == 1)
-    active_pct = min(100, int((active_count / max(1, len(rows_all))) * 100))
-    st.sidebar.markdown(f"**Team Active Status · {active_pct}%**")
-    st.sidebar.progress(active_pct)
-    st.sidebar.caption(f"{active_count} active of {len(rows_all)} employees")
-    st.sidebar.divider()
-
     st.sidebar.subheader("Navigation")
     page = st.sidebar.radio(
         "Navigation menu",
@@ -673,7 +654,8 @@ def main():
         key="page",
         label_visibility="collapsed",
     )
-    building = st.sidebar.selectbox("Building filter", ["All", *BUILDINGS], key="global_building")
+    st.sidebar.markdown("### Building filter")
+    building = st.sidebar.selectbox("Building filter", ["All", *BUILDINGS], key="global_building", label_visibility="collapsed")
 
     if page == "Dashboard":
         dashboard_page(conn, building)
