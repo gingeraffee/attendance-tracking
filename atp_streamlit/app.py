@@ -876,7 +876,7 @@ with tab_reports:
 
     with c1:
         st.markdown("#### Preview Roll Offs")
-        st.caption("Employees with a future roll-off date, sorted earliest first.")
+        st.caption("Shows missed/due and upcoming roll-off dates.")
 
         if _is_pg_conn(conn):
             rows_r = _fetchall_sql(
@@ -886,7 +886,6 @@ with tab_reports:
                        COALESCE(point_total, 0.0) AS pt
                   FROM employees
                  WHERE rolloff_date IS NOT NULL
-                   AND (rolloff_date::date) >= CURRENT_DATE
                    AND COALESCE(point_total, 0.0) > 0
                  ORDER BY (rolloff_date::date) ASC, last_name, first_name;
                 """,
@@ -899,7 +898,6 @@ with tab_reports:
                        COALESCE(point_total, 0.0) AS pt
                   FROM employees
                  WHERE rolloff_date IS NOT NULL
-                   AND date(rolloff_date) >= date('now')
                    AND COALESCE(point_total, 0.0) > 0
                  ORDER BY date(rolloff_date) ASC, last_name, first_name;
                 """,
@@ -907,17 +905,20 @@ with tab_reports:
 
         df_r = pd.DataFrame([dict(r) for r in rows_r])
         if df_r.empty:
-            st.info("No upcoming roll-offs found.")
+            st.info("No missed/due or upcoming roll-offs found.")
         else:
-            df_r["rolloff_date"] = pd.to_datetime(
-                df_r["rolloff_date"], errors="coerce"
-            ).dt.strftime("%m/%d/%Y")
+            raw_dates = pd.to_datetime(df_r["rolloff_date"], errors="coerce")
+            df_r["rolloff_date"] = raw_dates.dt.strftime("%m/%d/%Y")
+            df_r["status"] = raw_dates.apply(
+                lambda d: "Missed / Due" if pd.notna(d) and d.date() <= today else "Upcoming"
+            )
 
             df_out_r = pd.DataFrame({
                 "Employee #": df_r["employee_id"].astype(str),
                 "First Name": df_r["first_name"],
                 "Last Name": df_r["last_name"],
                 "Roll-Off Date": df_r["rolloff_date"],
+                "Status": df_r["status"],
                 "Points": df_r["pt"].apply(lambda v: f"-{float(v):.1f}"),
                 "Reason": "2 Month Roll Off",
                 "Note": "",
@@ -1036,6 +1037,71 @@ with tab_reports:
             st.download_button(
                 "Download CSV", csv, "apply_2_month_rolloffs.csv",
                 "text/csv", key="dl_apply_rolloffs",
+            )
+
+    st.divider()
+
+    # ---- Annual (YTD) Roll Off ----
+    st.markdown("#### Annual Roll Off (YTD)")
+    st.caption(
+        "Shows employees with net-positive points in last year's same month window "
+        "that are due for YTD roll-off now (including missed/due if not yet applied)."
+    )
+
+    ytd_items = services.preview_ytd_rolloffs(conn, run_date=today)
+    if not ytd_items:
+        st.info("No annual (YTD) roll-offs are due.")
+    else:
+        ytd_rows = []
+        for employee_id, net_points, roll_date, label in ytd_items:
+            ytd_rows.append(
+                {
+                    "Employee #": str(employee_id),
+                    "Roll-Off Date": roll_date.strftime("%m/%d/%Y"),
+                    "Points": f"-{float(net_points):.1f}",
+                    "Reason": "YTD Roll-Off",
+                    "Note": f"YTD roll-off for {label}",
+                    "Flag Code": "AUTO",
+                }
+            )
+        df_ytd = pd.DataFrame(ytd_rows)
+        st.dataframe(df_ytd, use_container_width=True, hide_index=True)
+        st.download_button(
+            "Download CSV",
+            df_ytd.to_csv(index=False).encode("utf-8"),
+            "preview_ytd_rolloffs.csv",
+            "text/csv",
+            key="dl_preview_ytd_rolloffs",
+        )
+
+    confirm_ytd = st.checkbox(
+        "I understand this will write annual (YTD) roll-off entries to the database.",
+        key="confirm_ytd_rolloff",
+    )
+    if st.button("Perform Annual Roll Off (Commit)", key="btn_commit_ytd_rolloff") and confirm_ytd:
+        applied_ytd = services.apply_ytd_rolloffs(conn, run_date=today, dry_run=False)
+        if not applied_ytd:
+            st.info("No annual (YTD) roll-offs were applied.")
+        else:
+            df_applied_ytd = pd.DataFrame(
+                [
+                    {
+                        "Employee #": str(employee_id),
+                        "Points Removed": f"-{float(net_points):.1f}",
+                        "Roll-Off Date": roll_date.strftime("%m/%d/%Y"),
+                        "Label": label,
+                    }
+                    for employee_id, net_points, roll_date, label in applied_ytd
+                ]
+            )
+            st.success(f"Applied annual (YTD) roll-offs for {len(df_applied_ytd)} employee(s).")
+            st.dataframe(df_applied_ytd, use_container_width=True, hide_index=True)
+            st.download_button(
+                "Download CSV",
+                df_applied_ytd.to_csv(index=False).encode("utf-8"),
+                "apply_ytd_rolloffs.csv",
+                "text/csv",
+                key="dl_apply_ytd_rolloffs",
             )
 
     st.divider()
