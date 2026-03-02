@@ -384,7 +384,7 @@ def dashboard_page(conn, building: str) -> None:
         leaders = [dict(r) for r in fetchall(conn, sql_leaders, (*emp_ids, top_n))]
         if leaders:
             df_l = pd.DataFrame(
-                [{"Emp #": r["employee_id"], "Name": f"{r['last_name']}, {r['first_name']}",
+                [{"Emp #": str(r["employee_id"]), "Name": f"{r['last_name']}, {r['first_name']}",
                   "Building": r["loc"] or "—", "Points": float(r["pts"] or 0)}
                  for r in leaders]
             )
@@ -395,19 +395,62 @@ def dashboard_page(conn, building: str) -> None:
     # ── Upcoming roll-offs + perfect attendance ───────────────────────────────
     with col_right:
         section_label("Upcoming Roll-offs")
-        rolloffs = [dict(r) for r in fetchall(conn, sql_rolloffs, emp_ids)]
-        if rolloffs:
+
+        # 2-month roll-offs (from rolloff_date column) ── always -1.0 pts
+        rolloffs_2mo = [dict(r) for r in fetchall(conn, sql_rolloffs, emp_ids)]
+
+        # YTD roll-off previews — amount varies by prior-year month points
+        emp_set    = set(emp_ids)
+        emp_lookup = {int(e["employee_id"]): e for e in employees}
+        ytd_entries: list[dict] = []
+        try:
+            for p in services.preview_ytd_rolloffs(conn, run_date=date.today()):
+                eid = int(p[0])
+                if eid not in emp_set:
+                    continue
+                e = emp_lookup.get(eid, {})
+                ytd_entries.append({
+                    "employee_id": eid,
+                    "last_name":   e.get("last_name", ""),
+                    "first_name":  e.get("first_name", ""),
+                    "point_total": e.get("point_total", 0),
+                    "rolloff_date": str(p[2]) if len(p) > 2 else "",
+                    "type":   "YTD Roll-Off",
+                    "amount": float(p[1] or 0),
+                })
+        except Exception:
+            pass
+
+        # Combine: tag 2-mo entries then append YTD entries; sort by date
+        all_upcoming = [{**r, "type": "2-Mo Roll-Off", "amount": -1.0} for r in rolloffs_2mo]
+        all_upcoming += ytd_entries
+        all_upcoming.sort(key=lambda x: str(x.get("rolloff_date") or "9999"))
+
+        if all_upcoming:
             html = []
-            for r in rolloffs:
-                days = days_until(r["rolloff_date"])
+            for r in all_upcoming:
+                days   = days_until(r["rolloff_date"])
+                is_ytd = r["type"] == "YTD Roll-Off"
+                tc = "#00b8e6" if is_ytd else "#4f8ef7"
+                tb = "rgba(0,184,230,.10)" if is_ytd else "rgba(79,142,247,.10)"
+                tbr= "rgba(0,184,230,.25)" if is_ytd else "rgba(79,142,247,.25)"
+                type_badge = (
+                    f"<span style='display:inline-block;padding:2px 8px;border-radius:6px;"
+                    f"font-size:.74rem;font-weight:700;color:{tc};background:{tb};"
+                    f"border:1px solid {tbr}'>{r['type']}</span>"
+                )
+                amt = float(r.get("amount") or 0)
                 html.append(
                     f"<div class='list-row'>"
                     f"<div style='display:flex;justify-content:space-between;align-items:center'>"
                     f"<div><span style='font-weight:600;font-size:.9rem;color:#1a2744'>{r['last_name']}, {r['first_name']}</span>"
                     f"<span style='color:#8fa0b8;font-size:.78rem;margin-left:.4rem'>#{r['employee_id']}</span></div>"
-                    f"<div style='display:flex;gap:.3rem;align-items:center'>{pt_badge(r['point_total'])}{days_badge(days)}</div>"
+                    f"<div style='display:flex;gap:.3rem;align-items:center'>{type_badge}{days_badge(days)}</div>"
                     f"</div>"
-                    f"<div style='font-size:.75rem;color:#8fa0b8;margin-top:.18rem'>Due {fmt_date(r['rolloff_date'])}</div>"
+                    f"<div style='display:flex;justify-content:space-between;margin-top:.22rem'>"
+                    f"<span style='font-size:.75rem;color:#8fa0b8'>Due {fmt_date(r['rolloff_date'])}</span>"
+                    f"<span style='font-size:.78rem;font-weight:700;color:#e0394a'>{amt:.1f} pts</span>"
+                    f"</div>"
                     f"</div>"
                 )
             st.markdown("".join(html), unsafe_allow_html=True)
