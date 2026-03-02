@@ -8,8 +8,7 @@ def get_db_path() -> str:
     env = os.getenv("ATP_DB_PATH")
     if env:
         return env
-    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    return os.path.join(repo_root, DEFAULT_DB_FILENAME)
+    return "/var/data/employeeroster.db"
 
 def connect(db_path: str | None = None) -> sqlite3.Connection:
     path = db_path or get_db_path()
