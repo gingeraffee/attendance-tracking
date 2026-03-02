@@ -1,7 +1,37 @@
 import os
 import sqlite3
 from pathlib import Path
+from contextlib import contextmanager
 
+
+@contextmanager
+def tx(conn=None, db_path: str | None = None):
+    """
+    Transaction context manager.
+
+    Usage:
+        with tx(conn) as c:
+            ... use c ...
+        # commits on success, rolls back on error
+
+    If conn is None, opens/closes its own connection.
+    """
+    own = False
+    if conn is None:
+        conn = connect(db_path=db_path)
+        own = True
+
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        if own:
+            conn.close()
+            
+            
 def get_db_path() -> str:
     """
     Return the SQLite DB path.
