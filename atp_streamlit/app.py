@@ -531,7 +531,7 @@ def dashboard_page(conn, building: str) -> None:
         ("0", "0 Points"),
         ("1-4", "1–4 Pts"),
         ("5-6", "5–6 Pts"),
-        ("7", "7 Pts"),
+        ("7-8", "7-8 Pts"),
     ]
     active_bucket = st.session_state.get("dashboard_bucket")
     tile_palette = {
@@ -550,7 +550,7 @@ def dashboard_page(conn, building: str) -> None:
         shadow = f"0 0 0 2px {glow}, 0 8px 18px rgba(15,32,68,.12)" if selected else "0 4px 14px rgba(15,32,68,.08)"
         employees_count = len(emp_detail_rows) if key == "all" else bucket_counts[key]
         col.markdown(
-            f"<a href='?dashboard_bucket={key}' style='text-decoration:none;display:block'>"
+            f"<a href='?dashboard_bucket={key}' target='_self' style='text-decoration:none;display:block'>"
             f"<div class='card-sm' style='margin-bottom:.45rem;padding:.72rem .9rem;"
             f"background:#ffffff;border:1px solid {border};box-shadow:{shadow};cursor:pointer;'>"
             f"<div style='height:4px;border-radius:999px;background:{accent};margin:-.2rem 0 .6rem 0'></div>"
