@@ -459,9 +459,9 @@ def selected_employee_sidebar(conn, employee_id: int | None) -> None:
                    e.first_name,
                    e.last_name,
                    COALESCE(e."Location", '') AS building,
-                   MAX(0.0, ROUND(COALESCE((
+                   GREATEST(0.0, ROUND(COALESCE((
                        SELECT SUM(ph.points) FROM points_history ph WHERE ph.employee_id = e.employee_id
-                   ), 0.0), 1)) AS point_total,
+                   ), 0.0)::numeric, 1)::float8) AS point_total,
                    (
                        SELECT MAX(ph2.point_date::date)
                          FROM points_history ph2
