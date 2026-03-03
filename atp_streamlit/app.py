@@ -642,7 +642,7 @@ def employees_page(conn, building: str) -> None:
     c4.metric("Last Point Entry", fmt_date(emp.get("last_point_date")))
 
     divider()
-    section_label("Point History")
+    section_label("Point History (all events)")
     hist = [dict(r) for r in repo.get_points_history(conn, emp_id, limit=5000)]
 
     pdf_bytes = build_point_history_pdf(emp, hist)
@@ -787,19 +787,21 @@ def points_ledger_page(conn, building: str) -> None:
                     try:
                         preview = services.preview_add_point(emp_id, p_date, float(points), reason, note)
                         services.add_point(conn, preview, flag_code=(flag_code or "").strip() or None)
-                        st.success(f"Added {float(points):+.1f} pts on {fmt_date(p_date)}.")
+                        st.success(f"Added {float(points):.1f} pts on {fmt_date(p_date)}.")
                         st.rerun()
                     except Exception as exc:
                         st.error(str(exc))
 
 
     with col_hist:
-        section_label("Transaction History")
-        hist = [dict(r) for r in repo.get_points_history(conn, emp_id, limit=100)]
+        section_label("Transaction History (all events)")
+        hist = [dict(r) for r in repo.get_points_history(conn, emp_id, limit=5000)]
         if hist:
             df_h = pd.DataFrame(hist)[["id", "point_date", "points", "reason", "note", "point_total"]]
-            df_h.columns = ["ID", "Date", "Pts", "Reason", "Note", "Point Total"]
-            df_h["Date"] = df_h["Date"].apply(fmt_date)
+            df_h["point_date"] = df_h["point_date"].apply(fmt_date)
+            df_h["points"] = df_h["points"].apply(lambda v: f"{float(v or 0):.1f}")
+            df_h["point_total"] = df_h["point_total"].apply(lambda v: f"{float(v or 0):.1f}")
+            df_h.columns = ["ID", "Date", "Pts", "Reason", "Note", "Running Total"]
             st.dataframe(df_h.drop(columns=["ID"]), use_container_width=True, hide_index=True, height=430)
             if st.button("Undo Last Entry", key="undo_last"):
                 try:
