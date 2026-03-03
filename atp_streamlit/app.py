@@ -603,8 +603,43 @@ def points_ledger_page(conn, building: str) -> None:
         (int(e["employee_id"]), f"#{e['employee_id']} — {e['last_name']}, {e['first_name']}")
         for e in employees
     ]
-    selected = st.selectbox("Employee", opts, format_func=lambda x: x[1])
-    emp_id = selected[0]
+
+    # Type-to-filter employee picker (fast for batch entry)
+    q = st.text_input(
+        "Find employee (type last name, first name, or employee #)",
+        value=st.session_state.get("ledger_emp_q", ""),
+        key="ledger_emp_q",
+        placeholder="Start typing…",
+    ).strip().lower()
+
+    def _match(label: str, emp_id: int) -> bool:
+        if not q:
+            return True
+        return (q in label.lower()) or (q in str(emp_id))
+
+    filtered = [o for o in opts if _match(o[1], o[0])]
+    if not filtered:
+        st.info("No employees match that search.")
+        return
+
+    # Keep last selected employee sticky (even while filtering)
+    prev_emp = st.session_state.get("ledger_emp_id")
+    default_idx = 0
+    if prev_emp is not None:
+        for i, o in enumerate(filtered):
+            if o[0] == prev_emp:
+                default_idx = i
+                break
+
+    selected = st.selectbox(
+        "Employee",
+        filtered,
+        index=default_idx,
+        format_func=lambda x: x[1],
+        key="ledger_emp_select",
+    )
+    emp_id = int(selected[0])
+    st.session_state["ledger_emp_id"] = emp_id
     emp = dict(repo.get_employee(conn, emp_id))
     pts = float(emp.get("point_total") or 0)
 
