@@ -170,6 +170,56 @@ p, label { color: var(--muted) !important; }
     text-transform: uppercase !important; color: #3d5270 !important;
     margin: 1rem 0 .3rem 0 !important; display: block;
 }
+
+.sidebar-employee-card {
+    margin-top: 1rem;
+    padding: .9rem .85rem;
+    border-radius: 14px;
+    border: 1px solid rgba(255,255,255,.10);
+    background: linear-gradient(160deg, rgba(110,156,255,.18) 0%, rgba(13,27,58,.45) 55%, rgba(0,184,230,.15) 100%);
+    box-shadow: 0 14px 24px rgba(6,12,28,.30), inset 0 1px 0 rgba(255,255,255,.08);
+}
+.sidebar-employee-title {
+    font-size: .67rem;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    font-weight: 700;
+    color: #8ea4c5 !important;
+    margin-bottom: .5rem;
+}
+.sidebar-employee-name {
+    font-size: 1.03rem;
+    font-weight: 800;
+    color: #edf3ff !important;
+    letter-spacing: -.01em;
+    margin-bottom: .55rem;
+}
+.sidebar-employee-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: .44rem;
+}
+.sidebar-employee-item {
+    background: rgba(7,16,36,.38);
+    border: 1px solid rgba(255,255,255,.09);
+    border-radius: 10px;
+    padding: .4rem .55rem;
+}
+.sidebar-employee-item .label {
+    display: block;
+    font-size: .61rem;
+    letter-spacing: .11em;
+    text-transform: uppercase;
+    color: #7e96ba !important;
+    font-weight: 700;
+    margin-bottom: .1rem;
+}
+.sidebar-employee-item .value {
+    display: block;
+    font-size: .8rem;
+    font-weight: 700;
+    color: #e8effc !important;
+}
 </style>""",
         unsafe_allow_html=True,
     )
@@ -375,6 +425,77 @@ def build_point_history_pdf(employee: dict, history: list[dict]) -> bytes:
 
     doc.build(story)
     return buffer.getvalue()
+
+
+def selected_employee_sidebar(conn, employee_id: int | None) -> None:
+    if not employee_id:
+        return
+
+    if is_pg(conn):
+        sql = '''
+            SELECT e.employee_id,
+                   e.first_name,
+                   e.last_name,
+                   COALESCE(e."Location", '') AS building,
+                   GREATEST(0.0, ROUND(COALESCE((
+                       SELECT SUM(ph.points) FROM points_history ph WHERE ph.employee_id = e.employee_id
+                   ), 0.0)::numeric, 1)::float8) AS point_total,
+                   (
+                       SELECT MAX(ph2.point_date::date)
+                         FROM points_history ph2
+                        WHERE ph2.employee_id = e.employee_id
+                          AND COALESCE(ph2.points, 0.0) > 0.0
+                   )::text AS last_positive_point_date,
+                   e.rolloff_date::text AS rolloff_date,
+                   e.perfect_attendance::text AS perfect_attendance
+              FROM employees e
+             WHERE e.employee_id = %s
+             LIMIT 1
+        '''
+        rows = fetchall(conn, sql, (employee_id,))
+    else:
+        sql = '''
+            SELECT e.employee_id,
+                   e.first_name,
+                   e.last_name,
+                   COALESCE(e."Location", '') AS building,
+                   MAX(0.0, ROUND(COALESCE((
+                       SELECT SUM(ph.points) FROM points_history ph WHERE ph.employee_id = e.employee_id
+                   ), 0.0), 1)) AS point_total,
+                   (
+                       SELECT MAX(date(ph2.point_date))
+                         FROM points_history ph2
+                        WHERE ph2.employee_id = e.employee_id
+                          AND COALESCE(ph2.points, 0.0) > 0.0
+                   ) AS last_positive_point_date,
+                   e.rolloff_date,
+                   e.perfect_attendance
+              FROM employees e
+             WHERE e.employee_id = ?
+             LIMIT 1
+        '''
+        rows = fetchall(conn, sql, (employee_id,))
+
+    if not rows:
+        return
+
+    emp = dict(rows[0])
+    full_name = f"{emp.get('first_name') or ''} {emp.get('last_name') or ''}".strip() or "Unknown Employee"
+    st.markdown(
+        "<div class='sidebar-employee-card'>"
+        "<div class='sidebar-employee-title'>Employee Spotlight</div>"
+        f"<div class='sidebar-employee-name'>{full_name}</div>"
+        "<div class='sidebar-employee-grid'>"
+        f"<div class='sidebar-employee-item'><span class='label'>Employee #</span><span class='value'>{emp.get('employee_id') or '—'}</span></div>"
+        f"<div class='sidebar-employee-item'><span class='label'>Building</span><span class='value'>{emp.get('building') or '—'}</span></div>"
+        f"<div class='sidebar-employee-item'><span class='label'>Point Total</span><span class='value'>{float(emp.get('point_total') or 0):.1f}</span></div>"
+        f"<div class='sidebar-employee-item'><span class='label'>Last Positive Point Date</span><span class='value'>{fmt_date(emp.get('last_positive_point_date'))}</span></div>"
+        f"<div class='sidebar-employee-item'><span class='label'>2 Month Roll Off Date</span><span class='value'>{fmt_date(emp.get('rolloff_date'))}</span></div>"
+        f"<div class='sidebar-employee-item'><span class='label'>Perfect Attendance Date</span><span class='value'>{fmt_date(emp.get('perfect_attendance'))}</span></div>"
+        "</div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
 
 
 def load_employees(conn, q: str = "", building: str = "All") -> list[dict]:
@@ -1546,6 +1667,8 @@ def main() -> None:
             key="global_building",
             label_visibility="collapsed",
         )
+
+        selected_employee_sidebar(conn, st.session_state.get("selected_employee_id"))
 
     if page == "Dashboard":
         dashboard_page(conn, building)
