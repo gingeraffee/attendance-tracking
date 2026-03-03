@@ -461,7 +461,7 @@ def selected_employee_sidebar(conn, employee_id: int | None) -> None:
                    COALESCE(e."Location", '') AS building,
                    GREATEST(0.0, ROUND(COALESCE((
                        SELECT SUM(ph.points) FROM points_history ph WHERE ph.employee_id = e.employee_id
-                   ), 0.0)::numeric, 1)::float8) AS point_total,
+                   ), 0.0), 1)) AS point_total,
                    (
                        SELECT MAX(ph2.point_date::date)
                          FROM points_history ph2
@@ -905,10 +905,7 @@ def dashboard_page(conn, building: str) -> None:
             if selected_rows:
                 idx = int(selected_rows[0])
                 if 0 <= idx < len(df_emps):
-                    new_id = int(df_emps.iloc[idx]["employee_id"])
-                    if st.session_state.get("selected_employee_id") != new_id:
-                        st.session_state["selected_employee_id"] = new_id
-                        st.rerun()
+                    st.session_state["selected_employee_id"] = int(df_emps.iloc[idx]["employee_id"])
         else:
             info_box("None 🎉")
 
@@ -1693,7 +1690,8 @@ def main() -> None:
             label_visibility="collapsed",
         )
 
-        selected_employee_sidebar(conn, st.session_state.get("selected_employee_id"))
+        # Placeholder so the spotlight renders AFTER page content updates session state
+        spotlight_placeholder = st.empty()
 
     if page == "Dashboard":
         dashboard_page(conn, building)
@@ -1707,6 +1705,10 @@ def main() -> None:
         exports_page(conn, building)
     else:
         system_updates_page(conn)
+
+    # Render spotlight after page runs so it always reflects the current selection
+    with spotlight_placeholder.container():
+        selected_employee_sidebar(conn, st.session_state.get("selected_employee_id"))
 
 
 if __name__ == "__main__":
