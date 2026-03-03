@@ -505,6 +505,27 @@ def dashboard_page(conn, building: str) -> None:
         else:
             info_box("No employees match this filter.")
 
+        divider()
+
+        section_label("Perfect Attendance Due ≤31 Days")
+        perfects = [dict(r) for r in fetchall(conn, sql_perfect, (*emp_ids, (today + timedelta(days=31)).isoformat()))]
+        if perfects:
+            html = []
+            for r in perfects:
+                days = days_until(r["perfect_attendance"])
+                html.append(
+                    f"<div class='list-row'>"
+                    f"<div style='display:flex;justify-content:space-between;align-items:center'>"
+                    f"<span style='font-weight:600;font-size:.9rem;color:#1a2744'>{r['last_name']}, {r['first_name']}</span>"
+                    f"{days_badge(days)}"
+                    f"</div>"
+                    f"<div style='font-size:.75rem;color:#8fa0b8;margin-top:.18rem'>Eligible {fmt_date(r['perfect_attendance'])}</div>"
+                    f"</div>"
+                )
+            st.markdown("".join(html), unsafe_allow_html=True)
+        else:
+            info_box("No perfect attendance milestones in the next 31 days.")
+
     # ── Upcoming roll-offs + perfect attendance ───────────────────────────────
     with col_right:
         section_label("Upcoming Roll-offs")
@@ -626,26 +647,6 @@ def dashboard_page(conn, building: str) -> None:
         else:
             info_box("No YTD or 2-month roll-offs in the next 31 days.")
 
-        divider()
-
-        section_label("Perfect Attendance Due ≤60 Days")
-        perfects = [dict(r) for r in fetchall(conn, sql_perfect, (*emp_ids, (today + timedelta(60)).isoformat()))]
-        if perfects:
-            html = []
-            for r in perfects:
-                days = days_until(r["perfect_attendance"])
-                html.append(
-                    f"<div class='list-row'>"
-                    f"<div style='display:flex;justify-content:space-between;align-items:center'>"
-                    f"<span style='font-weight:600;font-size:.9rem;color:#1a2744'>{r['last_name']}, {r['first_name']}</span>"
-                    f"{days_badge(days)}"
-                    f"</div>"
-                    f"<div style='font-size:.75rem;color:#8fa0b8;margin-top:.18rem'>Eligible {fmt_date(r['perfect_attendance'])}</div>"
-                    f"</div>"
-                )
-            st.markdown("".join(html), unsafe_allow_html=True)
-        else:
-            info_box("No perfect attendance milestones in the next 60 days.")
 
 
 # ── Employees ─────────────────────────────────────────────────────────────────
