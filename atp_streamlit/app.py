@@ -399,33 +399,48 @@ def dashboard_page(conn, building: str) -> None:
         # 2-month roll-offs — only future dates (rolloff_date >= today)
         rolloffs_2mo = [dict(r) for r in fetchall(conn, sql_rolloffs, (*emp_ids, today.isoformat()))]
 
-        # YTD roll-off previews — amount varies by prior-year month points
+        # YTD roll-off previews — gather current + upcoming month schedules.
+        # This keeps YTD events visible in "Upcoming" even after the current
+        # month has already been applied in System Maintenance.
         emp_set    = set(emp_ids)
         emp_lookup = {int(e["employee_id"]): e for e in employees}
         ytd_entries: list[dict] = []
         try:
-            for p in services.preview_ytd_rolloffs(
-                conn,
-                run_date=today,
-                exclude_applied=True,
-            ):
-                eid = int(p[0])
-                if eid not in emp_set:
-                    continue
-                roll_date_str = str(p[2]) if len(p) > 2 else ""
-                # Skip overdue YTD entries — past dates need System Updates, not this list
-                if roll_date_str and roll_date_str < today.isoformat():
-                    continue
-                e = emp_lookup.get(eid, {})
-                ytd_entries.append({
-                    "employee_id": eid,
-                    "last_name":   e.get("last_name", ""),
-                    "first_name":  e.get("first_name", ""),
-                    "point_total": e.get("point_total", 0),
-                    "rolloff_date": roll_date_str,
-                    "type":   "YTD Roll-Off",
-                    "amount": float(p[1] or 0),
-                })
+            # Look ahead a few months so upcoming YTD dates continue to appear.
+            # 2-month roll-offs still come from employees.rolloff_date.
+            seen_ytd: set[tuple[int, str]] = set()
+            for month_offset in range(0, 4):
+                run_month = (today.month - 1) + month_offset
+                run_year = today.year + (run_month // 12)
+                run_mon = (run_month % 12) + 1
+                run_date = date(run_year, run_mon, 1)
+
+                for p in services.preview_ytd_rolloffs(
+                    conn,
+                    run_date=run_date,
+                    exclude_applied=True,
+                ):
+                    eid = int(p[0])
+                    roll_date = str(p[2]) if len(p) > 2 else ""
+                    if eid not in emp_set or not roll_date:
+                        continue
+                    if roll_date < today.isoformat():
+                        continue
+                    dedupe_key = (eid, roll_date)
+                    if dedupe_key in seen_ytd:
+                        continue
+                    seen_ytd.add(dedupe_key)
+
+                    e = emp_lookup.get(eid, {})
+                    ytd_entries.append({
+                        "employee_id": eid,
+                        "last_name":   e.get("last_name", ""),
+                        "first_name":  e.get("first_name", ""),
+                        "point_total": e.get("point_total", 0),
+                        "rolloff_date": roll_date,
+                        "type":   "YTD Roll-Off",
+                        "amount": float(p[1] or 0),
+                    })
         except Exception:
             pass
 
