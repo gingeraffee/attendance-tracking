@@ -356,80 +356,123 @@ def update_employee_basic(conn, emp_id: int, first_name: str, last_name: str, lo
 
 def render_sidebar_employee_panel(conn) -> None:
     st.sidebar.markdown("---")
-    st.sidebar.markdown("### Selected employee")
 
     emp = get_selected_employee(conn)
     if not emp:
-        st.sidebar.caption("Select an employee on **Employees** or **Points Ledger** to see details here.")
+        st.sidebar.markdown(
+            "<div style='padding:.75rem .5rem;border-radius:10px;background:rgba(255,255,255,.04);"
+            "border:1px solid rgba(255,255,255,.07);text-align:center'>"
+            "<div style='font-size:.72rem;font-weight:700;letter-spacing:.09em;text-transform:uppercase;"
+            "color:#3d5270;margin-bottom:.35rem'>No Employee Selected</div>"
+            "<div style='font-size:.78rem;color:#4a5f80;line-height:1.45'>Click any row in the<br>"
+            "Employees or Points Ledger</div></div>",
+            unsafe_allow_html=True,
+        )
         return
 
-    emp_id = emp.get("employee_id")
-    name = f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip() or "—"
+    emp_id  = emp.get("employee_id")
+    first   = emp.get("first_name") or ""
+    last    = emp.get("last_name") or ""
     building = emp.get("Location") or emp.get("location") or "—"
-    pts = float(emp.get("point_total") or 0)
+    pts     = float(emp.get("point_total") or 0)
+    active  = bool(emp.get("is_active", 1))
 
-    st.sidebar.markdown(f"**{name}**")
-    st.sidebar.caption(f"Employee #{emp_id} · {building}")
+    # ── Point colour logic ────────────────────────────────────────────────
+    if pts == 0:
+        pts_color = "#00a87a"; pts_bg = "rgba(0,168,122,.13)"; pts_border = "rgba(0,168,122,.28)"
+    elif pts < 2:
+        pts_color = "#e6960a"; pts_bg = "rgba(230,150,10,.13)"; pts_border = "rgba(230,150,10,.28)"
+    else:
+        pts_color = "#e0394a"; pts_bg = "rgba(224,57,74,.13)";  pts_border = "rgba(224,57,74,.28)"
 
-    st.sidebar.metric("Point total", f"{pts:.1f}")
+    status_color  = "#00a87a" if active else "#8fa0b8"
+    status_bg     = "rgba(0,168,122,.13)" if active else "rgba(143,160,184,.10)"
+    status_border = "rgba(0,168,122,.28)" if active else "rgba(143,160,184,.22)"
+    status_label  = "Active" if active else "Inactive"
+
+    # ── Identity card ─────────────────────────────────────────────────────
     st.sidebar.markdown(
-        f"""<div style="font-size:.90rem;line-height:1.55;color:#1a2744">
-        <b>Last point date:</b> {fmt_date(emp.get("last_point_date"))}<br/>
-        <b>2-month roll-off:</b> {fmt_date(emp.get("rolloff_date"))}<br/>
-        <b>Perfect attendance:</b> {fmt_date(emp.get("perfect_attendance"))}<br/>
+        f"""<div style='padding:.9rem 1rem 1rem 1rem;border-radius:12px;
+            background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.09);
+            margin-bottom:.65rem'>
+          <div style='display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:.55rem'>
+            <div>
+              <div style='font-size:1rem;font-weight:800;color:#e2e8f4;letter-spacing:-.01em;
+                line-height:1.2'>{last},<br>{first}</div>
+              <div style='font-size:.72rem;color:#4a6080;margin-top:.25rem'>#{emp_id} · {building}</div>
+            </div>
+            <span style='display:inline-block;padding:2px 9px;border-radius:99px;font-size:.70rem;
+              font-weight:700;color:{status_color};background:{status_bg};
+              border:1px solid {status_border};white-space:nowrap'>{status_label}</span>
+          </div>
+          <div style='display:flex;align-items:center;gap:.5rem'>
+            <span style='font-size:.67rem;font-weight:700;letter-spacing:.09em;text-transform:uppercase;
+              color:#3d5270'>Points</span>
+            <span style='display:inline-block;padding:3px 12px;border-radius:99px;font-size:.85rem;
+              font-weight:800;color:{pts_color};background:{pts_bg};
+              border:1px solid {pts_border}'>{pts:.1f}</span>
+          </div>
         </div>""",
         unsafe_allow_html=True,
     )
 
-    # ── Recent point history (last 5) ───────────────────────────────────────
-    st.sidebar.markdown("#### Recent points")
-    try:
-        recent = [dict(r) for r in repo.get_points_history(conn, emp_id, limit=5)]
-    except Exception:
-        recent = []
-    if recent:
-        for r in recent:
-            d = fmt_date(r.get("point_date"))
-            pts_v = r.get("points")
-            reason = r.get("reason") or "—"
-            note = (r.get("note") or "").strip()
-            note_txt = f" — {note}" if note else ""
-            st.sidebar.markdown(f"- **{d}** · **{pts_v}** · {reason}{note_txt}")
-    else:
-        st.sidebar.caption("No point history found.")
+    # ── Date stat tiles ───────────────────────────────────────────────────
+    def _stat_tile(label: str, value: str) -> str:
+        return (
+            f"<div style='flex:1;padding:.55rem .7rem;border-radius:9px;"
+            f"background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07)'>"
+            f"<div style='font-size:.62rem;font-weight:700;letter-spacing:.09em;text-transform:uppercase;"
+            f"color:#3d5270;margin-bottom:.2rem'>{label}</div>"
+            f"<div style='font-size:.80rem;font-weight:700;color:#bfcde6'>{value}</div>"
+            f"</div>"
+        )
 
-    # ── Quick add point (keyboard-friendly) ─────────────────────────────────
-    st.sidebar.markdown("#### Quick add point")
+    st.sidebar.markdown(
+        f"<div style='display:flex;gap:.45rem;margin-bottom:.65rem'>"
+        f"{_stat_tile('Last Entry',   fmt_date(emp.get('last_point_date')))}"
+        f"{_stat_tile('Roll-off',     fmt_date(emp.get('rolloff_date')))}"
+        f"</div>"
+        f"<div style='display:flex;gap:.45rem;margin-bottom:.8rem'>"
+        f"{_stat_tile('Perfect Att.', fmt_date(emp.get('perfect_attendance')))}"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+    # ── Quick add point ────────────────────────────────────────────────────
+    st.sidebar.markdown(
+        "<div style='font-size:.67rem;font-weight:700;letter-spacing:.10em;text-transform:uppercase;"
+        "color:#3d5270;margin-bottom:.35rem'>Quick Add Point</div>",
+        unsafe_allow_html=True,
+    )
     with st.sidebar.form("sidebar_quick_add", clear_on_submit=False):
-        qa_date = st.text_input("Date (MM/DD/YYYY)", value=date.today().strftime("%m/%d/%Y"))
+        qa_date   = st.text_input("Date (MM/DD/YYYY)", value=date.today().strftime("%m/%d/%Y"))
         qa_points = st.selectbox("Points", [0.5, 1.0, 1.5], index=1)
         qa_reason = st.selectbox("Reason", ["Tardy/Early Leave", "Absence", "No Call/No Show"])
-        qa_note = st.text_input("Note", value="")
-        qa_flag = st.text_input("Flag code", value="")
-        submitted = st.form_submit_button("➕ Add point")
+        qa_note   = st.text_input("Note", value="")
+        qa_flag   = st.text_input("Flag code", value="")
+        submitted = st.form_submit_button("➕ Add Point", use_container_width=True)
     if submitted:
         try:
             dt = datetime.strptime(qa_date.strip(), "%m/%d/%Y").date()
         except Exception:
-            st.sidebar.error("Invalid date format. Use MM/DD/YYYY.")
+            st.sidebar.error("Invalid date — use MM/DD/YYYY.")
         else:
             try:
                 preview = services.preview_add_point(emp_id, dt, float(qa_points), qa_reason, qa_note)
                 services.add_point(conn, preview, flag_code=(qa_flag or "").strip() or None)
-                # refresh selected employee cache for sidebar
                 set_selected_employee(conn, emp_id)
                 st.sidebar.success("Point added.")
             except Exception as e:
                 st.sidebar.error(f"Could not add point: {e}")
 
     # ── Edit employee info ─────────────────────────────────────────────────
-    with st.sidebar.expander("✏️ Edit employee info", expanded=False):
+    with st.sidebar.expander("✏️ Edit Employee Info", expanded=False):
         with st.form("sidebar_edit_emp"):
-            ef_first = st.text_input("First name", value=str(emp.get("first_name") or ""))
-            ef_last = st.text_input("Last name", value=str(emp.get("last_name") or ""))
-            ef_loc = st.text_input("Building", value=str(emp.get("location") or emp.get("Location") or ""))
-            ef_active = st.checkbox("Active", value=bool(emp.get("is_active", 1)))
-            save = st.form_submit_button("Save changes")
+            ef_first  = st.text_input("First name",  value=str(emp.get("first_name") or ""))
+            ef_last   = st.text_input("Last name",   value=str(emp.get("last_name") or ""))
+            ef_loc    = st.text_input("Building",    value=str(emp.get("location") or emp.get("Location") or ""))
+            ef_active = st.checkbox("Active",        value=bool(emp.get("is_active", 1)))
+            save = st.form_submit_button("Save Changes", use_container_width=True)
         if save:
             try:
                 update_employee_basic(conn, emp_id, ef_first, ef_last, ef_loc, ef_active)
