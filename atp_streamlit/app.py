@@ -35,7 +35,7 @@ from atp_core.schema import ensure_schema
 from atp_core import repo, services
 from atp_core.rules import REASON_OPTIONS
 
-BUILDINGS = ["APIM", "APIS", "API"]
+BUILDINGS = ["APIM", "APIS", "AAP"]
 
 
 # ── Theme ─────────────────────────────────────────────────────────────────────
@@ -445,7 +445,16 @@ def dashboard_page(conn, building: str) -> None:
                AND COALESCE(ph.reason, '') <> ''
              GROUP BY ph.reason
              ORDER BY n DESC, ph.reason
-             LIMIT 3
+             LIMIT 1
+        '''
+        sql_active_emp_points = '''
+            SELECT e.employee_id,
+                   COALESCE(e."Location", '') AS building,
+                   GREATEST(0.0, ROUND(COALESCE(SUM(ph.points), 0.0)::numeric, 1)::float8) AS point_total
+              FROM employees e
+              LEFT JOIN points_history ph ON ph.employee_id = e.employee_id
+             WHERE COALESCE(e.is_active, 1) = 1
+             GROUP BY e.employee_id, e."Location"
         '''
         sql_active_emp_points = '''
             SELECT e.employee_id,
@@ -498,7 +507,16 @@ def dashboard_page(conn, building: str) -> None:
                AND COALESCE(ph.reason, '') <> ''
              GROUP BY ph.reason
              ORDER BY n DESC, ph.reason
-             LIMIT 3
+             LIMIT 1
+        '''
+        sql_active_emp_points = '''
+            SELECT e.employee_id,
+                   COALESCE(e."Location", '') AS building,
+                   MAX(0.0, ROUND(COALESCE((
+                       SELECT SUM(ph.points) FROM points_history ph WHERE ph.employee_id = e.employee_id
+                   ), 0.0), 1)) AS point_total
+              FROM employees e
+             WHERE COALESCE(e.is_active, 1) = 1
         '''
         sql_active_emp_points = '''
             SELECT e.employee_id,
@@ -606,7 +624,7 @@ def dashboard_page(conn, building: str) -> None:
                 df_emps[["Employee #", "Name", "Building", "Point Total", "Last Point Date"]],
                 use_container_width=True,
                 hide_index=True,
-                height=470,
+                height=575,
                 key="dash_emp_above5_table",
                 on_select="rerun",
                 selection_mode="single-row",
@@ -686,14 +704,14 @@ def dashboard_page(conn, building: str) -> None:
         headcount = int(active_by_build.get(b) or 0)
         avg_points = (sum(points_by_building[b]) / len(points_by_building[b])) if points_by_building[b] else 0.0
         avg_points_ceiling = float(math.ceil(avg_points)) if headcount else 0.0
-        reasons = [dict(r).get("reason") for r in fetchall(conn, sql_build_reasons, (since_30, b))]
-        reasons_txt = ", ".join([r for r in reasons if r]) or "—"
+        reason_rows = [dict(r) for r in fetchall(conn, sql_build_reasons, (since_30, b))]
+        most_common_reason = (reason_rows[0].get("reason") if reason_rows else None) or "—"
         snap_rows.append(
             {
                 "Building": b,
                 "Active Employees": headcount,
                 "Avg Points / Employee": f"{avg_points_ceiling:.1f}",
-                "Top 3 Reasons (30d)": reasons_txt,
+                "Most Common Reason (30d)": most_common_reason,
             }
         )
 
