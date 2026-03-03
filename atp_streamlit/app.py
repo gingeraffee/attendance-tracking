@@ -3,6 +3,7 @@ Full remodel: clean layout, status badges, live countdown, improved workflows.
 """
 from __future__ import annotations
 
+from io import BytesIO
 from datetime import date, datetime, timedelta
 from pathlib import Path
 import sys
@@ -10,6 +11,11 @@ import sys
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.units import inch
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 st.set_page_config(
     page_title="Attendance Point Tracker",
@@ -293,6 +299,73 @@ def to_csv(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False).encode("utf-8")
 
 
+def build_point_history_pdf(employee: dict, history: list[dict]) -> bytes:
+    """Generate a printable attendance point history report as a PDF."""
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=letter,
+        leftMargin=0.75 * inch,
+        rightMargin=0.75 * inch,
+        topMargin=0.75 * inch,
+        bottomMargin=0.75 * inch,
+    )
+    styles = getSampleStyleSheet()
+
+    full_name = f"{employee.get('last_name', '')}, {employee.get('first_name', '')}".strip(", ")
+    employee_id = employee.get("employee_id", "—")
+    location = employee.get("Location") or employee.get("location") or "—"
+    generated_on = datetime.now().strftime("%m/%d/%Y %I:%M %p")
+
+    story = [
+        Paragraph("Attendance Point History Report", styles["Title"]),
+        Spacer(1, 0.1 * inch),
+        Paragraph(f"<b>Employee:</b> {full_name}", styles["Normal"]),
+        Paragraph(f"<b>Employee #:</b> {employee_id}", styles["Normal"]),
+        Paragraph(f"<b>Location:</b> {location}", styles["Normal"]),
+        Paragraph(
+            f"<b>Current Point Total:</b> {float(employee.get('point_total') or 0):.1f}",
+            styles["Normal"],
+        ),
+        Paragraph(f"<b>Generated:</b> {generated_on}", styles["Normal"]),
+        Spacer(1, 0.2 * inch),
+    ]
+
+    if history:
+        table_rows = [["Date", "Points", "Reason", "Note", "Running Total"]]
+        for row in history:
+            table_rows.append(
+                [
+                    fmt_date(row.get("point_date")),
+                    f"{float(row.get('points') or 0):.1f}",
+                    str(row.get("reason") or "—"),
+                    str(row.get("note") or "—"),
+                    f"{float(row.get('point_total') or 0):.1f}",
+                ]
+            )
+
+        table = Table(table_rows, colWidths=[1.1 * inch, 0.8 * inch, 1.4 * inch, 2.9 * inch, 1.0 * inch])
+        table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f0f4fa")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#1a2744")),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 9),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cfd8e6")),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f9fbff")]),
+                ]
+            )
+        )
+        story.append(table)
+    else:
+        story.append(Paragraph("No point history entries were found for this employee.", styles["Normal"]))
+
+    doc.build(story)
+    return buffer.getvalue()
+
+
 def load_employees(conn, q: str = "", building: str = "All") -> list[dict]:
     rows = [dict(r) for r in repo.search_employees(conn, q=q, limit=3000)]
     if building != "All":
@@ -533,14 +606,6 @@ def employees_page(conn, building: str) -> None:
         info_box("No matching employees found.")
         return
 
-    # Results table
-    df = pd.DataFrame(rows)[["employee_id", "last_name", "first_name", "location", "is_active"]]
-    df.columns = ["Emp #", "Last Name", "First Name", "Building", "Active"]
-    df["Emp #"] = df["Emp #"].astype(str)
-    st.dataframe(df, use_container_width=True, hide_index=True)
-
-    divider()
-
     # Detail view
     opts = [
         (int(r["employee_id"]), f"#{r['employee_id']} — {r['last_name']}, {r['first_name']}")
@@ -580,12 +645,27 @@ def employees_page(conn, building: str) -> None:
     c4.metric("Last Point Entry", fmt_date(emp.get("last_point_date")))
 
     divider()
-    section_label("Point History (last 50 entries)")
-    hist = [dict(r) for r in repo.get_points_history(conn, emp_id, limit=50)]
+    section_label("Point History")
+    hist = [dict(r) for r in repo.get_points_history(conn, emp_id, limit=5000)]
+
+    pdf_bytes = build_point_history_pdf(emp, hist)
+    safe_last = str(emp.get("last_name") or "employee").replace(" ", "_")
+    safe_first = str(emp.get("first_name") or "").replace(" ", "_")
+    report_date = date.today().strftime("%Y%m%d")
+    st.download_button(
+        "Download Point History PDF",
+        data=pdf_bytes,
+        file_name=f"attendance-history-{emp_id}-{safe_last}-{safe_first}-{report_date}.pdf",
+        mime="application/pdf",
+        use_container_width=False,
+    )
+
     if hist:
         df_h = pd.DataFrame(hist)[["point_date", "points", "reason", "note", "point_total"]]
+        df_h["point_date"] = df_h["point_date"].apply(fmt_date)
+        df_h["points"] = df_h["points"].apply(lambda v: f"{float(v or 0):.1f}")
+        df_h["point_total"] = df_h["point_total"].apply(lambda v: f"{float(v or 0):.1f}")
         df_h.columns = ["Date", "Points", "Reason", "Note", "Running Total"]
-        df_h["Date"] = df_h["Date"].apply(fmt_date)
         st.dataframe(df_h, use_container_width=True, hide_index=True)
     else:
         info_box("No history entries yet for this employee.")
