@@ -456,6 +456,15 @@ def dashboard_page(conn, building: str) -> None:
              WHERE COALESCE(e.is_active, 1) = 1
              GROUP BY e.employee_id, e."Location"
         '''
+        sql_active_emp_points = '''
+            SELECT e.employee_id,
+                   COALESCE(e."Location", '') AS building,
+                   GREATEST(0.0, ROUND(COALESCE(SUM(ph.points), 0.0)::numeric, 1)::float8) AS point_total
+              FROM employees e
+              LEFT JOIN points_history ph ON ph.employee_id = e.employee_id
+             WHERE COALESCE(e.is_active, 1) = 1
+             GROUP BY e.employee_id, e."Location"
+        '''
     else:
         sql_emp_detail = f'''
             SELECT e.employee_id, e.last_name, e.first_name,
@@ -499,6 +508,15 @@ def dashboard_page(conn, building: str) -> None:
              GROUP BY ph.reason
              ORDER BY n DESC, ph.reason
              LIMIT 1
+        '''
+        sql_active_emp_points = '''
+            SELECT e.employee_id,
+                   COALESCE(e."Location", '') AS building,
+                   MAX(0.0, ROUND(COALESCE((
+                       SELECT SUM(ph.points) FROM points_history ph WHERE ph.employee_id = e.employee_id
+                   ), 0.0), 1)) AS point_total
+              FROM employees e
+             WHERE COALESCE(e.is_active, 1) = 1
         '''
         sql_active_emp_points = '''
             SELECT e.employee_id,
