@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from io import BytesIO
 from datetime import date, datetime, timedelta
+import math
 from pathlib import Path
 import sys
 
@@ -433,15 +434,6 @@ def dashboard_page(conn, building: str) -> None:
                AND (perfect_attendance::date) <= (%s::date)
              ORDER BY (perfect_attendance::date), lower(last_name), lower(first_name)
         '''
-        sql_build_points = '''
-            SELECT ROUND((COALESCE(SUM(points), 0.0))::numeric, 1)::float8 AS pts
-              FROM points_history ph
-              JOIN employees e ON e.employee_id = ph.employee_id
-             WHERE (ph.point_date::date) >= (%s::date)
-               AND COALESCE(ph.points, 0.0) > 0.0
-               AND COALESCE(e."Location", '') = %s
-               AND COALESCE(e.is_active, 1) = 1
-        '''
         sql_build_reasons = '''
             SELECT ph.reason, COUNT(*) AS n
               FROM points_history ph
@@ -454,6 +446,15 @@ def dashboard_page(conn, building: str) -> None:
              GROUP BY ph.reason
              ORDER BY n DESC, ph.reason
              LIMIT 3
+        '''
+        sql_active_emp_points = '''
+            SELECT e.employee_id,
+                   COALESCE(e."Location", '') AS building,
+                   GREATEST(0.0, ROUND(COALESCE(SUM(ph.points), 0.0)::numeric, 1)::float8) AS point_total
+              FROM employees e
+              LEFT JOIN points_history ph ON ph.employee_id = e.employee_id
+             WHERE COALESCE(e.is_active, 1) = 1
+             GROUP BY e.employee_id, e."Location"
         '''
     else:
         sql_emp_detail = f'''
@@ -486,15 +487,6 @@ def dashboard_page(conn, building: str) -> None:
                AND date(perfect_attendance) <= date(?)
              ORDER BY date(perfect_attendance), lower(last_name), lower(first_name)
         '''
-        sql_build_points = '''
-            SELECT ROUND(COALESCE(SUM(points), 0.0), 1) AS pts
-              FROM points_history ph
-              JOIN employees e ON e.employee_id = ph.employee_id
-             WHERE date(ph.point_date) >= date(?)
-               AND COALESCE(ph.points, 0.0) > 0.0
-               AND COALESCE(e."Location", '') = ?
-               AND COALESCE(e.is_active, 1) = 1
-        '''
         sql_build_reasons = '''
             SELECT ph.reason, COUNT(*) AS n
               FROM points_history ph
@@ -507,6 +499,15 @@ def dashboard_page(conn, building: str) -> None:
              GROUP BY ph.reason
              ORDER BY n DESC, ph.reason
              LIMIT 3
+        '''
+        sql_active_emp_points = '''
+            SELECT e.employee_id,
+                   COALESCE(e."Location", '') AS building,
+                   MAX(0.0, ROUND(COALESCE((
+                       SELECT SUM(ph.points) FROM points_history ph WHERE ph.employee_id = e.employee_id
+                   ), 0.0), 1)) AS point_total
+              FROM employees e
+             WHERE COALESCE(e.is_active, 1) = 1
         '''
 
     emp_detail_rows = [dict(r) for r in fetchall(conn, sql_emp_detail, tuple(emp_ids))]
@@ -562,7 +563,7 @@ def dashboard_page(conn, building: str) -> None:
             f"<div style='font-size:.68rem;letter-spacing:.09em;text-transform:uppercase;color:#5c6f8c;font-weight:700'>{label}</div>"
             f"<div style='display:flex;align-items:baseline;justify-content:space-between;margin-top:.18rem'>"
             f"<span style='font-size:1.95rem;font-weight:800;color:#1a2744;line-height:1'>{employees_count}</span>"
-            f"<span style='font-size:.72rem;font-weight:700;color:{accent};text-transform:uppercase;letter-spacing:.05em'>employees</span>"
+            f"<span style='font-size:.72rem;font-weight:700;color:{accent};text-transform:uppercase;letter-spacing:.05em'>&nbsp;employees</span>"
             f"</div>"
             f"</div>"
             f"</a>",
@@ -658,7 +659,7 @@ def dashboard_page(conn, building: str) -> None:
             info_box("No perfect attendance dates due in the next 30 days.")
 
     divider()
-    section_label("Building Snapshot (Last 30 Days)")
+    section_label("Building Snapshot (Average Points per Employee)")
 
     active_rows = [
         dict(r)
@@ -673,20 +674,26 @@ def dashboard_page(conn, building: str) -> None:
             active_by_build[r["building"]] = int(r["n"] or 0)
 
     since_30 = (today - timedelta(days=30)).isoformat()
+    points_by_building = {b: [] for b in BUILDINGS}
+    for row in fetchall(conn, sql_active_emp_points):
+        rec = dict(row)
+        bldg = rec.get("building") or ""
+        if bldg in points_by_building:
+            points_by_building[bldg].append(float(rec.get("point_total") or 0.0))
+
     snap_rows = []
     for b in BUILDINGS:
-        pts_row = fetchall(conn, sql_build_points, (since_30, b))
-        total_pts = float(dict(pts_row[0]).get("pts") or 0.0) if pts_row else 0.0
         headcount = int(active_by_build.get(b) or 0)
-        per_100 = (total_pts / headcount * 100.0) if headcount else 0.0
+        avg_points = (sum(points_by_building[b]) / len(points_by_building[b])) if points_by_building[b] else 0.0
+        avg_points_ceiling = float(math.ceil(avg_points)) if headcount else 0.0
         reasons = [dict(r).get("reason") for r in fetchall(conn, sql_build_reasons, (since_30, b))]
         reasons_txt = ", ".join([r for r in reasons if r]) or "—"
         snap_rows.append(
             {
                 "Building": b,
-                "Total Points Added (30d)": f"{total_pts:.1f}",
-                "Points / 100 Active": f"{per_100:.1f}",
-                "Top 3 Reasons": reasons_txt,
+                "Active Employees": headcount,
+                "Avg Points / Employee": f"{avg_points_ceiling:.1f}",
+                "Top 3 Reasons (30d)": reasons_txt,
             }
         )
 
