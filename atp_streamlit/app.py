@@ -3,6 +3,7 @@ Full remodel: clean layout, status badges, live countdown, improved workflows.
 """
 from __future__ import annotations
 
+from io import BytesIO
 from datetime import date, datetime, timedelta
 from pathlib import Path
 import sys
@@ -10,6 +11,11 @@ import sys
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.units import inch
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 st.set_page_config(
     page_title="Attendance Point Tracker",
@@ -293,6 +299,84 @@ def to_csv(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False).encode("utf-8")
 
 
+def ensure_session_defaults() -> None:
+    defaults = {
+        "selected_employee_id": None,
+        "dashboard_bucket": None,
+        "_nav_page": None,
+    }
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
+
+
+def build_point_history_pdf(employee: dict, history: list[dict]) -> bytes:
+    """Generate a printable attendance point history report as a PDF."""
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=letter,
+        leftMargin=0.75 * inch,
+        rightMargin=0.75 * inch,
+        topMargin=0.75 * inch,
+        bottomMargin=0.75 * inch,
+    )
+    styles = getSampleStyleSheet()
+
+    full_name = f"{employee.get('last_name', '')}, {employee.get('first_name', '')}".strip(", ")
+    employee_id = employee.get("employee_id", "—")
+    location = employee.get("Location") or employee.get("location") or "—"
+    generated_on = datetime.now().strftime("%m/%d/%Y %I:%M %p")
+
+    story = [
+        Paragraph("Attendance Point History Report", styles["Title"]),
+        Spacer(1, 0.1 * inch),
+        Paragraph(f"<b>Employee:</b> {full_name}", styles["Normal"]),
+        Paragraph(f"<b>Employee #:</b> {employee_id}", styles["Normal"]),
+        Paragraph(f"<b>Location:</b> {location}", styles["Normal"]),
+        Paragraph(
+            f"<b>Current Point Total:</b> {float(employee.get('point_total') or 0):.1f}",
+            styles["Normal"],
+        ),
+        Paragraph(f"<b>Generated:</b> {generated_on}", styles["Normal"]),
+        Spacer(1, 0.2 * inch),
+    ]
+
+    if history:
+        table_rows = [["Date", "Points", "Reason", "Note", "Running Total"]]
+        for row in history:
+            table_rows.append(
+                [
+                    fmt_date(row.get("point_date")),
+                    f"{float(row.get('points') or 0):.1f}",
+                    str(row.get("reason") or "—"),
+                    str(row.get("note") or "—"),
+                    f"{float(row.get('point_total') or 0):.1f}",
+                ]
+            )
+
+        table = Table(table_rows, colWidths=[1.1 * inch, 0.8 * inch, 1.4 * inch, 2.9 * inch, 1.0 * inch])
+        table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f0f4fa")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#1a2744")),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 9),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cfd8e6")),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f9fbff")]),
+                ]
+            )
+        )
+        story.append(table)
+    else:
+        story.append(Paragraph("No point history entries were found for this employee.", styles["Normal"]))
+
+    doc.build(story)
+    return buffer.getvalue()
+
+
 def load_employees(conn, q: str = "", building: str = "All") -> list[dict]:
     rows = [dict(r) for r in repo.search_employees(conn, q=q, limit=3000)]
     if building != "All":
@@ -304,10 +388,12 @@ def load_employees(conn, q: str = "", building: str = "All") -> list[dict]:
 def dashboard_page(conn, building: str) -> None:
     page_heading(
         "Dashboard",
-        "Real-time overview of attendance activity, upcoming actions, and point leaders.",
+        "Real-time overview of attendance activity, thresholds, and upcoming actions.",
     )
 
     today = date.today()
+    in_30_days = today + timedelta(days=30)
+    since_60_days = today - timedelta(days=60)
     employees = load_employees(conn, building=building)
     emp_ids = [int(e["employee_id"]) for e in employees]
 
@@ -317,208 +403,344 @@ def dashboard_page(conn, building: str) -> None:
 
     ph = ",".join(["?" if not is_pg(conn) else "%s"] * len(emp_ids))
 
-    # ── Window selector ──────────────────────────────────────────────────────
-    win_label = st.selectbox(
-        "Activity window",
-        ["7 days", "14 days", "30 days", "60 days"],
-        index=2,
-        label_visibility="collapsed",
-        key="dash_win",
-    )
-    win_days = int(win_label.split()[0])
-    since = (today - timedelta(days=win_days)).isoformat()
-
-    # ── KPI queries — always use AS aliases so dict rows work ────────────────
     if is_pg(conn):
-        sql_active  = f"SELECT COUNT(DISTINCT employee_id) AS cnt FROM points_history WHERE employee_id IN ({ph}) AND points > 0 AND (point_date::date) >= (%s::date)"
-        sql_roll30  = f"SELECT COUNT(*) AS cnt FROM employees WHERE employee_id IN ({ph}) AND rolloff_date IS NOT NULL AND (rolloff_date::date) <= (%s::date) AND point_total > 0"
-        sql_perf60  = f"SELECT COUNT(*) AS cnt FROM employees WHERE employee_id IN ({ph}) AND perfect_attendance IS NOT NULL AND (perfect_attendance::date) <= (%s::date)"
-        sql_trend   = f"SELECT (point_date::date)::text AS d, COUNT(*) AS n FROM points_history WHERE employee_id IN ({ph}) AND points > 0 AND (point_date::date) >= (%s::date) GROUP BY 1 ORDER BY 1"
-        sql_leaders = f"SELECT employee_id, last_name, first_name, COALESCE(\"Location\",'') AS loc, COALESCE(point_total,0) AS pts FROM employees WHERE employee_id IN ({ph}) ORDER BY pts DESC, last_name LIMIT %s"
-        sql_rolloffs= f"SELECT employee_id, last_name, first_name, rolloff_date, point_total FROM employees WHERE employee_id IN ({ph}) AND rolloff_date IS NOT NULL AND point_total > 0 AND (rolloff_date::date) >= (%s::date) ORDER BY rolloff_date LIMIT 12"
-        sql_perfect = f"SELECT employee_id, last_name, first_name, perfect_attendance FROM employees WHERE employee_id IN ({ph}) AND perfect_attendance IS NOT NULL AND (perfect_attendance::date) <= (%s::date) ORDER BY perfect_attendance LIMIT 10"
+        sql_emp_detail = f'''
+            SELECT employee_id, last_name, first_name,
+                   COALESCE("Location",'') AS building,
+                   COALESCE(point_total,0) AS point_total,
+                   last_point_date, rolloff_date, perfect_attendance
+              FROM employees
+             WHERE employee_id IN ({ph})
+        '''
+        sql_roll_due = f'''
+            SELECT employee_id, last_name, first_name, COALESCE("Location",'') AS building,
+                   rolloff_date, COALESCE(point_total,0) AS point_total
+              FROM employees
+             WHERE employee_id IN ({ph})
+               AND rolloff_date IS NOT NULL
+               AND (rolloff_date::date) >= (%s::date)
+               AND (rolloff_date::date) <= (%s::date)
+             ORDER BY (rolloff_date::date), lower(last_name), lower(first_name)
+        '''
+        sql_perf_due = f'''
+            SELECT employee_id, last_name, first_name, COALESCE("Location",'') AS building,
+                   perfect_attendance, COALESCE(point_total,0) AS point_total
+              FROM employees
+             WHERE employee_id IN ({ph})
+               AND perfect_attendance IS NOT NULL
+               AND (perfect_attendance::date) >= (%s::date)
+               AND (perfect_attendance::date) <= (%s::date)
+             ORDER BY (perfect_attendance::date), lower(last_name), lower(first_name)
+        '''
+        sql_repeat_reason = f'''
+            SELECT e.employee_id, e.last_name, e.first_name,
+                   COALESCE(e."Location", '') AS building,
+                   ph.reason,
+                   COUNT(*) AS cnt,
+                   MAX((ph.point_date::date))::text AS most_recent
+              FROM points_history ph
+              JOIN employees e ON e.employee_id = ph.employee_id
+             WHERE ph.employee_id IN ({ph})
+               AND (ph.point_date::date) >= (%s::date)
+               AND COALESCE(ph.reason, '') <> ''
+             GROUP BY e.employee_id, e.last_name, e.first_name, COALESCE(e."Location", ''), ph.reason
+            HAVING COUNT(*) >= 3
+             ORDER BY cnt DESC, most_recent DESC, e.last_name, e.first_name
+        '''
+        sql_hotspots = f'''
+            SELECT (point_date::date)::text AS d
+              FROM points_history
+             WHERE employee_id IN ({ph})
+               AND (point_date::date) >= (%s::date)
+        '''
+        sql_build_points = '''
+            SELECT ROUND((COALESCE(SUM(points), 0.0))::numeric, 1)::float8 AS pts
+              FROM points_history ph
+              JOIN employees e ON e.employee_id = ph.employee_id
+             WHERE (ph.point_date::date) >= (%s::date)
+               AND COALESCE(ph.points, 0.0) > 0.0
+               AND COALESCE(e."Location", '') = %s
+               AND COALESCE(e.is_active, 1) = 1
+        '''
+        sql_build_reasons = '''
+            SELECT ph.reason, COUNT(*) AS n
+              FROM points_history ph
+              JOIN employees e ON e.employee_id = ph.employee_id
+             WHERE (ph.point_date::date) >= (%s::date)
+               AND COALESCE(ph.points, 0.0) > 0.0
+               AND COALESCE(e."Location", '') = %s
+               AND COALESCE(e.is_active, 1) = 1
+               AND COALESCE(ph.reason, '') <> ''
+             GROUP BY ph.reason
+             ORDER BY n DESC, ph.reason
+             LIMIT 3
+        '''
     else:
-        sql_active  = f"SELECT COUNT(DISTINCT employee_id) AS cnt FROM points_history WHERE employee_id IN ({ph}) AND points > 0 AND date(point_date) >= date(?)"
-        sql_roll30  = f"SELECT COUNT(*) AS cnt FROM employees WHERE employee_id IN ({ph}) AND rolloff_date IS NOT NULL AND date(rolloff_date) <= date(?) AND point_total > 0"
-        sql_perf60  = f"SELECT COUNT(*) AS cnt FROM employees WHERE employee_id IN ({ph}) AND perfect_attendance IS NOT NULL AND date(perfect_attendance) <= date(?)"
-        sql_trend   = f"SELECT date(point_date) AS d, COUNT(*) AS n FROM points_history WHERE employee_id IN ({ph}) AND points > 0 AND date(point_date) >= date(?) GROUP BY 1 ORDER BY 1"
-        sql_leaders = f"SELECT employee_id, last_name, first_name, COALESCE(\"Location\",'') AS loc, COALESCE(point_total,0) AS pts FROM employees WHERE employee_id IN ({ph}) ORDER BY pts DESC, last_name LIMIT ?"
-        sql_rolloffs= f"SELECT employee_id, last_name, first_name, rolloff_date, point_total FROM employees WHERE employee_id IN ({ph}) AND rolloff_date IS NOT NULL AND point_total > 0 AND date(rolloff_date) >= date(?) ORDER BY rolloff_date LIMIT 12"
-        sql_perfect = f"SELECT employee_id, last_name, first_name, perfect_attendance FROM employees WHERE employee_id IN ({ph}) AND perfect_attendance IS NOT NULL AND date(perfect_attendance) <= date(?) ORDER BY perfect_attendance LIMIT 10"
+        sql_emp_detail = f'''
+            SELECT employee_id, last_name, first_name,
+                   COALESCE("Location",'') AS building,
+                   COALESCE(point_total,0) AS point_total,
+                   last_point_date, rolloff_date, perfect_attendance
+              FROM employees
+             WHERE employee_id IN ({ph})
+        '''
+        sql_roll_due = f'''
+            SELECT employee_id, last_name, first_name, COALESCE("Location",'') AS building,
+                   rolloff_date, COALESCE(point_total,0) AS point_total
+              FROM employees
+             WHERE employee_id IN ({ph})
+               AND rolloff_date IS NOT NULL
+               AND date(rolloff_date) >= date(?)
+               AND date(rolloff_date) <= date(?)
+             ORDER BY date(rolloff_date), lower(last_name), lower(first_name)
+        '''
+        sql_perf_due = f'''
+            SELECT employee_id, last_name, first_name, COALESCE("Location",'') AS building,
+                   perfect_attendance, COALESCE(point_total,0) AS point_total
+              FROM employees
+             WHERE employee_id IN ({ph})
+               AND perfect_attendance IS NOT NULL
+               AND date(perfect_attendance) >= date(?)
+               AND date(perfect_attendance) <= date(?)
+             ORDER BY date(perfect_attendance), lower(last_name), lower(first_name)
+        '''
+        sql_repeat_reason = f'''
+            SELECT e.employee_id, e.last_name, e.first_name,
+                   COALESCE(e."Location", '') AS building,
+                   ph.reason,
+                   COUNT(*) AS cnt,
+                   MAX(date(ph.point_date)) AS most_recent
+              FROM points_history ph
+              JOIN employees e ON e.employee_id = ph.employee_id
+             WHERE ph.employee_id IN ({ph})
+               AND date(ph.point_date) >= date(?)
+               AND COALESCE(ph.reason, '') <> ''
+             GROUP BY e.employee_id, e.last_name, e.first_name, COALESCE(e."Location", ''), ph.reason
+            HAVING COUNT(*) >= 3
+             ORDER BY cnt DESC, most_recent DESC, e.last_name, e.first_name
+        '''
+        sql_hotspots = f'''
+            SELECT date(point_date) AS d
+              FROM points_history
+             WHERE employee_id IN ({ph})
+               AND date(point_date) >= date(?)
+        '''
+        sql_build_points = '''
+            SELECT ROUND(COALESCE(SUM(points), 0.0), 1) AS pts
+              FROM points_history ph
+              JOIN employees e ON e.employee_id = ph.employee_id
+             WHERE date(ph.point_date) >= date(?)
+               AND COALESCE(ph.points, 0.0) > 0.0
+               AND COALESCE(e."Location", '') = ?
+               AND COALESCE(e.is_active, 1) = 1
+        '''
+        sql_build_reasons = '''
+            SELECT ph.reason, COUNT(*) AS n
+              FROM points_history ph
+              JOIN employees e ON e.employee_id = ph.employee_id
+             WHERE date(ph.point_date) >= date(?)
+               AND COALESCE(ph.points, 0.0) > 0.0
+               AND COALESCE(e."Location", '') = ?
+               AND COALESCE(e.is_active, 1) = 1
+               AND COALESCE(ph.reason, '') <> ''
+             GROUP BY ph.reason
+             ORDER BY n DESC, ph.reason
+             LIMIT 3
+        '''
 
-    # Access scalars by column name (works for both sqlite3.Row and pg dict rows)
-    active_n  = dict(fetchall(conn, sql_active,  (*emp_ids, since))[0]).get("cnt") or 0
-    rolloff_n = dict(fetchall(conn, sql_roll30,  (*emp_ids, (today + timedelta(30)).isoformat()))[0]).get("cnt") or 0
-    perf_n    = dict(fetchall(conn, sql_perf60,  (*emp_ids, (today + timedelta(60)).isoformat()))[0]).get("cnt") or 0
+    emp_detail_rows = [dict(r) for r in fetchall(conn, sql_emp_detail, tuple(emp_ids))]
+    roll_due_rows = [dict(r) for r in fetchall(conn, sql_roll_due, (*emp_ids, today.isoformat(), in_30_days.isoformat()))]
+    perf_due_rows = [dict(r) for r in fetchall(conn, sql_perf_due, (*emp_ids, today.isoformat(), in_30_days.isoformat()))]
 
-    # ── KPI row ──────────────────────────────────────────────────────────────
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric(f"Incidents ({win_days}d)", int(active_n))
-    m2.metric("Roll-offs Due ≤30d", int(rolloff_n))
-    m3.metric("Perfect Att. Due ≤60d", int(perf_n))
-    m4.metric("Total Employees", len(emp_ids))
+    if st.button("➕ Add Points", key="dash_add_points"):
+        selected_emp = st.session_state.get("selected_employee_id")
+        if selected_emp:
+            st.session_state["ledger_emp_id"] = int(selected_emp)
+        st.session_state["_nav_page"] = "Points Ledger"
+        st.rerun()
 
-    st.markdown("<div style='height:.6rem'></div>", unsafe_allow_html=True)
+    bucket_defs = {
+        "0": lambda pts: pts == 0,
+        "1-2": lambda pts: 1 <= pts <= 2,
+        "3-5": lambda pts: 3 <= pts <= 5,
+        "6+": lambda pts: pts >= 6,
+    }
+    bucket_counts = {
+        key: sum(1 for r in emp_detail_rows if fn(float(r.get("point_total") or 0)))
+        for key, fn in bucket_defs.items()
+    }
+
+    tile_cols = st.columns(4)
+    tile_specs = [
+        ("0", "0 Points"),
+        ("1-2", "1–2 Points"),
+        ("3-5", "3–5 Points"),
+        ("6+", "6+ Points"),
+    ]
+    for col, (key, label) in zip(tile_cols, tile_specs):
+        if col.button(f"{label}\n{bucket_counts[key]}", key=f"dash_bucket_{key}", use_container_width=True):
+            st.session_state["dashboard_bucket"] = key
+
+    st.caption(
+        f"Roll Offs Due ≤30 Days: {len(roll_due_rows)}  •  Perfect Attendance Due ≤30 Days: {len(perf_due_rows)}"
+    )
 
     col_left, col_right = st.columns([1.6, 1], gap="large")
 
-    # ── Trend chart + leaderboard ────────────────────────────────────────────
     with col_left:
-        section_label(f"Incident Trend — last {win_days} days")
-        # Convert to dicts so field access works for both SQLite and PostgreSQL
-        trend = [dict(r) for r in fetchall(conn, sql_trend, (*emp_ids, since))]
-        if trend:
-            df_t = pd.DataFrame(trend).rename(columns={"d": "Date", "n": "Incidents"})
-            df_t["Date"] = pd.to_datetime(df_t["Date"])
-            st.line_chart(df_t.set_index("Date")["Incidents"], color="#4f8ef7", height=220)
-        else:
-            info_box("No incidents recorded in the selected window.")
+        section_label("Employees at 6+ Points")
+        bucket_key = st.session_state.get("dashboard_bucket")
+        source_rows = [r for r in emp_detail_rows if float(r.get("point_total") or 0) >= 6]
+        if bucket_key in bucket_defs:
+            source_rows = [r for r in emp_detail_rows if bucket_defs[bucket_key](float(r.get("point_total") or 0))]
+            st.caption(f"Filtered by threshold tile: {bucket_key}")
 
-        st.markdown("<div style='height:.65rem'></div>", unsafe_allow_html=True)
-
-        lbl_col, n_col = st.columns([3, 1])
-        with lbl_col:
-            section_label("Top Employees by Point Total")
-        with n_col:
-            top_n = st.slider("Top", 5, 25, 10, step=5, label_visibility="collapsed", key="dash_n")
-
-        leaders = [dict(r) for r in fetchall(conn, sql_leaders, (*emp_ids, top_n))]
-        if leaders:
-            df_l = pd.DataFrame(
-                [{"Emp #": str(r["employee_id"]), "Name": f"{r['last_name']}, {r['first_name']}",
-                  "Building": r["loc"] or "—", "Points": float(r["pts"] or 0)}
-                 for r in leaders]
-            )
-            st.dataframe(df_l, use_container_width=True, hide_index=True)
-        else:
-            info_box("No employees currently have outstanding points.")
-
-    # ── Upcoming roll-offs + perfect attendance ───────────────────────────────
-    with col_right:
-        section_label("Upcoming Roll-offs")
-        rolloff_search = st.text_input(
-            "Search roll-offs",
-            placeholder="Filter by name or employee # …",
-            key="rolloff_search",
-            label_visibility="collapsed",
+        source_rows = sorted(
+            source_rows,
+            key=lambda r: (
+                -float(r.get("point_total") or 0),
+                str(r.get("last_point_date") or ""),
+            ),
         )
 
-        # 2-month roll-offs — only future dates (rolloff_date >= today)
-        rolloffs_2mo = [dict(r) for r in fetchall(conn, sql_rolloffs, (*emp_ids, today.isoformat()))]
-
-        # YTD roll-off previews — gather current + upcoming month schedules.
-        # This keeps YTD events visible in "Upcoming" even after the current
-        # month has already been applied in System Maintenance.
-        emp_set    = set(emp_ids)
-        emp_lookup = {int(e["employee_id"]): e for e in employees}
-        ytd_entries: list[dict] = []
-        try:
-            # Look ahead a few months so upcoming YTD dates continue to appear.
-            # 2-month roll-offs still come from employees.rolloff_date.
-            seen_ytd: set[tuple[int, str]] = set()
-            for month_offset in range(0, 4):
-                run_month = (today.month - 1) + month_offset
-                run_year = today.year + (run_month // 12)
-                run_mon = (run_month % 12) + 1
-                run_date = date(run_year, run_mon, 1)
-
-                for p in services.preview_ytd_rolloffs(
-                    conn,
-                    run_date=run_date,
-                    exclude_applied=True,
-                ):
-                    eid = int(p[0])
-                    roll_date = str(p[2]) if len(p) > 2 else ""
-                    if eid not in emp_set or not roll_date:
-                        continue
-                    if roll_date < today.isoformat():
-                        continue
-                    dedupe_key = (eid, roll_date)
-                    if dedupe_key in seen_ytd:
-                        continue
-                    seen_ytd.add(dedupe_key)
-
-                    e = emp_lookup.get(eid, {})
-                    ytd_entries.append({
-                        "employee_id": eid,
-                        "last_name":   e.get("last_name", ""),
-                        "first_name":  e.get("first_name", ""),
-                        "point_total": e.get("point_total", 0),
-                        "rolloff_date": roll_date,
-                        "type":   "YTD Roll-Off",
-                        "amount": float(p[1] or 0),
-                    })
-        except Exception:
-            pass
-
-        # Combine: tag 2-mo entries then append YTD entries; sort by date
-        all_upcoming = [{**r, "type": "2-Mo Roll-Off", "amount": -1.0} for r in rolloffs_2mo]
-        all_upcoming += ytd_entries
-        all_upcoming.sort(key=lambda x: str(x.get("rolloff_date") or "9999"))
-
-        # Live search filter
-        if rolloff_search.strip():
-            _q = rolloff_search.strip().lower()
-            all_upcoming = [
-                r for r in all_upcoming
-                if _q in (r.get("last_name") or "").lower()
-                or _q in (r.get("first_name") or "").lower()
-                or _q in f"{(r.get('last_name') or '').lower()}, {(r.get('first_name') or '').lower()}"
-                or _q in str(r.get("employee_id") or "")
-            ]
-
-        if all_upcoming:
-            html = []
-            for r in all_upcoming:
-                days   = days_until(r["rolloff_date"])
-                is_ytd = r["type"] == "YTD Roll-Off"
-                tc = "#00b8e6" if is_ytd else "#4f8ef7"
-                tb = "rgba(0,184,230,.10)" if is_ytd else "rgba(79,142,247,.10)"
-                tbr= "rgba(0,184,230,.25)" if is_ytd else "rgba(79,142,247,.25)"
-                type_badge = (
-                    f"<span style='display:inline-block;padding:2px 8px;border-radius:6px;"
-                    f"font-size:.74rem;font-weight:700;color:{tc};background:{tb};"
-                    f"border:1px solid {tbr}'>{r['type']}</span>"
-                )
-                amt = float(r.get("amount") or 0)
-                html.append(
-                    f"<div class='list-row'>"
-                    f"<div style='display:flex;justify-content:space-between;align-items:center'>"
-                    f"<div><span style='font-weight:600;font-size:.9rem;color:#1a2744'>{r['last_name']}, {r['first_name']}</span>"
-                    f"<span style='color:#8fa0b8;font-size:.78rem;margin-left:.4rem'>#{r['employee_id']}</span></div>"
-                    f"<div style='display:flex;gap:.3rem;align-items:center'>{type_badge}{days_badge(days)}</div>"
-                    f"</div>"
-                    f"<div style='display:flex;justify-content:space-between;margin-top:.22rem'>"
-                    f"<span style='font-size:.75rem;color:#8fa0b8'>Due {fmt_date(r['rolloff_date'])}</span>"
-                    f"<span style='font-size:.78rem;font-weight:700;color:#e0394a'>{amt:.1f} pts</span>"
-                    f"</div>"
-                    f"</div>"
-                )
-            st.markdown("".join(html), unsafe_allow_html=True)
+        if source_rows:
+            df_emps = pd.DataFrame(
+                [
+                    {
+                        "employee_id": int(r["employee_id"]),
+                        "Employee #": str(r["employee_id"]),
+                        "Name": f"{r['last_name']}, {r['first_name']}",
+                        "Building": r.get("building") or "—",
+                        "Point Total": f"{float(r.get('point_total') or 0):.1f}",
+                        "Last Point Date": fmt_date(r.get("last_point_date")),
+                    }
+                    for r in source_rows
+                ]
+            )
+            event = st.dataframe(
+                df_emps[["Employee #", "Name", "Building", "Point Total", "Last Point Date"]],
+                use_container_width=True,
+                hide_index=True,
+                height=295,
+                key="dash_emp_above5_table",
+                on_select="rerun",
+                selection_mode="single-row",
+            )
+            selected_rows = (event.selection.get("rows") if event else []) or []
+            if selected_rows:
+                idx = int(selected_rows[0])
+                if 0 <= idx < len(df_emps):
+                    st.session_state["selected_employee_id"] = int(df_emps.iloc[idx]["employee_id"])
         else:
-            info_box("No roll-offs are currently pending.")
+            info_box("None 🎉")
 
         divider()
+        section_label("Pattern Detection (Last 60 Days)")
 
-        section_label("Perfect Attendance Due ≤60 Days")
-        perfects = [dict(r) for r in fetchall(conn, sql_perfect, (*emp_ids, (today + timedelta(60)).isoformat()))]
-        if perfects:
-            html = []
-            for r in perfects:
-                days = days_until(r["perfect_attendance"])
-                html.append(
-                    f"<div class='list-row'>"
-                    f"<div style='display:flex;justify-content:space-between;align-items:center'>"
-                    f"<span style='font-weight:600;font-size:.9rem;color:#1a2744'>{r['last_name']}, {r['first_name']}</span>"
-                    f"{days_badge(days)}"
-                    f"</div>"
-                    f"<div style='font-size:.75rem;color:#8fa0b8;margin-top:.18rem'>Eligible {fmt_date(r['perfect_attendance'])}</div>"
-                    f"</div>"
-                )
-            st.markdown("".join(html), unsafe_allow_html=True)
+        repeat_rows = [dict(r) for r in fetchall(conn, sql_repeat_reason, (*emp_ids, since_60_days.isoformat()))]
+        st.markdown("<div style='font-size:.8rem;font-weight:700;color:#5c6f8c;margin-bottom:.25rem'>Repeat Reason Flags</div>", unsafe_allow_html=True)
+        if repeat_rows:
+            df_repeat = pd.DataFrame(
+                [
+                    {
+                        "Employee #": str(r["employee_id"]),
+                        "Name": f"{r['last_name']}, {r['first_name']}",
+                        "Building": r.get("building") or "—",
+                        "Reason": r.get("reason") or "—",
+                        "Count (last 60d)": int(r.get("cnt") or 0),
+                        "Most Recent Date": fmt_date(r.get("most_recent")),
+                    }
+                    for r in repeat_rows
+                ]
+            )
+            st.dataframe(df_repeat, use_container_width=True, hide_index=True, height=220)
         else:
-            info_box("No perfect attendance milestones in the next 60 days.")
+            info_box("No repeat reason flags in the last 60 days.")
 
+        hotspots = [dict(r) for r in fetchall(conn, sql_hotspots, (*emp_ids, since_60_days.isoformat()))]
+        st.markdown("<div style='font-size:.8rem;font-weight:700;color:#5c6f8c;margin:.6rem 0 .25rem 0'>Day-of-Week Hotspots</div>", unsafe_allow_html=True)
+        if hotspots:
+            df_hot = pd.DataFrame(hotspots)
+            df_hot["d"] = pd.to_datetime(df_hot["d"], errors="coerce")
+            dow_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+            counts = df_hot.dropna(subset=["d"])["d"].dt.day_name().value_counts().reindex(dow_order, fill_value=0)
+            df_dow = pd.DataFrame({"Day": [d[:3] for d in dow_order], "Count": counts.values})
+            st.dataframe(df_dow, use_container_width=True, hide_index=True)
+        else:
+            info_box("No point activity in the last 60 days.")
+
+    with col_right:
+        section_label("Roll Offs Due (Next 30 Days)")
+        if roll_due_rows:
+            df_roll = pd.DataFrame(
+                [
+                    {
+                        "Employee #": str(r["employee_id"]),
+                        "Name": f"{r['last_name']}, {r['first_name']}",
+                        "Building": r.get("building") or "—",
+                        "Rolloff Date": fmt_date(r.get("rolloff_date")),
+                        "Current Points": f"{float(r.get('point_total') or 0):.1f}",
+                    }
+                    for r in roll_due_rows
+                ]
+            )
+            st.dataframe(df_roll, use_container_width=True, hide_index=True, height=235)
+        else:
+            info_box("No roll-offs due in the next 30 days.")
+
+        divider()
+        section_label("Perfect Attendance Due (Next 30 Days)")
+        if perf_due_rows:
+            df_perf = pd.DataFrame(
+                [
+                    {
+                        "Employee #": str(r["employee_id"]),
+                        "Name": f"{r['last_name']}, {r['first_name']}",
+                        "Building": r.get("building") or "—",
+                        "Perfect Date": fmt_date(r.get("perfect_attendance")),
+                        "Current Points": f"{float(r.get('point_total') or 0):.1f}",
+                    }
+                    for r in perf_due_rows
+                ]
+            )
+            st.dataframe(df_perf, use_container_width=True, hide_index=True, height=235)
+        else:
+            info_box("No perfect attendance dates due in the next 30 days.")
+
+    divider()
+    section_label("Building Snapshot (Last 30 Days)")
+
+    active_rows = [
+        dict(r)
+        for r in fetchall(
+            conn,
+            'SELECT COALESCE("Location", "") AS building, COUNT(*) AS n FROM employees WHERE COALESCE(is_active,1)=1 GROUP BY COALESCE("Location", "")',
+        )
+    ]
+    active_by_build = {b: 0 for b in BUILDINGS}
+    for r in active_rows:
+        if r["building"] in active_by_build:
+            active_by_build[r["building"]] = int(r["n"] or 0)
+
+    since_30 = (today - timedelta(days=30)).isoformat()
+    snap_rows = []
+    for b in BUILDINGS:
+        pts_row = fetchall(conn, sql_build_points, (since_30, b))
+        total_pts = float(dict(pts_row[0]).get("pts") or 0.0) if pts_row else 0.0
+        headcount = int(active_by_build.get(b) or 0)
+        per_100 = (total_pts / headcount * 100.0) if headcount else 0.0
+        reasons = [dict(r).get("reason") for r in fetchall(conn, sql_build_reasons, (since_30, b))]
+        reasons_txt = ", ".join([r for r in reasons if r]) or "—"
+        snap_rows.append(
+            {
+                "Building": b,
+                "Total Points Added (30d)": f"{total_pts:.1f}",
+                "Points / 100 Active": f"{per_100:.1f}",
+                "Top 3 Reasons": reasons_txt,
+            }
+        )
+
+    st.dataframe(pd.DataFrame(snap_rows), use_container_width=True, hide_index=True)
 
 # ── Employees ─────────────────────────────────────────────────────────────────
 def employees_page(conn, building: str) -> None:
@@ -532,14 +754,6 @@ def employees_page(conn, building: str) -> None:
     if not rows:
         info_box("No matching employees found.")
         return
-
-    # Results table
-    df = pd.DataFrame(rows)[["employee_id", "last_name", "first_name", "location", "is_active"]]
-    df.columns = ["Emp #", "Last Name", "First Name", "Building", "Active"]
-    df["Emp #"] = df["Emp #"].astype(str)
-    st.dataframe(df, use_container_width=True, hide_index=True)
-
-    divider()
 
     # Detail view
     opts = [
@@ -580,12 +794,27 @@ def employees_page(conn, building: str) -> None:
     c4.metric("Last Point Entry", fmt_date(emp.get("last_point_date")))
 
     divider()
-    section_label("Point History (last 50 entries)")
-    hist = [dict(r) for r in repo.get_points_history(conn, emp_id, limit=50)]
+    section_label("Point History (all events)")
+    hist = [dict(r) for r in repo.get_points_history(conn, emp_id, limit=5000)]
+
+    pdf_bytes = build_point_history_pdf(emp, hist)
+    safe_last = str(emp.get("last_name") or "employee").replace(" ", "_")
+    safe_first = str(emp.get("first_name") or "").replace(" ", "_")
+    report_date = date.today().strftime("%Y%m%d")
+    st.download_button(
+        "Download Point History PDF",
+        data=pdf_bytes,
+        file_name=f"attendance-history-{emp_id}-{safe_last}-{safe_first}-{report_date}.pdf",
+        mime="application/pdf",
+        use_container_width=False,
+    )
+
     if hist:
         df_h = pd.DataFrame(hist)[["point_date", "points", "reason", "note", "point_total"]]
+        df_h["point_date"] = df_h["point_date"].apply(fmt_date)
+        df_h["points"] = df_h["points"].apply(lambda v: f"{float(v or 0):.1f}")
+        df_h["point_total"] = df_h["point_total"].apply(lambda v: f"{float(v or 0):.1f}")
         df_h.columns = ["Date", "Points", "Reason", "Note", "Running Total"]
-        df_h["Date"] = df_h["Date"].apply(fmt_date)
         st.dataframe(df_h, use_container_width=True, hide_index=True)
     else:
         info_box("No history entries yet for this employee.")
@@ -710,19 +939,21 @@ def points_ledger_page(conn, building: str) -> None:
                     try:
                         preview = services.preview_add_point(emp_id, p_date, float(points), reason, note)
                         services.add_point(conn, preview, flag_code=(flag_code or "").strip() or None)
-                        st.success(f"Added {float(points):+.1f} pts on {fmt_date(p_date)}.")
+                        st.success(f"Added {float(points):.1f} pts on {fmt_date(p_date)}.")
                         st.rerun()
                     except Exception as exc:
                         st.error(str(exc))
 
 
     with col_hist:
-        section_label("Transaction History")
-        hist = [dict(r) for r in repo.get_points_history(conn, emp_id, limit=100)]
+        section_label("Transaction History (all events)")
+        hist = [dict(r) for r in repo.get_points_history(conn, emp_id, limit=5000)]
         if hist:
             df_h = pd.DataFrame(hist)[["id", "point_date", "points", "reason", "note", "point_total"]]
+            df_h["point_date"] = df_h["point_date"].apply(fmt_date)
+            df_h["points"] = df_h["points"].apply(lambda v: f"{float(v or 0):.1f}")
+            df_h["point_total"] = df_h["point_total"].apply(lambda v: f"{float(v or 0):.1f}")
             df_h.columns = ["ID", "Date", "Pts", "Reason", "Note", "Running Total"]
-            df_h["Date"] = df_h["Date"].apply(fmt_date)
             st.dataframe(df_h.drop(columns=["ID"]), use_container_width=True, hide_index=True, height=430)
             if st.button("Undo Last Entry", key="undo_last"):
                 try:
@@ -1078,6 +1309,7 @@ def system_updates_page(conn) -> None:
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main() -> None:
     apply_theme()
+    ensure_session_defaults()
     conn = get_conn()
 
     logo_path = REPO_ROOT / "assets" / "logo.png"
@@ -1095,6 +1327,11 @@ def main() -> None:
             )
 
         st.markdown("<span class='sidebar-nav-label'>Navigation</span>", unsafe_allow_html=True)
+        pending_page = st.session_state.get("_nav_page")
+        if pending_page:
+            st.session_state["page"] = pending_page
+            st.session_state["_nav_page"] = None
+
         page = st.radio(
             "nav",
             ["Dashboard", "Employees", "Points Ledger", "Manage Employees", "Exports & Forecasts", "System Updates"],
