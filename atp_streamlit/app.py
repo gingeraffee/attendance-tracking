@@ -659,10 +659,10 @@ def employees_page(conn, building: str) -> None:
 
     if hist:
         df_h = pd.DataFrame(hist)[["point_date", "points", "reason", "note", "point_total"]]
-        df_h.columns = ["Date", "Points", "Reason", "Note", "Point Total"]
-        df_h["Date"] = df_h["Date"].apply(fmt_date)
-        df_h["Points"] = df_h["Points"].apply(lambda v: f"{float(v or 0):.1f}")
-        df_h["Running Total"] = df_h["Running Total"].apply(lambda v: f"{float(v or 0):.1f}")
+        df_h["point_date"] = df_h["point_date"].apply(fmt_date)
+        df_h["points"] = df_h["points"].apply(lambda v: f"{float(v or 0):.1f}")
+        df_h["point_total"] = df_h["point_total"].apply(lambda v: f"{float(v or 0):.1f}")
+        df_h.columns = ["Date", "Points", "Reason", "Note", "Running Total"]
         st.dataframe(df_h, use_container_width=True, hide_index=True)
     else:
         info_box("No history entries yet for this employee.")
