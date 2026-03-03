@@ -597,9 +597,6 @@ def dashboard_page(conn, building: str) -> None:
 def employees_page(conn, building: str) -> None:
     page_heading("Employees", "Look up employees and review current attendance status.")
 
-    q = st.text_input(
-        "Search", placeholder="Name or employee # …", label_visibility="collapsed"
-    )
     rows = load_employees(conn, q=q, building=building)
 
     if not rows:
