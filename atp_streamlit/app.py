@@ -1351,25 +1351,31 @@ def main() -> None:
         render_sidebar_employee_panel(conn)
     # Top navigation bar (clean + fast): only the active page renders.
     PAGES = ["Dashboard", "Employees", "Points Ledger", "Manage Employees", "Exports & Forecasts", "System Updates"]
+
     if "page" not in st.session_state:
         st.session_state["page"] = "Dashboard"
 
+    def _nav_to(page_name: str) -> None:
+        st.session_state["page"] = page_name
+        try:
+            st.rerun()
+        except Exception:
+            st.experimental_rerun()
+
     current = st.session_state["page"]
     nav_cols = st.columns(len(PAGES), gap="small")
+
     for col, name in zip(nav_cols, PAGES):
         with col:
-            pressed = st.button(
+            st.button(
                 name,
                 key=f"nav_{name}",
                 use_container_width=True,
                 type="primary" if name == current else "secondary",
+                on_click=_nav_to,
+                args=(name,),
             )
-            if pressed and name != current:
-                st.session_state["page"] = name
-                try:
-                    st.rerun()
-                except Exception:
-                    st.experimental_rerun()
+
     page = st.session_state["page"]
 
     if page == "Dashboard":
