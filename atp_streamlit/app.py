@@ -332,7 +332,7 @@ def build_point_history_pdf(employee: dict, history: list[dict]) -> bytes:
     ]
 
     if history:
-        table_rows = [["Date", "Points", "Reason", "Note", "Point Total"]]
+        table_rows = [["Date", "Points", "Reason", "Note", "Running Total"]]
         for row in history:
             table_rows.append(
                 [
@@ -642,11 +642,10 @@ def employees_page(conn, building: str) -> None:
     c4.metric("Last Point Entry", fmt_date(emp.get("last_point_date")))
 
     divider()
-    section_label("Point History (last 50 entries)")
-    hist = [dict(r) for r in repo.get_points_history(conn, emp_id, limit=50)]
+    section_label("Point History")
+    hist = [dict(r) for r in repo.get_points_history(conn, emp_id, limit=5000)]
 
-    full_hist = [dict(r) for r in repo.get_points_history(conn, emp_id, limit=5000)]
-    pdf_bytes = build_point_history_pdf(emp, full_hist)
+    pdf_bytes = build_point_history_pdf(emp, hist)
     safe_last = str(emp.get("last_name") or "employee").replace(" ", "_")
     safe_first = str(emp.get("first_name") or "").replace(" ", "_")
     report_date = date.today().strftime("%Y%m%d")
@@ -662,6 +661,8 @@ def employees_page(conn, building: str) -> None:
         df_h = pd.DataFrame(hist)[["point_date", "points", "reason", "note", "point_total"]]
         df_h.columns = ["Date", "Points", "Reason", "Note", "Point Total"]
         df_h["Date"] = df_h["Date"].apply(fmt_date)
+        df_h["Points"] = df_h["Points"].apply(lambda v: f"{float(v or 0):.1f}")
+        df_h["Running Total"] = df_h["Running Total"].apply(lambda v: f"{float(v or 0):.1f}")
         st.dataframe(df_h, use_container_width=True, hide_index=True)
     else:
         info_box("No history entries yet for this employee.")
