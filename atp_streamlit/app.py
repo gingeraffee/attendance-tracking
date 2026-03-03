@@ -332,7 +332,7 @@ def build_point_history_pdf(employee: dict, history: list[dict]) -> bytes:
     ]
 
     if history:
-        table_rows = [["Date", "Points", "Reason", "Note", "Running Total"]]
+        table_rows = [["Date", "Points", "Reason", "Note", "Point Total"]]
         for row in history:
             table_rows.append(
                 [
