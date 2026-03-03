@@ -9,6 +9,7 @@ import sys
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 st.set_page_config(
     page_title="Attendance Point Tracker",
@@ -640,6 +641,21 @@ def points_ledger_page(conn, building: str) -> None:
     )
     emp_id = int(selected[0])
     st.session_state["ledger_emp_id"] = emp_id
+
+    # When the employee changes, nudge keyboard focus to the Date field (best-effort).
+    prev_focus_emp = st.session_state.get("_focus_emp_id")
+    if prev_focus_emp != emp_id:
+        st.session_state["_focus_emp_id"] = emp_id
+        components.html(
+            """<script>
+            // best-effort focus: Streamlit renders inputs with aria-labels
+            const sel = () => document.querySelector('input[aria-label="Date (MM/DD/YYYY)"]');
+            const tryFocus = () => { const el = sel(); if (el) { el.focus(); el.select?.(); return true; } return false; };
+            let tries = 0;
+            const t = setInterval(() => { tries++; if (tryFocus() || tries > 20) clearInterval(t); }, 100);
+            </script>""",
+            height=0,
+        )
     emp = dict(repo.get_employee(conn, emp_id))
     pts = float(emp.get("point_total") or 0)
 
@@ -669,24 +685,53 @@ def points_ledger_page(conn, building: str) -> None:
 
     with col_form:
         section_label("New Transaction")
-        with st.form("ledger_entry", clear_on_submit=True):
-            p_date  = st.date_input("Date", value=date.today())
-            points  = st.number_input("Points (+ add / − remove)", step=0.5, value=0.5, min_value=-20.0, max_value=20.0)
-            reason  = st.selectbox("Reason", REASON_OPTIONS)
-            note    = st.text_input("Note (optional)")
-            submit  = st.form_submit_button("Post Transaction", use_container_width=True)
+        with st.form("ledger_entry", clear_on_submit=False):
+            # Keyboard-first entry order (Tab works naturally in this top-to-bottom layout)
+            # Date in MM/DD/YYYY (text input is faster than clicking a date picker for batch work)
+            date_str = st.text_input(
+                "Date (MM/DD/YYYY)",
+                value=date.today().strftime("%m/%d/%Y"),
+                placeholder="MM/DD/YYYY",
+                key="ledger_date_str",
+            )
+
+            points = st.selectbox(
+                "Points",
+                [0.5, 1.0, 1.5],
+                index=0,
+                key="ledger_points",
+            )
+
+            reason = st.selectbox(
+                "Reason",
+                ["Tardy/Early Leave", "Absence", "No Call/No Show"],
+                index=0,
+                key="ledger_reason",
+            )
+
+            note = st.text_input("Note (optional)", key="ledger_note")
+            flag_code = st.text_input("Flag code (optional)", key="ledger_flag")
+
+            submit = st.form_submit_button("Add Point", use_container_width=True)
 
         if submit:
-            if p_date > date.today():
-                st.error("Date cannot be in the future.")
+            # Parse MM/DD/YYYY
+            try:
+                p_date = datetime.strptime(date_str.strip(), "%m/%d/%Y").date()
+            except Exception:
+                st.error("Invalid date. Use MM/DD/YYYY (example: 03/02/2026).")
             else:
-                try:
-                    preview = services.preview_add_point(emp_id, p_date, points, reason, note)
-                    services.add_point(conn, preview)
-                    st.success(f"Posted {points:+.1f} pts on {fmt_date(p_date)}.")
-                    st.rerun()
-                except Exception as exc:
-                    st.error(str(exc))
+                if p_date > date.today():
+                    st.error("Date cannot be in the future.")
+                else:
+                    try:
+                        preview = services.preview_add_point(emp_id, p_date, float(points), reason, note)
+                        services.add_point(conn, preview, flag_code=(flag_code or "").strip() or None)
+                        st.success(f"Added {float(points):+.1f} pts on {fmt_date(p_date)}.")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(str(exc))
+
 
     with col_hist:
         section_label("Transaction History")
