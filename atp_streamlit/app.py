@@ -303,7 +303,7 @@ def load_employees(conn, q: str = "", building: str = "All") -> list[dict]:
 def dashboard_page(conn, building: str) -> None:
     page_heading(
         "Dashboard",
-        "Real-time overview of upcoming actions and attendance milestones.",
+        "Real-time overview of attendance activity, upcoming actions, and point leaders.",
     )
 
     today = date.today()
@@ -327,32 +327,44 @@ def dashboard_page(conn, building: str) -> None:
     win_days = int(win_label.split()[0])
     since = (today - timedelta(days=win_days)).isoformat()
 
-    # ── Queries ──────────────────────────────────────────────────────────────
+    # ── KPI queries — always use AS aliases so dict rows work ────────────────
     if is_pg(conn):
+        sql_active  = f"SELECT COUNT(DISTINCT employee_id) AS cnt FROM points_history WHERE employee_id IN ({ph}) AND points > 0 AND (point_date::date) >= (%s::date)"
+        sql_roll30  = f"SELECT COUNT(*) AS cnt FROM employees WHERE employee_id IN ({ph}) AND rolloff_date IS NOT NULL AND (rolloff_date::date) <= (%s::date) AND point_total > 0"
         sql_perf60  = f"SELECT COUNT(*) AS cnt FROM employees WHERE employee_id IN ({ph}) AND perfect_attendance IS NOT NULL AND (perfect_attendance::date) <= (%s::date)"
         sql_trend   = f"SELECT (point_date::date)::text AS d, COUNT(*) AS n FROM points_history WHERE employee_id IN ({ph}) AND points > 0 AND (point_date::date) >= (%s::date) GROUP BY 1 ORDER BY 1"
+        sql_leaders = f"SELECT employee_id, last_name, first_name, COALESCE(\"Location\",'') AS loc, COALESCE(point_total,0) AS pts FROM employees WHERE employee_id IN ({ph}) ORDER BY pts DESC, last_name LIMIT %s"
         sql_rolloffs= f"SELECT employee_id, last_name, first_name, rolloff_date, point_total FROM employees WHERE employee_id IN ({ph}) AND rolloff_date IS NOT NULL AND point_total > 0 AND (rolloff_date::date) >= (%s::date) ORDER BY rolloff_date LIMIT 12"
         sql_perfect = f"SELECT employee_id, last_name, first_name, perfect_attendance FROM employees WHERE employee_id IN ({ph}) AND perfect_attendance IS NOT NULL AND (perfect_attendance::date) <= (%s::date) ORDER BY perfect_attendance LIMIT 10"
     else:
+        sql_active  = f"SELECT COUNT(DISTINCT employee_id) AS cnt FROM points_history WHERE employee_id IN ({ph}) AND points > 0 AND date(point_date) >= date(?)"
+        sql_roll30  = f"SELECT COUNT(*) AS cnt FROM employees WHERE employee_id IN ({ph}) AND rolloff_date IS NOT NULL AND date(rolloff_date) <= date(?) AND point_total > 0"
         sql_perf60  = f"SELECT COUNT(*) AS cnt FROM employees WHERE employee_id IN ({ph}) AND perfect_attendance IS NOT NULL AND date(perfect_attendance) <= date(?)"
         sql_trend   = f"SELECT date(point_date) AS d, COUNT(*) AS n FROM points_history WHERE employee_id IN ({ph}) AND points > 0 AND date(point_date) >= date(?) GROUP BY 1 ORDER BY 1"
+        sql_leaders = f"SELECT employee_id, last_name, first_name, COALESCE(\"Location\",'') AS loc, COALESCE(point_total,0) AS pts FROM employees WHERE employee_id IN ({ph}) ORDER BY pts DESC, last_name LIMIT ?"
         sql_rolloffs= f"SELECT employee_id, last_name, first_name, rolloff_date, point_total FROM employees WHERE employee_id IN ({ph}) AND rolloff_date IS NOT NULL AND point_total > 0 AND date(rolloff_date) >= date(?) ORDER BY rolloff_date LIMIT 12"
         sql_perfect = f"SELECT employee_id, last_name, first_name, perfect_attendance FROM employees WHERE employee_id IN ({ph}) AND perfect_attendance IS NOT NULL AND date(perfect_attendance) <= date(?) ORDER BY perfect_attendance LIMIT 10"
 
-    perf_n = dict(fetchall(conn, sql_perf60, (*emp_ids, (today + timedelta(60)).isoformat()))[0]).get("cnt") or 0
+    # Access scalars by column name (works for both sqlite3.Row and pg dict rows)
+    active_n  = dict(fetchall(conn, sql_active,  (*emp_ids, since))[0]).get("cnt") or 0
+    rolloff_n = dict(fetchall(conn, sql_roll30,  (*emp_ids, (today + timedelta(30)).isoformat()))[0]).get("cnt") or 0
+    perf_n    = dict(fetchall(conn, sql_perf60,  (*emp_ids, (today + timedelta(60)).isoformat()))[0]).get("cnt") or 0
 
     # ── KPI row ──────────────────────────────────────────────────────────────
-    m1, m2 = st.columns(2)
-    m1.metric("Perfect Att. Due ≤60d", int(perf_n))
-    m2.metric("Total Employees", len(emp_ids))
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric(f"Incidents ({win_days}d)", int(active_n))
+    m2.metric("Roll-offs Due ≤30d", int(rolloff_n))
+    m3.metric("Perfect Att. Due ≤60d", int(perf_n))
+    m4.metric("Total Employees", len(emp_ids))
 
     st.markdown("<div style='height:.6rem'></div>", unsafe_allow_html=True)
 
     col_left, col_right = st.columns([1.6, 1], gap="large")
 
-    # ── Trend chart + perfect attendance ─────────────────────────────────────
+    # ── Trend chart + leaderboard ────────────────────────────────────────────
     with col_left:
         section_label(f"Incident Trend — last {win_days} days")
+        # Convert to dicts so field access works for both SQLite and PostgreSQL
         trend = [dict(r) for r in fetchall(conn, sql_trend, (*emp_ids, since))]
         if trend:
             df_t = pd.DataFrame(trend).rename(columns={"d": "Date", "n": "Incidents"})
@@ -363,26 +375,24 @@ def dashboard_page(conn, building: str) -> None:
 
         st.markdown("<div style='height:.65rem'></div>", unsafe_allow_html=True)
 
-        section_label("Perfect Attendance Due ≤60 Days")
-        perfects = [dict(r) for r in fetchall(conn, sql_perfect, (*emp_ids, (today + timedelta(60)).isoformat()))]
-        if perfects:
-            html = []
-            for r in perfects:
-                days = days_until(r["perfect_attendance"])
-                html.append(
-                    f"<div class='list-row'>"
-                    f"<div style='display:flex;justify-content:space-between;align-items:center'>"
-                    f"<span style='font-weight:600;font-size:.9rem;color:#1a2744'>{r['last_name']}, {r['first_name']}</span>"
-                    f"{days_badge(days)}"
-                    f"</div>"
-                    f"<div style='font-size:.75rem;color:#8fa0b8;margin-top:.18rem'>Eligible {fmt_date(r['perfect_attendance'])}</div>"
-                    f"</div>"
-                )
-            st.markdown("".join(html), unsafe_allow_html=True)
-        else:
-            info_box("No perfect attendance milestones in the next 60 days.")
+        lbl_col, n_col = st.columns([3, 1])
+        with lbl_col:
+            section_label("Top Employees by Point Total")
+        with n_col:
+            top_n = st.slider("Top", 5, 25, 10, step=5, label_visibility="collapsed", key="dash_n")
 
-    # ── Upcoming roll-offs ───────────────────────────────────────────────────
+        leaders = [dict(r) for r in fetchall(conn, sql_leaders, (*emp_ids, top_n))]
+        if leaders:
+            df_l = pd.DataFrame(
+                [{"Emp #": str(r["employee_id"]), "Name": f"{r['last_name']}, {r['first_name']}",
+                  "Building": r["loc"] or "—", "Points": float(r["pts"] or 0)}
+                 for r in leaders]
+            )
+            st.dataframe(df_l, use_container_width=True, hide_index=True)
+        else:
+            info_box("No employees currently have outstanding points.")
+
+    # ── Upcoming roll-offs + perfect attendance ───────────────────────────────
     with col_right:
         section_label("Upcoming Roll-offs")
         rolloff_search = st.text_input(
@@ -396,10 +406,14 @@ def dashboard_page(conn, building: str) -> None:
         rolloffs_2mo = [dict(r) for r in fetchall(conn, sql_rolloffs, (*emp_ids, today.isoformat()))]
 
         # YTD roll-off previews — gather current + upcoming month schedules.
+        # This keeps YTD events visible in "Upcoming" even after the current
+        # month has already been applied in System Maintenance.
         emp_set    = set(emp_ids)
         emp_lookup = {int(e["employee_id"]): e for e in employees}
         ytd_entries: list[dict] = []
         try:
+            # Look ahead a few months so upcoming YTD dates continue to appear.
+            # 2-month roll-offs still come from employees.rolloff_date.
             seen_ytd: set[tuple[int, str]] = set()
             for month_offset in range(0, 4):
                 run_month = (today.month - 1) + month_offset
@@ -441,7 +455,7 @@ def dashboard_page(conn, building: str) -> None:
         all_upcoming += ytd_entries
         all_upcoming.sort(key=lambda x: str(x.get("rolloff_date") or "9999"))
 
-        # Live search filter (updates on every keystroke)
+        # Live search filter
         if rolloff_search.strip():
             _q = rolloff_search.strip().lower()
             all_upcoming = [
@@ -482,6 +496,27 @@ def dashboard_page(conn, building: str) -> None:
             st.markdown("".join(html), unsafe_allow_html=True)
         else:
             info_box("No roll-offs are currently pending.")
+
+        divider()
+
+        section_label("Perfect Attendance Due ≤60 Days")
+        perfects = [dict(r) for r in fetchall(conn, sql_perfect, (*emp_ids, (today + timedelta(60)).isoformat()))]
+        if perfects:
+            html = []
+            for r in perfects:
+                days = days_until(r["perfect_attendance"])
+                html.append(
+                    f"<div class='list-row'>"
+                    f"<div style='display:flex;justify-content:space-between;align-items:center'>"
+                    f"<span style='font-weight:600;font-size:.9rem;color:#1a2744'>{r['last_name']}, {r['first_name']}</span>"
+                    f"{days_badge(days)}"
+                    f"</div>"
+                    f"<div style='font-size:.75rem;color:#8fa0b8;margin-top:.18rem'>Eligible {fmt_date(r['perfect_attendance'])}</div>"
+                    f"</div>"
+                )
+            st.markdown("".join(html), unsafe_allow_html=True)
+        else:
+            info_box("No perfect attendance milestones in the next 60 days.")
 
 
 # ── Employees ─────────────────────────────────────────────────────────────────
@@ -564,52 +599,13 @@ def points_ledger_page(conn, building: str) -> None:
         warn_box("No active employees found for this building filter.")
         return
 
-    # --- Quick employee finder (built for batch work) -------------------------
-    # Streamlit reruns on each keystroke, so this search "auto-sifts" instantly.
-    q = st.text_input("Find employee (type last name, first name, or #)", value=st.session_state.get("ledger_q", ""), key="ledger_q")
-
-    def _label(e: dict) -> str:
-        return f"#{e['employee_id']} — {e['last_name']}, {e['first_name']}"
-
-    q_norm = (q or "").strip().lower()
-    filtered = []
-    for e in employees:
-        blob = f"{e.get('employee_id','')} {e.get('first_name','')} {e.get('last_name','')}".lower()
-        if (not q_norm) or (q_norm in blob):
-            filtered.append(e)
-
-    if not filtered:
-        info_box("No employees match that search in the current building filter.")
-        return
-
-    # Keep selection stable across reruns/posts
-    default_emp_id = int(st.session_state.get("ledger_emp_id", filtered[0]["employee_id"]))
-    filtered_ids = [int(e["employee_id"]) for e in filtered]
-    if default_emp_id not in filtered_ids:
-        default_emp_id = filtered_ids[0]
-
-    # Navigation helpers (fast when processing a list)
-    nav = st.columns([1, 1, 5], gap="small")
-    cur_idx = filtered_ids.index(default_emp_id)
-
-    with nav[0]:
-        if st.button("⬅️ Prev", use_container_width=True, disabled=(cur_idx == 0)):
-            st.session_state.ledger_emp_id = filtered_ids[cur_idx - 1]
-            st.rerun()
-    with nav[1]:
-        if st.button("Next ➡️", use_container_width=True, disabled=(cur_idx == len(filtered_ids) - 1)):
-            st.session_state.ledger_emp_id = filtered_ids[cur_idx + 1]
-            st.rerun()
-
-    emp_id = st.selectbox(
-        "Employee",
-        options=filtered_ids,
-        index=filtered_ids.index(default_emp_id),
-        format_func=lambda _id: _label(next(e for e in filtered if int(e["employee_id"]) == int(_id))),
-        key="ledger_emp_id",
-    )
-
-    emp = dict(repo.get_employee(conn, int(emp_id)))
+    opts = [
+        (int(e["employee_id"]), f"#{e['employee_id']} — {e['last_name']}, {e['first_name']}")
+        for e in employees
+    ]
+    selected = st.selectbox("Employee", opts, format_func=lambda x: x[1])
+    emp_id = selected[0]
+    emp = dict(repo.get_employee(conn, emp_id))
     pts = float(emp.get("point_total") or 0)
 
     # Status strip
@@ -637,92 +633,29 @@ def points_ledger_page(conn, building: str) -> None:
     col_form, col_hist = st.columns([1, 2], gap="large")
 
     with col_form:
-        section_label("Quick Post")
+        section_label("New Transaction")
+        with st.form("ledger_entry", clear_on_submit=True):
+            p_date  = st.date_input("Date", value=date.today())
+            points  = st.number_input("Points (+ add / − remove)", step=0.5, value=0.5, min_value=-20.0, max_value=20.0)
+            reason  = st.selectbox("Reason", REASON_OPTIONS)
+            note    = st.text_input("Note (optional)")
+            submit  = st.form_submit_button("Post Transaction", use_container_width=True)
 
-        # Defaults that persist while you work through a batch
-        st.session_state.setdefault("ledger_points", 0.5)
-        st.session_state.setdefault("ledger_reason", REASON_OPTIONS[0] if REASON_OPTIONS else "")
-        st.session_state.setdefault("ledger_note", "")
-        st.session_state.setdefault("ledger_date", date.today())
-        st.session_state.setdefault("ledger_auto_next", True)
-
-        with st.form("ledger_entry", clear_on_submit=False):
-            p_date = st.date_input("Date", value=st.session_state.ledger_date, key="ledger_date")
-            points = st.number_input(
-                "Points (+ add / − remove)",
-                step=0.5,
-                value=float(st.session_state.ledger_points),
-                min_value=-20.0,
-                max_value=20.0,
-                key="ledger_points",
-            )
-            reason = st.selectbox("Reason", REASON_OPTIONS, index=REASON_OPTIONS.index(st.session_state.ledger_reason) if st.session_state.ledger_reason in REASON_OPTIONS else 0, key="ledger_reason")
-            note = st.text_input("Note (optional)", value=st.session_state.ledger_note, key="ledger_note")
-
-            st.caption("Tip: Use **Prev/Next** above to fly through a filtered list. Post + auto-advance is great for batches.")
-            auto_next = st.toggle("Auto-advance to next employee after posting", value=bool(st.session_state.ledger_auto_next), key="ledger_auto_next")
-
-            c1, c2 = st.columns(2, gap="small")
-            post = c1.form_submit_button("Post", use_container_width=True)
-            post_next = c2.form_submit_button("Post & Next", use_container_width=True)
-
-        if post or post_next:
+        if submit:
             if p_date > date.today():
                 st.error("Date cannot be in the future.")
-            elif float(points) == 0:
-                st.error("Points cannot be 0.")
             else:
                 try:
-                    preview = services.preview_add_point(int(emp_id), p_date, float(points), reason, note)
+                    preview = services.preview_add_point(emp_id, p_date, points, reason, note)
                     services.add_point(conn, preview)
-                    st.success(f"Posted {float(points):+.1f} pts to {_label(emp)} on {fmt_date(p_date)}.")
-
-                    # Optional auto-advance for batch entry
-                    if post_next or st.session_state.ledger_auto_next:
-                        idx = filtered_ids.index(int(emp_id))
-                        if idx < len(filtered_ids) - 1:
-                            st.session_state.ledger_emp_id = filtered_ids[idx + 1]
+                    st.success(f"Posted {points:+.1f} pts on {fmt_date(p_date)}.")
                     st.rerun()
                 except Exception as exc:
                     st.error(str(exc))
 
-        with st.expander("Batch apply (same transaction to multiple employees)", expanded=False):
-            st.caption("Use this when many employees get the *same* points/date/reason. It saves a ton of clicks.")
-            ms = st.multiselect(
-                "Employees",
-                options=[int(e["employee_id"]) for e in employees],
-                format_func=lambda _id: _label(next(e for e in employees if int(e["employee_id"]) == int(_id))),
-                default=[],
-                key="ledger_batch_ids",
-            )
-            b_cols = st.columns(2, gap="small")
-            b_apply = b_cols[0].button("Apply to selected", use_container_width=True)
-            if b_apply:
-                if not ms:
-                    st.warning("Select at least one employee.")
-                elif st.session_state.ledger_date > date.today():
-                    st.error("Date cannot be in the future.")
-                elif float(st.session_state.ledger_points) == 0:
-                    st.error("Points cannot be 0.")
-                else:
-                    ok = 0
-                    errors = []
-                    for _id in ms:
-                        try:
-                            prev = services.preview_add_point(int(_id), st.session_state.ledger_date, float(st.session_state.ledger_points), st.session_state.ledger_reason, st.session_state.ledger_note)
-                            services.add_point(conn, prev)
-                            ok += 1
-                        except Exception as exc:
-                            errors.append(f"#{_id}: {exc}")
-                    if ok:
-                        st.success(f"Applied transaction to {ok} employee(s).")
-                    if errors:
-                        st.error("Some entries failed:\n" + "\n".join(errors))
-                    st.rerun()
-
     with col_hist:
         section_label("Transaction History")
-        hist = [dict(r) for r in repo.get_points_history(conn, int(emp_id), limit=100)]
+        hist = [dict(r) for r in repo.get_points_history(conn, emp_id, limit=100)]
         if hist:
             df_h = pd.DataFrame(hist)[["id", "point_date", "points", "reason", "note", "point_total"]]
             df_h.columns = ["ID", "Date", "Pts", "Reason", "Note", "Running Total"]
@@ -730,14 +663,13 @@ def points_ledger_page(conn, building: str) -> None:
             st.dataframe(df_h.drop(columns=["ID"]), use_container_width=True, hide_index=True, height=430)
             if st.button("Undo Last Entry", key="undo_last"):
                 try:
-                    services.delete_point_history_entry(conn, point_id=int(df_h.iloc[0]["ID"]), employee_id=int(emp_id))
+                    services.delete_point_history_entry(conn, point_id=int(df_h.iloc[0]["ID"]), employee_id=emp_id)
                     st.success("Last entry removed.")
                     st.rerun()
                 except Exception as exc:
                     st.error(str(exc))
         else:
             info_box("No history entries for this employee yet.")
-
 
 
 # ── Manage Employees ──────────────────────────────────────────────────────────
