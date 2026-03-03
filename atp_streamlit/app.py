@@ -305,6 +305,67 @@ def load_employees(conn, q: str = "", building: str = "All") -> list[dict]:
     return rows
 
 
+# ── Selected employee (sidebar panel) ─────────────────────────────────────────-
+def set_selected_employee(conn, emp_id: int) -> None:
+    """Persist the currently selected employee so the sidebar can show context."""
+    try:
+        emp = dict(repo.get_employee(conn, int(emp_id)))
+    except Exception:
+        return
+
+    st.session_state["selected_emp_id"] = int(emp_id)
+    st.session_state["selected_emp"] = emp
+
+
+def get_selected_employee(conn):
+    emp_id = st.session_state.get("selected_emp_id")
+    if not emp_id:
+        return None
+
+    emp = st.session_state.get("selected_emp")
+    try:
+        cached_id = int(emp.get("employee_id")) if emp and emp.get("employee_id") is not None else None
+    except Exception:
+        cached_id = None
+
+    if emp is None or cached_id != int(emp_id):
+        try:
+            emp = dict(repo.get_employee(conn, int(emp_id)))
+            st.session_state["selected_emp"] = emp
+        except Exception:
+            return None
+
+    return emp
+
+
+def render_sidebar_employee_panel(conn) -> None:
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### Selected employee")
+
+    emp = get_selected_employee(conn)
+    if not emp:
+        st.sidebar.caption("Select an employee on **Employees** or **Points Ledger** to see details here.")
+        return
+
+    emp_id = emp.get("employee_id")
+    name = f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip() or "—"
+    building = emp.get("Location") or emp.get("location") or "—"
+    pts = float(emp.get("point_total") or 0)
+
+    st.sidebar.markdown(f"**{name}**")
+    st.sidebar.caption(f"Employee #{emp_id} · {building}")
+
+    st.sidebar.metric("Point total", f"{pts:.1f}")
+    st.sidebar.markdown(
+        f"""<div style="font-size:.90rem;line-height:1.55;color:#1a2744">
+        <b>Last point date:</b> {fmt_date(emp.get("last_point_date"))}<br/>
+        <b>2-month roll-off:</b> {fmt_date(emp.get("rolloff_date"))}<br/>
+        <b>Perfect attendance:</b> {fmt_date(emp.get("perfect_attendance"))}<br/>
+        </div>""",
+        unsafe_allow_html=True,
+    )
+
+
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 def dashboard_page(conn, building: str) -> None:
     page_heading(
@@ -553,6 +614,7 @@ def employees_page(conn, building: str) -> None:
     ]
     selected = st.selectbox("View details for", opts, format_func=lambda x: x[1], label_visibility="collapsed")
     emp_id = selected[0]
+    set_selected_employee(conn, emp_id)
     emp = dict(repo.get_employee(conn, emp_id))
 
     pts = float(emp.get("point_total") or 0)
@@ -629,6 +691,7 @@ def points_ledger_page(conn, building: str) -> None:
     )
     emp_id = int(selected[0])
     st.session_state["ledger_emp_id"] = emp_id
+    set_selected_employee(conn, emp_id)
 
     # When the employee changes, nudge keyboard focus to the Date field (best-effort).
     prev_focus_emp = st.session_state.get("_focus_emp_id")
@@ -716,7 +779,10 @@ def points_ledger_page(conn, building: str) -> None:
                         preview = services.preview_add_point(emp_id, p_date, float(points), reason, note)
                         services.add_point(conn, preview, flag_code=(flag_code or "").strip() or None)
                         st.success(f"Added {float(points):+.1f} pts on {fmt_date(p_date)}.")
-                        st.rerun()
+                        try:
+                            st.rerun()
+                        except Exception:
+                            st.experimental_rerun()
                     except Exception as exc:
                         st.error(str(exc))
 
@@ -733,7 +799,10 @@ def points_ledger_page(conn, building: str) -> None:
                 try:
                     services.delete_point_history_entry(conn, point_id=int(df_h.iloc[0]["ID"]), employee_id=emp_id)
                     st.success("Last entry removed.")
-                    st.rerun()
+                    try:
+                        st.rerun()
+                    except Exception:
+                        st.experimental_rerun()
                 except Exception as exc:
                     st.error(str(exc))
         else:
@@ -822,7 +891,10 @@ def manage_employees_page(conn) -> None:
                     )
                     conn.commit()
                     st.success("Changes saved.")
-                    st.rerun()
+                    try:
+                        st.rerun()
+                    except Exception:
+                        st.experimental_rerun()
                 except Exception as exc:
                     st.error(str(exc))
 
@@ -841,7 +913,10 @@ def manage_employees_page(conn) -> None:
                         services.delete_employee(conn, sel[0])
                         conn.commit()
                         st.success(f"Employee #{sel[0]} deleted.")
-                        st.rerun()
+                        try:
+                            st.rerun()
+                        except Exception:
+                            st.experimental_rerun()
                     except Exception as exc:
                         st.error(str(exc))
 
@@ -1108,15 +1183,29 @@ def main() -> None:
             label_visibility="collapsed",
         )
 
+        render_sidebar_employee_panel(conn)
+    # Top navigation bar (clean + fast): only the active page renders.
+    PAGES = ["Dashboard", "Employees", "Points Ledger", "Manage Employees", "Exports & Forecasts", "System Updates"]
+    if "page" not in st.session_state:
+        st.session_state["page"] = "Dashboard"
 
-    # Top navigation (keyboard-friendly): single page renders at a time
-    page = st.radio(
-        "Page",
-        ["Dashboard", "Employees", "Points Ledger", "Manage Employees", "Exports & Forecasts", "System Updates"],
-        key="page",
-        horizontal=True,
-        label_visibility="collapsed",
-    )
+    current = st.session_state["page"]
+    nav_cols = st.columns(len(PAGES), gap="small")
+    for col, name in zip(nav_cols, PAGES):
+        with col:
+            pressed = st.button(
+                name,
+                key=f"nav_{name}",
+                use_container_width=True,
+                type="primary" if name == current else "secondary",
+            )
+            if pressed and name != current:
+                st.session_state["page"] = name
+                try:
+                    st.rerun()
+                except Exception:
+                    st.experimental_rerun()
+    page = st.session_state["page"]
 
     if page == "Dashboard":
         dashboard_page(conn, building)
