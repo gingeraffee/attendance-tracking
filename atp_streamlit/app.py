@@ -562,7 +562,7 @@ def dashboard_page(conn, building: str) -> None:
             f"<div style='font-size:.68rem;letter-spacing:.09em;text-transform:uppercase;color:#5c6f8c;font-weight:700'>{label}</div>"
             f"<div style='display:flex;align-items:baseline;justify-content:space-between;margin-top:.18rem'>"
             f"<span style='font-size:1.95rem;font-weight:800;color:#1a2744;line-height:1'>{employees_count}</span>"
-            f"<span style='font-size:.72rem;font-weight:700;color:{accent};text-transform:uppercase;letter-spacing:.05em'>employees</span>"
+            f"<span style='font-size:.72rem;font-weight:700;color:{accent};text-transform:uppercase;letter-spacing:.05em'>&nbsp;employees</span>"
             f"</div>"
             f"</div>"
             f"</a>",
