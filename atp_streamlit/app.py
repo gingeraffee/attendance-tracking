@@ -172,53 +172,75 @@ p, label { color: var(--muted) !important; }
 }
 
 .sidebar-employee-card {
-    margin-top: 1rem;
-    padding: .9rem .85rem;
-    border-radius: 14px;
-    border: 1px solid rgba(255,255,255,.10);
-    background: linear-gradient(160deg, rgba(110,156,255,.18) 0%, rgba(13,27,58,.45) 55%, rgba(0,184,230,.15) 100%);
-    box-shadow: 0 14px 24px rgba(6,12,28,.30), inset 0 1px 0 rgba(255,255,255,.08);
+    margin-top: 1.1rem;
+    padding: 1rem .9rem .85rem;
+    border-radius: 16px;
+    border: 1px solid rgba(100,149,255,.22);
+    background: linear-gradient(145deg, rgba(15,28,62,.92) 0%, rgba(9,19,44,.97) 100%);
+    box-shadow: 0 8px 32px rgba(4,10,26,.45), inset 0 1px 0 rgba(120,160,255,.12);
+    position: relative;
+    overflow: hidden;
+}
+.sidebar-employee-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, #4f8ef7, #00b8e6, #4f8ef7);
+    opacity: .85;
 }
 .sidebar-employee-title {
-    font-size: .67rem;
-    letter-spacing: .12em;
+    font-size: .6rem;
+    letter-spacing: .16em;
     text-transform: uppercase;
     font-weight: 700;
-    color: #8ea4c5 !important;
-    margin-bottom: .5rem;
+    color: #4f8ef7 !important;
+    margin-bottom: .45rem;
 }
 .sidebar-employee-name {
-    font-size: 1.03rem;
+    font-size: 1.05rem;
     font-weight: 800;
-    color: #edf3ff !important;
-    letter-spacing: -.01em;
-    margin-bottom: .55rem;
+    color: #f0f6ff !important;
+    letter-spacing: -.015em;
+    line-height: 1.2;
+    margin-bottom: .7rem;
+    padding-bottom: .6rem;
+    border-bottom: 1px solid rgba(255,255,255,.07);
 }
 .sidebar-employee-grid {
     display: grid;
-    grid-template-columns: 1fr;
-    gap: .44rem;
+    grid-template-columns: 1fr 1fr;
+    gap: .35rem;
 }
 .sidebar-employee-item {
-    background: rgba(7,16,36,.38);
-    border: 1px solid rgba(255,255,255,.09);
-    border-radius: 10px;
-    padding: .4rem .55rem;
+    background: rgba(255,255,255,.04);
+    border: 1px solid rgba(255,255,255,.06);
+    border-radius: 8px;
+    padding: .38rem .45rem;
+}
+.sidebar-employee-item.full-width {
+    grid-column: 1 / -1;
 }
 .sidebar-employee-item .label {
     display: block;
-    font-size: .61rem;
-    letter-spacing: .11em;
+    font-size: .56rem;
+    letter-spacing: .10em;
     text-transform: uppercase;
-    color: #7e96ba !important;
+    color: #4a6490 !important;
     font-weight: 700;
-    margin-bottom: .1rem;
+    margin-bottom: .12rem;
 }
 .sidebar-employee-item .value {
     display: block;
-    font-size: .8rem;
-    font-weight: 700;
-    color: #e8effc !important;
+    font-size: .78rem;
+    font-weight: 600;
+    color: #c8d8f4 !important;
+    letter-spacing: -.01em;
+}
+.sidebar-employee-item .value.highlight {
+    color: #4f8ef7 !important;
+    font-size: .9rem;
+    font-weight: 800;
 }
 </style>""",
         unsafe_allow_html=True,
@@ -483,15 +505,15 @@ def selected_employee_sidebar(conn, employee_id: int | None) -> None:
     full_name = f"{emp.get('first_name') or ''} {emp.get('last_name') or ''}".strip() or "Unknown Employee"
     st.markdown(
         "<div class='sidebar-employee-card'>"
-        "<div class='sidebar-employee-title'>Employee Spotlight</div>"
+        "<div class='sidebar-employee-title'>&#9673; Employee Spotlight</div>"
         f"<div class='sidebar-employee-name'>{full_name}</div>"
         "<div class='sidebar-employee-grid'>"
-        f"<div class='sidebar-employee-item'><span class='label'>Employee #</span><span class='value'>{emp.get('employee_id') or '—'}</span></div>"
+        f"<div class='sidebar-employee-item'><span class='label'>Emp #</span><span class='value'>{emp.get('employee_id') or '—'}</span></div>"
         f"<div class='sidebar-employee-item'><span class='label'>Building</span><span class='value'>{emp.get('building') or '—'}</span></div>"
-        f"<div class='sidebar-employee-item'><span class='label'>Point Total</span><span class='value'>{float(emp.get('point_total') or 0):.1f}</span></div>"
-        f"<div class='sidebar-employee-item'><span class='label'>Last Positive Point Date</span><span class='value'>{fmt_date(emp.get('last_positive_point_date'))}</span></div>"
-        f"<div class='sidebar-employee-item'><span class='label'>2 Month Roll Off Date</span><span class='value'>{fmt_date(emp.get('rolloff_date'))}</span></div>"
-        f"<div class='sidebar-employee-item'><span class='label'>Perfect Attendance Date</span><span class='value'>{fmt_date(emp.get('perfect_attendance'))}</span></div>"
+        f"<div class='sidebar-employee-item full-width'><span class='label'>Point Total</span><span class='value highlight'>{float(emp.get('point_total') or 0):.1f} pts</span></div>"
+        f"<div class='sidebar-employee-item'><span class='label'>Last Point</span><span class='value'>{fmt_date(emp.get('last_positive_point_date'))}</span></div>"
+        f"<div class='sidebar-employee-item'><span class='label'>Roll Off</span><span class='value'>{fmt_date(emp.get('rolloff_date'))}</span></div>"
+        f"<div class='sidebar-employee-item full-width'><span class='label'>Perfect Attendance</span><span class='value'>{fmt_date(emp.get('perfect_attendance'))}</span></div>"
         "</div>"
         "</div>",
         unsafe_allow_html=True,
@@ -883,7 +905,10 @@ def dashboard_page(conn, building: str) -> None:
             if selected_rows:
                 idx = int(selected_rows[0])
                 if 0 <= idx < len(df_emps):
-                    st.session_state["selected_employee_id"] = int(df_emps.iloc[idx]["employee_id"])
+                    new_id = int(df_emps.iloc[idx]["employee_id"])
+                    if st.session_state.get("selected_employee_id") != new_id:
+                        st.session_state["selected_employee_id"] = new_id
+                        st.rerun()
         else:
             info_box("None 🎉")
 
