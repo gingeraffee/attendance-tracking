@@ -395,6 +395,12 @@ def dashboard_page(conn, building: str) -> None:
     # ── Upcoming roll-offs + perfect attendance ───────────────────────────────
     with col_right:
         section_label("Upcoming Roll-offs")
+        rolloff_search = st.text_input(
+            "Search roll-offs",
+            placeholder="Filter by name or employee # …",
+            key="rolloff_search",
+            label_visibility="collapsed",
+        )
 
         # 2-month roll-offs — only future dates (rolloff_date >= today)
         rolloffs_2mo = [dict(r) for r in fetchall(conn, sql_rolloffs, (*emp_ids, today.isoformat()))]
@@ -448,6 +454,17 @@ def dashboard_page(conn, building: str) -> None:
         all_upcoming = [{**r, "type": "2-Mo Roll-Off", "amount": -1.0} for r in rolloffs_2mo]
         all_upcoming += ytd_entries
         all_upcoming.sort(key=lambda x: str(x.get("rolloff_date") or "9999"))
+
+        # Live search filter
+        if rolloff_search.strip():
+            _q = rolloff_search.strip().lower()
+            all_upcoming = [
+                r for r in all_upcoming
+                if _q in (r.get("last_name") or "").lower()
+                or _q in (r.get("first_name") or "").lower()
+                or _q in f"{(r.get('last_name') or '').lower()}, {(r.get('first_name') or '').lower()}"
+                or _q in str(r.get("employee_id") or "")
+            ]
 
         if all_upcoming:
             html = []
