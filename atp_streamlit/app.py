@@ -303,7 +303,7 @@ def load_employees(conn, q: str = "", building: str = "All") -> list[dict]:
 def dashboard_page(conn, building: str) -> None:
     page_heading(
         "Dashboard",
-        "Real-time overview of attendance activity, upcoming actions, and point leaders.",
+        "Real-time overview of upcoming actions and attendance milestones.",
     )
 
     today = date.today()
@@ -327,44 +327,32 @@ def dashboard_page(conn, building: str) -> None:
     win_days = int(win_label.split()[0])
     since = (today - timedelta(days=win_days)).isoformat()
 
-    # ── KPI queries — always use AS aliases so dict rows work ────────────────
+    # ── Queries ──────────────────────────────────────────────────────────────
     if is_pg(conn):
-        sql_active  = f"SELECT COUNT(DISTINCT employee_id) AS cnt FROM points_history WHERE employee_id IN ({ph}) AND points > 0 AND (point_date::date) >= (%s::date)"
-        sql_roll30  = f"SELECT COUNT(*) AS cnt FROM employees WHERE employee_id IN ({ph}) AND rolloff_date IS NOT NULL AND (rolloff_date::date) <= (%s::date) AND point_total > 0"
         sql_perf60  = f"SELECT COUNT(*) AS cnt FROM employees WHERE employee_id IN ({ph}) AND perfect_attendance IS NOT NULL AND (perfect_attendance::date) <= (%s::date)"
         sql_trend   = f"SELECT (point_date::date)::text AS d, COUNT(*) AS n FROM points_history WHERE employee_id IN ({ph}) AND points > 0 AND (point_date::date) >= (%s::date) GROUP BY 1 ORDER BY 1"
-        sql_leaders = f"SELECT employee_id, last_name, first_name, COALESCE(\"Location\",'') AS loc, COALESCE(point_total,0) AS pts FROM employees WHERE employee_id IN ({ph}) ORDER BY pts DESC, last_name LIMIT %s"
         sql_rolloffs= f"SELECT employee_id, last_name, first_name, rolloff_date, point_total FROM employees WHERE employee_id IN ({ph}) AND rolloff_date IS NOT NULL AND point_total > 0 AND (rolloff_date::date) >= (%s::date) ORDER BY rolloff_date LIMIT 12"
         sql_perfect = f"SELECT employee_id, last_name, first_name, perfect_attendance FROM employees WHERE employee_id IN ({ph}) AND perfect_attendance IS NOT NULL AND (perfect_attendance::date) <= (%s::date) ORDER BY perfect_attendance LIMIT 10"
     else:
-        sql_active  = f"SELECT COUNT(DISTINCT employee_id) AS cnt FROM points_history WHERE employee_id IN ({ph}) AND points > 0 AND date(point_date) >= date(?)"
-        sql_roll30  = f"SELECT COUNT(*) AS cnt FROM employees WHERE employee_id IN ({ph}) AND rolloff_date IS NOT NULL AND date(rolloff_date) <= date(?) AND point_total > 0"
         sql_perf60  = f"SELECT COUNT(*) AS cnt FROM employees WHERE employee_id IN ({ph}) AND perfect_attendance IS NOT NULL AND date(perfect_attendance) <= date(?)"
         sql_trend   = f"SELECT date(point_date) AS d, COUNT(*) AS n FROM points_history WHERE employee_id IN ({ph}) AND points > 0 AND date(point_date) >= date(?) GROUP BY 1 ORDER BY 1"
-        sql_leaders = f"SELECT employee_id, last_name, first_name, COALESCE(\"Location\",'') AS loc, COALESCE(point_total,0) AS pts FROM employees WHERE employee_id IN ({ph}) ORDER BY pts DESC, last_name LIMIT ?"
         sql_rolloffs= f"SELECT employee_id, last_name, first_name, rolloff_date, point_total FROM employees WHERE employee_id IN ({ph}) AND rolloff_date IS NOT NULL AND point_total > 0 AND date(rolloff_date) >= date(?) ORDER BY rolloff_date LIMIT 12"
         sql_perfect = f"SELECT employee_id, last_name, first_name, perfect_attendance FROM employees WHERE employee_id IN ({ph}) AND perfect_attendance IS NOT NULL AND date(perfect_attendance) <= date(?) ORDER BY perfect_attendance LIMIT 10"
 
-    # Access scalars by column name (works for both sqlite3.Row and pg dict rows)
-    active_n  = dict(fetchall(conn, sql_active,  (*emp_ids, since))[0]).get("cnt") or 0
-    rolloff_n = dict(fetchall(conn, sql_roll30,  (*emp_ids, (today + timedelta(30)).isoformat()))[0]).get("cnt") or 0
-    perf_n    = dict(fetchall(conn, sql_perf60,  (*emp_ids, (today + timedelta(60)).isoformat()))[0]).get("cnt") or 0
+    perf_n = dict(fetchall(conn, sql_perf60, (*emp_ids, (today + timedelta(60)).isoformat()))[0]).get("cnt") or 0
 
     # ── KPI row ──────────────────────────────────────────────────────────────
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric(f"Incidents ({win_days}d)", int(active_n))
-    m2.metric("Roll-offs Due ≤30d", int(rolloff_n))
-    m3.metric("Perfect Att. Due ≤60d", int(perf_n))
-    m4.metric("Total Employees", len(emp_ids))
+    m1, m2 = st.columns(2)
+    m1.metric("Perfect Att. Due ≤60d", int(perf_n))
+    m2.metric("Total Employees", len(emp_ids))
 
     st.markdown("<div style='height:.6rem'></div>", unsafe_allow_html=True)
 
     col_left, col_right = st.columns([1.6, 1], gap="large")
 
-    # ── Trend chart + leaderboard ────────────────────────────────────────────
+    # ── Trend chart + perfect attendance ─────────────────────────────────────
     with col_left:
         section_label(f"Incident Trend — last {win_days} days")
-        # Convert to dicts so field access works for both SQLite and PostgreSQL
         trend = [dict(r) for r in fetchall(conn, sql_trend, (*emp_ids, since))]
         if trend:
             df_t = pd.DataFrame(trend).rename(columns={"d": "Date", "n": "Incidents"})
@@ -375,24 +363,26 @@ def dashboard_page(conn, building: str) -> None:
 
         st.markdown("<div style='height:.65rem'></div>", unsafe_allow_html=True)
 
-        lbl_col, n_col = st.columns([3, 1])
-        with lbl_col:
-            section_label("Top Employees by Point Total")
-        with n_col:
-            top_n = st.slider("Top", 5, 25, 10, step=5, label_visibility="collapsed", key="dash_n")
-
-        leaders = [dict(r) for r in fetchall(conn, sql_leaders, (*emp_ids, top_n))]
-        if leaders:
-            df_l = pd.DataFrame(
-                [{"Emp #": str(r["employee_id"]), "Name": f"{r['last_name']}, {r['first_name']}",
-                  "Building": r["loc"] or "—", "Points": float(r["pts"] or 0)}
-                 for r in leaders]
-            )
-            st.dataframe(df_l, use_container_width=True, hide_index=True)
+        section_label("Perfect Attendance Due ≤60 Days")
+        perfects = [dict(r) for r in fetchall(conn, sql_perfect, (*emp_ids, (today + timedelta(60)).isoformat()))]
+        if perfects:
+            html = []
+            for r in perfects:
+                days = days_until(r["perfect_attendance"])
+                html.append(
+                    f"<div class='list-row'>"
+                    f"<div style='display:flex;justify-content:space-between;align-items:center'>"
+                    f"<span style='font-weight:600;font-size:.9rem;color:#1a2744'>{r['last_name']}, {r['first_name']}</span>"
+                    f"{days_badge(days)}"
+                    f"</div>"
+                    f"<div style='font-size:.75rem;color:#8fa0b8;margin-top:.18rem'>Eligible {fmt_date(r['perfect_attendance'])}</div>"
+                    f"</div>"
+                )
+            st.markdown("".join(html), unsafe_allow_html=True)
         else:
-            info_box("No employees currently have outstanding points.")
+            info_box("No perfect attendance milestones in the next 60 days.")
 
-    # ── Upcoming roll-offs + perfect attendance ───────────────────────────────
+    # ── Upcoming roll-offs ───────────────────────────────────────────────────
     with col_right:
         section_label("Upcoming Roll-offs")
         rolloff_search = st.text_input(
@@ -406,14 +396,10 @@ def dashboard_page(conn, building: str) -> None:
         rolloffs_2mo = [dict(r) for r in fetchall(conn, sql_rolloffs, (*emp_ids, today.isoformat()))]
 
         # YTD roll-off previews — gather current + upcoming month schedules.
-        # This keeps YTD events visible in "Upcoming" even after the current
-        # month has already been applied in System Maintenance.
         emp_set    = set(emp_ids)
         emp_lookup = {int(e["employee_id"]): e for e in employees}
         ytd_entries: list[dict] = []
         try:
-            # Look ahead a few months so upcoming YTD dates continue to appear.
-            # 2-month roll-offs still come from employees.rolloff_date.
             seen_ytd: set[tuple[int, str]] = set()
             for month_offset in range(0, 4):
                 run_month = (today.month - 1) + month_offset
@@ -455,7 +441,7 @@ def dashboard_page(conn, building: str) -> None:
         all_upcoming += ytd_entries
         all_upcoming.sort(key=lambda x: str(x.get("rolloff_date") or "9999"))
 
-        # Live search filter
+        # Live search filter (updates on every keystroke)
         if rolloff_search.strip():
             _q = rolloff_search.strip().lower()
             all_upcoming = [
@@ -496,27 +482,6 @@ def dashboard_page(conn, building: str) -> None:
             st.markdown("".join(html), unsafe_allow_html=True)
         else:
             info_box("No roll-offs are currently pending.")
-
-        divider()
-
-        section_label("Perfect Attendance Due ≤60 Days")
-        perfects = [dict(r) for r in fetchall(conn, sql_perfect, (*emp_ids, (today + timedelta(60)).isoformat()))]
-        if perfects:
-            html = []
-            for r in perfects:
-                days = days_until(r["perfect_attendance"])
-                html.append(
-                    f"<div class='list-row'>"
-                    f"<div style='display:flex;justify-content:space-between;align-items:center'>"
-                    f"<span style='font-weight:600;font-size:.9rem;color:#1a2744'>{r['last_name']}, {r['first_name']}</span>"
-                    f"{days_badge(days)}"
-                    f"</div>"
-                    f"<div style='font-size:.75rem;color:#8fa0b8;margin-top:.18rem'>Eligible {fmt_date(r['perfect_attendance'])}</div>"
-                    f"</div>"
-                )
-            st.markdown("".join(html), unsafe_allow_html=True)
-        else:
-            info_box("No perfect attendance milestones in the next 60 days.")
 
 
 # ── Employees ─────────────────────────────────────────────────────────────────
