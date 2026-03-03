@@ -531,7 +531,7 @@ def dashboard_page(conn, building: str) -> None:
         ("0", "0 Points"),
         ("1-4", "1–4 Pts"),
         ("5-6", "5–6 Pts"),
-        ("7", "7 Pts"),
+        ("7-8", "7-8 Pts"),
     ]
     active_bucket = st.session_state.get("dashboard_bucket")
     tile_palette = {
