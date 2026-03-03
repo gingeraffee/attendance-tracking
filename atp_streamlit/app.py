@@ -529,7 +529,24 @@ def dashboard_page(conn, building: str) -> None:
                   "Building": r["loc"] or "—", "Points": float(r["pts"] or 0)}
                  for r in leaders]
             )
-            st.dataframe(df_l, use_container_width=True, hide_index=True)
+            try:
+                st.dataframe(
+                    df_l,
+                    use_container_width=True,
+                    hide_index=True,
+                    selection_mode="single-row",
+                    on_select="rerun",
+                    key="dash_leaders_table",
+                )
+                dash_sel = st.session_state.get("dash_leaders_table", {}).get("selection", {}).get("rows", [])
+                if dash_sel:
+                    try:
+                        clicked_id = int(df_l.iloc[dash_sel[0]]["Emp #"])
+                        set_selected_employee(conn, clicked_id)
+                    except Exception:
+                        pass
+            except TypeError:
+                st.dataframe(df_l, use_container_width=True, hide_index=True)
         else:
             info_box("No employees currently have outstanding points.")
 
@@ -704,8 +721,12 @@ def employees_page(conn, building: str) -> None:
 
     divider()
 
-    # Detail view
-# If a row was clicked above, default the detail selector to it
+    # Detail view — build opts first, then resolve the default index
+    opts = [
+        (int(r["employee_id"]), f"#{r['employee_id']} — {r['last_name']}, {r['first_name']}")
+        for r in rows
+    ]
+    # If a row was clicked above, default the detail selector to that employee
     default_emp_id = st.session_state.get("selected_emp_id")
     default_index = 0
     if default_emp_id is not None:
@@ -713,10 +734,6 @@ def employees_page(conn, building: str) -> None:
             if int(eid) == int(default_emp_id):
                 default_index = i
                 break
-    opts = [
-        (int(r["employee_id"]), f"#{r['employee_id']} — {r['last_name']}, {r['first_name']}")
-        for r in rows
-    ]
     selected = st.selectbox("View details for", opts, index=default_index, format_func=lambda x: x[1], label_visibility="collapsed")
     emp_id = selected[0]
     set_selected_employee(conn, emp_id)
@@ -1200,30 +1217,7 @@ def system_updates_page(conn) -> None:
                 if rows:
                     df = pd.DataFrame(rows)
                     st.success(f"{'Preview:' if dry_run else 'Applied:'} {len(rows)} employee(s) affected.")
-                    # Click-to-select table (best effort). If selection support isn't available, fallback to plain dataframe.
-    selected_from_table = None
-    try:
-        st.dataframe(
-            df,
-            use_container_width=True,
-            hide_index=True,
-            selection_mode="single-row",
-            on_select="rerun",
-            key="emp_table",
-        )
-        sel = st.session_state.get("emp_table", {}).get("selection", {}).get("rows", [])
-        if sel:
-            ridx = sel[0]
-            try:
-                selected_from_table = int(df.iloc[ridx]["Emp #"])
-            except Exception:
-                selected_from_table = None
-    except TypeError:
-        st.dataframe(df, use_container_width=True, hide_index=True)
-
-    if selected_from_table is not None:
-        set_selected_employee(conn, selected_from_table)
-
+                    st.dataframe(df, use_container_width=True, hide_index=True)
                     st.download_button("Download CSV", to_csv(df), file_name=f"rolloffs_{run_date}.csv", mime="text/csv", key="dl_roll")
                 else:
                     info_box("No 2-month roll-offs are due as of the selected date.")
@@ -1242,30 +1236,7 @@ def system_updates_page(conn) -> None:
                 if rows:
                     df = pd.DataFrame(rows)
                     st.success(f"{'Preview:' if dry_run else 'Applied:'} {len(rows)} employee(s) affected.")
-                    # Click-to-select table (best effort). If selection support isn't available, fallback to plain dataframe.
-    selected_from_table = None
-    try:
-        st.dataframe(
-            df,
-            use_container_width=True,
-            hide_index=True,
-            selection_mode="single-row",
-            on_select="rerun",
-            key="emp_table",
-        )
-        sel = st.session_state.get("emp_table", {}).get("selection", {}).get("rows", [])
-        if sel:
-            ridx = sel[0]
-            try:
-                selected_from_table = int(df.iloc[ridx]["Emp #"])
-            except Exception:
-                selected_from_table = None
-    except TypeError:
-        st.dataframe(df, use_container_width=True, hide_index=True)
-
-    if selected_from_table is not None:
-        set_selected_employee(conn, selected_from_table)
-
+                    st.dataframe(df, use_container_width=True, hide_index=True)
                     st.download_button("Download CSV", to_csv(df), file_name=f"perfect_att_{run_date}.csv", mime="text/csv", key="dl_perf")
                 else:
                     info_box("No perfect attendance dates are due for advancement.")
@@ -1289,30 +1260,7 @@ def system_updates_page(conn) -> None:
                     except Exception:
                         df = pd.DataFrame(rows)
                     st.success(f"{'Preview:' if dry_run else 'Applied:'} {len(rows)} YTD entry(ies).")
-                    # Click-to-select table (best effort). If selection support isn't available, fallback to plain dataframe.
-    selected_from_table = None
-    try:
-        st.dataframe(
-            df,
-            use_container_width=True,
-            hide_index=True,
-            selection_mode="single-row",
-            on_select="rerun",
-            key="emp_table",
-        )
-        sel = st.session_state.get("emp_table", {}).get("selection", {}).get("rows", [])
-        if sel:
-            ridx = sel[0]
-            try:
-                selected_from_table = int(df.iloc[ridx]["Emp #"])
-            except Exception:
-                selected_from_table = None
-    except TypeError:
-        st.dataframe(df, use_container_width=True, hide_index=True)
-
-    if selected_from_table is not None:
-        set_selected_employee(conn, selected_from_table)
-
+                    st.dataframe(df, use_container_width=True, hide_index=True)
                     st.download_button("Download CSV", to_csv(df), file_name=f"ytd_rolloffs_{run_date}.csv", mime="text/csv", key="dl_ytd")
                 else:
                     info_box("No YTD roll-offs are applicable for the selected date.")
