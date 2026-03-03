@@ -64,11 +64,6 @@ section[data-testid="stSidebar"] {
 }
 section[data-testid="stSidebar"] * { color: #bfcde6 !important; }
 
-/* Sidebar: make the Building filter select text readable (black on light control) */
-section[data-testid="stSidebar"] div[data-baseweb="select"] * { color: #000000 !important; }
-section[data-testid="stSidebar"] div[data-baseweb="select"] > div { background: #ffffff !important; }
-
-
 /* ── Metric tiles ── */
 div[data-testid="stMetric"] {
     background: var(--surface);
@@ -305,184 +300,6 @@ def load_employees(conn, q: str = "", building: str = "All") -> list[dict]:
     return rows
 
 
-# ── Selected employee (sidebar panel) ─────────────────────────────────────────-
-def set_selected_employee(conn, emp_id: int) -> None:
-    """Persist the currently selected employee so the sidebar can show context."""
-    try:
-        emp = dict(repo.get_employee(conn, int(emp_id)))
-    except Exception:
-        return
-
-    st.session_state["selected_emp_id"] = int(emp_id)
-    st.session_state["selected_emp"] = emp
-
-
-def get_selected_employee(conn):
-    emp_id = st.session_state.get("selected_emp_id")
-    if not emp_id:
-        return None
-
-    emp = st.session_state.get("selected_emp")
-    try:
-        cached_id = int(emp.get("employee_id")) if emp and emp.get("employee_id") is not None else None
-    except Exception:
-        cached_id = None
-
-    if emp is None or cached_id != int(emp_id):
-        try:
-            emp = dict(repo.get_employee(conn, int(emp_id)))
-            st.session_state["selected_emp"] = emp
-        except Exception:
-            return None
-
-    return emp
-
-
-
-def update_employee_basic(conn, emp_id: int, first_name: str, last_name: str, location: str, is_active: bool) -> None:
-    """Update basic employee fields (name/building/active)."""
-    pg = is_pg(conn)
-    sql = "UPDATE employees SET first_name = ?, last_name = ?, location = ?, is_active = ? WHERE employee_id = ?"
-    if pg:
-        sql = sql.replace("?", "%s")
-    params = (first_name.strip(), last_name.strip(), location.strip(), 1 if is_active else 0, int(emp_id))
-    cur = conn.cursor()
-    cur.execute(sql, params)
-    try:
-        conn.commit()
-    except Exception:
-        pass
-
-
-def render_sidebar_employee_panel(conn) -> None:
-    st.sidebar.markdown("---")
-
-    emp = get_selected_employee(conn)
-    if not emp:
-        st.sidebar.markdown(
-            "<div style='padding:.75rem .5rem;border-radius:10px;background:rgba(255,255,255,.04);"
-            "border:1px solid rgba(255,255,255,.07);text-align:center'>"
-            "<div style='font-size:.72rem;font-weight:700;letter-spacing:.09em;text-transform:uppercase;"
-            "color:#3d5270;margin-bottom:.35rem'>No Employee Selected</div>"
-            "<div style='font-size:.78rem;color:#4a5f80;line-height:1.45'>Click any row in the<br>"
-            "Employees or Points Ledger</div></div>",
-            unsafe_allow_html=True,
-        )
-        return
-
-    emp_id  = emp.get("employee_id")
-    first   = emp.get("first_name") or ""
-    last    = emp.get("last_name") or ""
-    building = emp.get("Location") or emp.get("location") or "—"
-    pts     = float(emp.get("point_total") or 0)
-    active  = bool(emp.get("is_active", 1))
-
-    # ── Point colour logic ────────────────────────────────────────────────
-    if pts == 0:
-        pts_color = "#00a87a"; pts_bg = "rgba(0,168,122,.13)"; pts_border = "rgba(0,168,122,.28)"
-    elif pts < 2:
-        pts_color = "#e6960a"; pts_bg = "rgba(230,150,10,.13)"; pts_border = "rgba(230,150,10,.28)"
-    else:
-        pts_color = "#e0394a"; pts_bg = "rgba(224,57,74,.13)";  pts_border = "rgba(224,57,74,.28)"
-
-    status_color  = "#00a87a" if active else "#8fa0b8"
-    status_bg     = "rgba(0,168,122,.13)" if active else "rgba(143,160,184,.10)"
-    status_border = "rgba(0,168,122,.28)" if active else "rgba(143,160,184,.22)"
-    status_label  = "Active" if active else "Inactive"
-
-    # ── Identity card ─────────────────────────────────────────────────────
-    st.sidebar.markdown(
-        f"""<div style='padding:.9rem 1rem 1rem 1rem;border-radius:12px;
-            background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.09);
-            margin-bottom:.65rem'>
-          <div style='display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:.55rem'>
-            <div>
-              <div style='font-size:1rem;font-weight:800;color:#e2e8f4;letter-spacing:-.01em;
-                line-height:1.2'>{last},<br>{first}</div>
-              <div style='font-size:.72rem;color:#4a6080;margin-top:.25rem'>#{emp_id} · {building}</div>
-            </div>
-            <span style='display:inline-block;padding:2px 9px;border-radius:99px;font-size:.70rem;
-              font-weight:700;color:{status_color};background:{status_bg};
-              border:1px solid {status_border};white-space:nowrap'>{status_label}</span>
-          </div>
-          <div style='display:flex;align-items:center;gap:.5rem'>
-            <span style='font-size:.67rem;font-weight:700;letter-spacing:.09em;text-transform:uppercase;
-              color:#3d5270'>Points</span>
-            <span style='display:inline-block;padding:3px 12px;border-radius:99px;font-size:.85rem;
-              font-weight:800;color:{pts_color};background:{pts_bg};
-              border:1px solid {pts_border}'>{pts:.1f}</span>
-          </div>
-        </div>""",
-        unsafe_allow_html=True,
-    )
-
-    # ── Date stat tiles ───────────────────────────────────────────────────
-    def _stat_tile(label: str, value: str) -> str:
-        return (
-            f"<div style='flex:1;padding:.55rem .7rem;border-radius:9px;"
-            f"background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07)'>"
-            f"<div style='font-size:.62rem;font-weight:700;letter-spacing:.09em;text-transform:uppercase;"
-            f"color:#3d5270;margin-bottom:.2rem'>{label}</div>"
-            f"<div style='font-size:.80rem;font-weight:700;color:#bfcde6'>{value}</div>"
-            f"</div>"
-        )
-
-    st.sidebar.markdown(
-        f"<div style='display:flex;gap:.45rem;margin-bottom:.65rem'>"
-        f"{_stat_tile('Last Entry',   fmt_date(emp.get('last_point_date')))}"
-        f"{_stat_tile('Roll-off',     fmt_date(emp.get('rolloff_date')))}"
-        f"</div>"
-        f"<div style='display:flex;gap:.45rem;margin-bottom:.8rem'>"
-        f"{_stat_tile('Perfect Att.', fmt_date(emp.get('perfect_attendance')))}"
-        f"</div>",
-        unsafe_allow_html=True,
-    )
-
-    # ── Quick add point ────────────────────────────────────────────────────
-    st.sidebar.markdown(
-        "<div style='font-size:.67rem;font-weight:700;letter-spacing:.10em;text-transform:uppercase;"
-        "color:#3d5270;margin-bottom:.35rem'>Quick Add Point</div>",
-        unsafe_allow_html=True,
-    )
-    with st.sidebar.form("sidebar_quick_add", clear_on_submit=False):
-        qa_date   = st.text_input("Date (MM/DD/YYYY)", value=date.today().strftime("%m/%d/%Y"))
-        qa_points = st.selectbox("Points", [0.5, 1.0, 1.5], index=1)
-        qa_reason = st.selectbox("Reason", ["Tardy/Early Leave", "Absence", "No Call/No Show"])
-        qa_note   = st.text_input("Note", value="")
-        qa_flag   = st.text_input("Flag code", value="")
-        submitted = st.form_submit_button("➕ Add Point", use_container_width=True)
-    if submitted:
-        try:
-            dt = datetime.strptime(qa_date.strip(), "%m/%d/%Y").date()
-        except Exception:
-            st.sidebar.error("Invalid date — use MM/DD/YYYY.")
-        else:
-            try:
-                preview = services.preview_add_point(emp_id, dt, float(qa_points), qa_reason, qa_note)
-                services.add_point(conn, preview, flag_code=(qa_flag or "").strip() or None)
-                set_selected_employee(conn, emp_id)
-                st.sidebar.success("Point added.")
-            except Exception as e:
-                st.sidebar.error(f"Could not add point: {e}")
-
-    # ── Edit employee info ─────────────────────────────────────────────────
-    with st.sidebar.expander("✏️ Edit Employee Info", expanded=False):
-        with st.form("sidebar_edit_emp"):
-            ef_first  = st.text_input("First name",  value=str(emp.get("first_name") or ""))
-            ef_last   = st.text_input("Last name",   value=str(emp.get("last_name") or ""))
-            ef_loc    = st.text_input("Building",    value=str(emp.get("location") or emp.get("Location") or ""))
-            ef_active = st.checkbox("Active",        value=bool(emp.get("is_active", 1)))
-            save = st.form_submit_button("Save Changes", use_container_width=True)
-        if save:
-            try:
-                update_employee_basic(conn, emp_id, ef_first, ef_last, ef_loc, ef_active)
-                set_selected_employee(conn, emp_id)
-                st.success("Employee updated.")
-            except Exception as e:
-                st.error(f"Could not update employee: {e}")
-
-
-
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 def dashboard_page(conn, building: str) -> None:
     page_heading(
@@ -572,24 +389,7 @@ def dashboard_page(conn, building: str) -> None:
                   "Building": r["loc"] or "—", "Points": float(r["pts"] or 0)}
                  for r in leaders]
             )
-            try:
-                st.dataframe(
-                    df_l,
-                    use_container_width=True,
-                    hide_index=True,
-                    selection_mode="single-row",
-                    on_select="rerun",
-                    key="dash_leaders_table",
-                )
-                dash_sel = st.session_state.get("dash_leaders_table", {}).get("selection", {}).get("rows", [])
-                if dash_sel:
-                    try:
-                        clicked_id = int(df_l.iloc[dash_sel[0]]["Emp #"])
-                        set_selected_employee(conn, clicked_id)
-                    except Exception:
-                        pass
-            except TypeError:
-                st.dataframe(df_l, use_container_width=True, hide_index=True)
+            st.dataframe(df_l, use_container_width=True, hide_index=True)
         else:
             info_box("No employees currently have outstanding points.")
 
@@ -737,49 +537,17 @@ def employees_page(conn, building: str) -> None:
     df = pd.DataFrame(rows)[["employee_id", "last_name", "first_name", "location", "is_active"]]
     df.columns = ["Emp #", "Last Name", "First Name", "Building", "Active"]
     df["Emp #"] = df["Emp #"].astype(str)
-    # Click-to-select table (best effort). If selection support isn't available, fallback to plain dataframe.
-    selected_from_table = None
-    try:
-        st.dataframe(
-            df,
-            use_container_width=True,
-            hide_index=True,
-            selection_mode="single-row",
-            on_select="rerun",
-            key="emp_table",
-        )
-        sel = st.session_state.get("emp_table", {}).get("selection", {}).get("rows", [])
-        if sel:
-            ridx = sel[0]
-            try:
-                selected_from_table = int(df.iloc[ridx]["Emp #"])
-            except Exception:
-                selected_from_table = None
-    except TypeError:
-        st.dataframe(df, use_container_width=True, hide_index=True)
-
-    if selected_from_table is not None:
-        set_selected_employee(conn, selected_from_table)
-
+    st.dataframe(df, use_container_width=True, hide_index=True)
 
     divider()
 
-    # Detail view — build opts first, then resolve the default index
+    # Detail view
     opts = [
         (int(r["employee_id"]), f"#{r['employee_id']} — {r['last_name']}, {r['first_name']}")
         for r in rows
     ]
-    # If a row was clicked above, default the detail selector to that employee
-    default_emp_id = st.session_state.get("selected_emp_id")
-    default_index = 0
-    if default_emp_id is not None:
-        for i, (eid, _lbl) in enumerate(opts):
-            if int(eid) == int(default_emp_id):
-                default_index = i
-                break
-    selected = st.selectbox("View details for", opts, index=default_index, format_func=lambda x: x[1], label_visibility="collapsed")
+    selected = st.selectbox("View details for", opts, format_func=lambda x: x[1], label_visibility="collapsed")
     emp_id = selected[0]
-    set_selected_employee(conn, emp_id)
     emp = dict(repo.get_employee(conn, emp_id))
 
     pts = float(emp.get("point_total") or 0)
@@ -856,7 +624,6 @@ def points_ledger_page(conn, building: str) -> None:
     )
     emp_id = int(selected[0])
     st.session_state["ledger_emp_id"] = emp_id
-    set_selected_employee(conn, emp_id)
 
     # When the employee changes, nudge keyboard focus to the Date field (best-effort).
     prev_focus_emp = st.session_state.get("_focus_emp_id")
@@ -944,10 +711,7 @@ def points_ledger_page(conn, building: str) -> None:
                         preview = services.preview_add_point(emp_id, p_date, float(points), reason, note)
                         services.add_point(conn, preview, flag_code=(flag_code or "").strip() or None)
                         st.success(f"Added {float(points):+.1f} pts on {fmt_date(p_date)}.")
-                        try:
-                            st.rerun()
-                        except Exception:
-                            st.experimental_rerun()
+                        st.rerun()
                     except Exception as exc:
                         st.error(str(exc))
 
@@ -964,10 +728,7 @@ def points_ledger_page(conn, building: str) -> None:
                 try:
                     services.delete_point_history_entry(conn, point_id=int(df_h.iloc[0]["ID"]), employee_id=emp_id)
                     st.success("Last entry removed.")
-                    try:
-                        st.rerun()
-                    except Exception:
-                        st.experimental_rerun()
+                    st.rerun()
                 except Exception as exc:
                     st.error(str(exc))
         else:
@@ -1056,10 +817,7 @@ def manage_employees_page(conn) -> None:
                     )
                     conn.commit()
                     st.success("Changes saved.")
-                    try:
-                        st.rerun()
-                    except Exception:
-                        st.experimental_rerun()
+                    st.rerun()
                 except Exception as exc:
                     st.error(str(exc))
 
@@ -1078,10 +836,7 @@ def manage_employees_page(conn) -> None:
                         services.delete_employee(conn, sel[0])
                         conn.commit()
                         st.success(f"Employee #{sel[0]} deleted.")
-                        try:
-                            st.rerun()
-                        except Exception:
-                            st.experimental_rerun()
+                        st.rerun()
                     except Exception as exc:
                         st.error(str(exc))
 
@@ -1339,6 +1094,13 @@ def main() -> None:
                 unsafe_allow_html=True,
             )
 
+        st.markdown("<span class='sidebar-nav-label'>Navigation</span>", unsafe_allow_html=True)
+        page = st.radio(
+            "nav",
+            ["Dashboard", "Employees", "Points Ledger", "Manage Employees", "Exports & Forecasts", "System Updates"],
+            key="page",
+            label_visibility="collapsed",
+        )
 
         st.markdown("<span class='sidebar-nav-label'>Building Filter</span>", unsafe_allow_html=True)
         building = st.selectbox(
@@ -1347,36 +1109,6 @@ def main() -> None:
             key="global_building",
             label_visibility="collapsed",
         )
-
-        render_sidebar_employee_panel(conn)
-    # Top navigation bar (clean + fast): only the active page renders.
-    PAGES = ["Dashboard", "Employees", "Points Ledger", "Manage Employees", "Exports & Forecasts", "System Updates"]
-
-    if "page" not in st.session_state:
-        st.session_state["page"] = "Dashboard"
-
-    def _nav_to(page_name: str) -> None:
-        st.session_state["page"] = page_name
-        try:
-            st.rerun()
-        except Exception:
-            st.experimental_rerun()
-
-    current = st.session_state["page"]
-    nav_cols = st.columns(len(PAGES), gap="small")
-
-    for col, name in zip(nav_cols, PAGES):
-        with col:
-            st.button(
-                name,
-                key=f"nav_{name}",
-                use_container_width=True,
-                type="primary" if name == current else "secondary",
-                on_click=_nav_to,
-                args=(name,),
-            )
-
-    page = st.session_state["page"]
 
     if page == "Dashboard":
         dashboard_page(conn, building)
