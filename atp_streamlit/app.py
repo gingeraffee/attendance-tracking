@@ -480,6 +480,7 @@ def dashboard_page(conn, building: str) -> None:
                         WHERE ph2.employee_id = e.employee_id
                           AND (ph2.point_date::date) >= (%s::date)
                           AND EXTRACT(DOW FROM ph2.point_date::date) NOT IN (0, 6)
+                          AND COALESCE(ph2.points, 0.0) > 0.0
                           AND COALESCE(ph2.reason, '') <> ''
                         GROUP BY ph2.reason
                         ORDER BY COUNT(*) DESC, MAX(ph2.point_date::date) DESC, ph2.reason
@@ -490,6 +491,7 @@ def dashboard_page(conn, building: str) -> None:
              WHERE e.employee_id IN ({ph})
                AND (ph.point_date::date) >= (%s::date)
                AND EXTRACT(DOW FROM ph.point_date::date) NOT IN (0, 6)
+               AND COALESCE(ph.points, 0.0) > 0.0
              GROUP BY e.employee_id, e.last_name, e.first_name, e."Location"
             HAVING COALESCE(SUM(ph.points), 0.0) > 1.0
              ORDER BY points_30d DESC, MAX(ph.point_date::date) DESC, lower(e.last_name), lower(e.first_name)
@@ -501,6 +503,7 @@ def dashboard_page(conn, building: str) -> None:
              WHERE ph.employee_id IN ({ph})
                AND (ph.point_date::date) >= (%s::date)
                AND EXTRACT(DOW FROM ph.point_date::date) NOT IN (0, 6)
+               AND COALESCE(ph.points, 0.0) > 0.0
              GROUP BY ph.employee_id
         '''
         sql_trend_90d = f'''
@@ -510,6 +513,7 @@ def dashboard_page(conn, building: str) -> None:
              WHERE ph.employee_id IN ({ph})
                AND (ph.point_date::date) >= (%s::date)
                AND EXTRACT(DOW FROM ph.point_date::date) NOT IN (0, 6)
+               AND COALESCE(ph.points, 0.0) > 0.0
              GROUP BY (ph.point_date::date)
              ORDER BY (ph.point_date::date)
         '''
@@ -521,6 +525,7 @@ def dashboard_page(conn, building: str) -> None:
              WHERE ph.employee_id IN ({ph})
                AND (ph.point_date::date) >= (%s::date)
                AND EXTRACT(DOW FROM ph.point_date::date) NOT IN (0, 6)
+               AND COALESCE(ph.points, 0.0) > 0.0
              GROUP BY EXTRACT(DOW FROM ph.point_date::date)
              ORDER BY total_points DESC
         '''
@@ -602,6 +607,7 @@ def dashboard_page(conn, building: str) -> None:
                         WHERE ph2.employee_id = e.employee_id
                           AND date(ph2.point_date) >= date(?)
                           AND strftime('%w', ph2.point_date) NOT IN ('0', '6')
+                          AND COALESCE(ph2.points, 0.0) > 0.0
                           AND COALESCE(ph2.reason, '') <> ''
                         GROUP BY ph2.reason
                         ORDER BY COUNT(*) DESC, MAX(date(ph2.point_date)) DESC, ph2.reason
@@ -612,6 +618,7 @@ def dashboard_page(conn, building: str) -> None:
              WHERE e.employee_id IN ({ph})
                AND date(ph.point_date) >= date(?)
                AND strftime('%w', ph.point_date) NOT IN ('0', '6')
+               AND COALESCE(ph.points, 0.0) > 0.0
              GROUP BY e.employee_id, e.last_name, e.first_name, e."Location"
             HAVING COALESCE(SUM(ph.points), 0.0) > 1.0
              ORDER BY points_30d DESC, MAX(date(ph.point_date)) DESC, lower(e.last_name), lower(e.first_name)
@@ -623,6 +630,7 @@ def dashboard_page(conn, building: str) -> None:
              WHERE ph.employee_id IN ({ph})
                AND date(ph.point_date) >= date(?)
                AND strftime('%w', ph.point_date) NOT IN ('0', '6')
+               AND COALESCE(ph.points, 0.0) > 0.0
              GROUP BY ph.employee_id
         '''
         sql_trend_90d = f'''
@@ -632,6 +640,7 @@ def dashboard_page(conn, building: str) -> None:
              WHERE ph.employee_id IN ({ph})
                AND date(ph.point_date) >= date(?)
                AND strftime('%w', ph.point_date) NOT IN ('0', '6')
+               AND COALESCE(ph.points, 0.0) > 0.0
              GROUP BY date(ph.point_date)
              ORDER BY date(ph.point_date)
         '''
@@ -643,6 +652,7 @@ def dashboard_page(conn, building: str) -> None:
              WHERE ph.employee_id IN ({ph})
                AND date(ph.point_date) >= date(?)
                AND strftime('%w', ph.point_date) NOT IN ('0', '6')
+               AND COALESCE(ph.points, 0.0) > 0.0
              GROUP BY CAST(strftime('%w', ph.point_date) AS INTEGER)
              ORDER BY total_points DESC
         '''
