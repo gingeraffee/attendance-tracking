@@ -3,6 +3,7 @@ Full remodel: clean layout, status badges, live countdown, improved workflows.
 """
 from __future__ import annotations
 
+from io import BytesIO
 from datetime import date, datetime, timedelta
 from pathlib import Path
 import sys
@@ -10,6 +11,11 @@ import sys
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.units import inch
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 st.set_page_config(
     page_title="Attendance Point Tracker",
@@ -293,6 +299,73 @@ def to_csv(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False).encode("utf-8")
 
 
+def build_point_history_pdf(employee: dict, history: list[dict]) -> bytes:
+    """Generate a printable attendance point history report as a PDF."""
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=letter,
+        leftMargin=0.75 * inch,
+        rightMargin=0.75 * inch,
+        topMargin=0.75 * inch,
+        bottomMargin=0.75 * inch,
+    )
+    styles = getSampleStyleSheet()
+
+    full_name = f"{employee.get('last_name', '')}, {employee.get('first_name', '')}".strip(", ")
+    employee_id = employee.get("employee_id", "—")
+    location = employee.get("Location") or employee.get("location") or "—"
+    generated_on = datetime.now().strftime("%m/%d/%Y %I:%M %p")
+
+    story = [
+        Paragraph("Attendance Point History Report", styles["Title"]),
+        Spacer(1, 0.1 * inch),
+        Paragraph(f"<b>Employee:</b> {full_name}", styles["Normal"]),
+        Paragraph(f"<b>Employee #:</b> {employee_id}", styles["Normal"]),
+        Paragraph(f"<b>Location:</b> {location}", styles["Normal"]),
+        Paragraph(
+            f"<b>Current Point Total:</b> {float(employee.get('point_total') or 0):.1f}",
+            styles["Normal"],
+        ),
+        Paragraph(f"<b>Generated:</b> {generated_on}", styles["Normal"]),
+        Spacer(1, 0.2 * inch),
+    ]
+
+    if history:
+        table_rows = [["Date", "Points", "Reason", "Note", "Running Total"]]
+        for row in history:
+            table_rows.append(
+                [
+                    fmt_date(row.get("point_date")),
+                    f"{float(row.get('points') or 0):.1f}",
+                    str(row.get("reason") or "—"),
+                    str(row.get("note") or "—"),
+                    f"{float(row.get('point_total') or 0):.1f}",
+                ]
+            )
+
+        table = Table(table_rows, colWidths=[1.1 * inch, 0.8 * inch, 1.4 * inch, 2.9 * inch, 1.0 * inch])
+        table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f0f4fa")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#1a2744")),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 9),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cfd8e6")),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f9fbff")]),
+                ]
+            )
+        )
+        story.append(table)
+    else:
+        story.append(Paragraph("No point history entries were found for this employee.", styles["Normal"]))
+
+    doc.build(story)
+    return buffer.getvalue()
+
+
 def load_employees(conn, q: str = "", building: str = "All") -> list[dict]:
     rows = [dict(r) for r in repo.search_employees(conn, q=q, limit=3000)]
     if building != "All":
@@ -376,22 +449,82 @@ def dashboard_page(conn, building: str) -> None:
 
         st.markdown("<div style='height:.65rem'></div>", unsafe_allow_html=True)
 
-        lbl_col, n_col = st.columns([3, 1])
-        with lbl_col:
-            section_label("Top Employees by Point Total")
-        with n_col:
-            top_n = st.slider("Top", 5, 25, 10, step=5, label_visibility="collapsed", key="dash_n")
+        section_label("Employee Point Overview")
+        emp_search = st.text_input(
+            "Search employees",
+            placeholder="Filter by name or employee # …",
+            key="dash_emp_search",
+            label_visibility="collapsed",
+        )
 
-        leaders = [dict(r) for r in fetchall(conn, sql_leaders, (*emp_ids, top_n))]
-        if leaders:
-            df_l = pd.DataFrame(
-                [{"Emp #": str(r["employee_id"]), "Name": f"{r['last_name']}, {r['first_name']}",
-                  "Building": r["loc"] or "—", "Points": float(r["pts"] or 0)}
-                 for r in leaders]
-            )
-            st.dataframe(df_l, use_container_width=True, hide_index=True)
+        if is_pg(conn):
+            sql_emp_overview = f"""
+                SELECT employee_id, last_name, first_name,
+                       COALESCE("Location",'') AS loc,
+                       COALESCE(point_total,0) AS pts,
+                       last_point_date
+                  FROM employees
+                 WHERE employee_id IN ({ph})
+                 ORDER BY lower(last_name), lower(first_name)
+            """
         else:
-            info_box("No employees currently have outstanding points.")
+            sql_emp_overview = f"""
+                SELECT employee_id, last_name, first_name,
+                       COALESCE("Location",'') AS loc,
+                       COALESCE(point_total,0) AS pts,
+                       last_point_date
+                  FROM employees
+                 WHERE employee_id IN ({ph})
+                 ORDER BY lower(last_name), lower(first_name)
+            """
+
+        overview_rows = [dict(r) for r in fetchall(conn, sql_emp_overview, tuple(emp_ids))]
+        if emp_search.strip():
+            ql = emp_search.strip().lower()
+            overview_rows = [
+                r for r in overview_rows
+                if ql in (r.get("last_name") or "").lower()
+                or ql in (r.get("first_name") or "").lower()
+                or ql in f"{(r.get('last_name') or '').lower()}, {(r.get('first_name') or '').lower()}"
+                or ql in str(r.get("employee_id") or "")
+            ]
+
+        if overview_rows:
+            df_l = pd.DataFrame(
+                [
+                    {
+                        "Name": f"{r['last_name']}, {r['first_name']}",
+                        "Building": r.get("loc") or "—",
+                        "Point Total": f"{float(r.get('pts') or 0):.1f}",
+                        "Last Point Date": fmt_date(r.get("last_point_date")),
+                    }
+                    for r in overview_rows
+                ]
+            )
+            st.dataframe(df_l, use_container_width=True, hide_index=True, height=295)
+        else:
+            info_box("No employees match this filter.")
+
+        divider()
+
+        section_label("Perfect Attendance Due ≤31 Days")
+        perfects = [dict(r) for r in fetchall(conn, sql_perfect, (*emp_ids, (today + timedelta(days=31)).isoformat()))]
+        if perfects:
+            html = []
+            for r in perfects:
+                days = days_until(r["perfect_attendance"])
+                html.append(
+                    f"<div class='list-row'>"
+                    f"<div style='display:flex;justify-content:space-between;align-items:center'>"
+                    f"<span style='font-weight:600;font-size:.9rem;color:#1a2744'>{r['last_name']}, {r['first_name']}</span>"
+                    f"{days_badge(days)}"
+                    f"</div>"
+                    f"<div style='font-size:.75rem;color:#8fa0b8;margin-top:.18rem'>Eligible {fmt_date(r['perfect_attendance'])}</div>"
+                    f"</div>"
+                )
+            st.markdown("".join(html), unsafe_allow_html=True)
+        else:
+            info_box("No perfect attendance milestones in the next 31 days.")
 
     # ── Upcoming roll-offs + perfect attendance ───────────────────────────────
     with col_right:
@@ -403,18 +536,20 @@ def dashboard_page(conn, building: str) -> None:
             label_visibility="collapsed",
         )
 
-        # 2-month roll-offs — only future dates (rolloff_date >= today)
-        rolloffs_2mo = [dict(r) for r in fetchall(conn, sql_rolloffs, (*emp_ids, today.isoformat()))]
+        window_end = today + timedelta(days=31)
 
-        # YTD roll-off previews — gather current + upcoming month schedules.
-        # This keeps YTD events visible in "Upcoming" even after the current
-        # month has already been applied in System Maintenance.
-        emp_set    = set(emp_ids)
+        # 2-month roll-offs due within the next 31 days
+        rolloffs_2mo = [
+            dict(r)
+            for r in fetchall(conn, sql_rolloffs, (*emp_ids, today.isoformat()))
+            if today <= date.fromisoformat(str(r["rolloff_date"])) <= window_end
+        ]
+
+        # YTD roll-off previews due within the next 31 days
+        emp_set = set(emp_ids)
         emp_lookup = {int(e["employee_id"]): e for e in employees}
         ytd_entries: list[dict] = []
         try:
-            # Look ahead a few months so upcoming YTD dates continue to appear.
-            # 2-month roll-offs still come from employees.rolloff_date.
             seen_ytd: set[tuple[int, str]] = set()
             for month_offset in range(0, 4):
                 run_month = (today.month - 1) + month_offset
@@ -431,7 +566,8 @@ def dashboard_page(conn, building: str) -> None:
                     roll_date = str(p[2]) if len(p) > 2 else ""
                     if eid not in emp_set or not roll_date:
                         continue
-                    if roll_date < today.isoformat():
+                    roll_dt = date.fromisoformat(roll_date)
+                    if not (today <= roll_dt <= window_end):
                         continue
                     dedupe_key = (eid, roll_date)
                     if dedupe_key in seen_ytd:
@@ -441,22 +577,33 @@ def dashboard_page(conn, building: str) -> None:
                     e = emp_lookup.get(eid, {})
                     ytd_entries.append({
                         "employee_id": eid,
-                        "last_name":   e.get("last_name", ""),
-                        "first_name":  e.get("first_name", ""),
-                        "point_total": e.get("point_total", 0),
+                        "last_name": e.get("last_name", ""),
+                        "first_name": e.get("first_name", ""),
                         "rolloff_date": roll_date,
-                        "type":   "YTD Roll-Off",
+                        "type": "YTD Roll-Off",
                         "amount": float(p[1] or 0),
                     })
         except Exception:
             pass
 
-        # Combine: tag 2-mo entries then append YTD entries; sort by date
-        all_upcoming = [{**r, "type": "2-Mo Roll-Off", "amount": -1.0} for r in rolloffs_2mo]
-        all_upcoming += ytd_entries
-        all_upcoming.sort(key=lambda x: str(x.get("rolloff_date") or "9999"))
+        combined: dict[tuple[int, str], dict] = {}
+        for r in [{**r, "type": "2-Mo Roll-Off", "amount": 1.0} for r in rolloffs_2mo] + ytd_entries:
+            key = (int(r["employee_id"]), str(r["rolloff_date"]))
+            if key not in combined:
+                combined[key] = {
+                    "employee_id": int(r["employee_id"]),
+                    "last_name": r.get("last_name", ""),
+                    "first_name": r.get("first_name", ""),
+                    "rolloff_date": str(r["rolloff_date"]),
+                    "types": [],
+                    "total_rolloff": 0.0,
+                }
+            if r["type"] not in combined[key]["types"]:
+                combined[key]["types"].append(r["type"])
+            combined[key]["total_rolloff"] += abs(float(r.get("amount") or 0.0))
 
-        # Live search filter
+        all_upcoming = sorted(combined.values(), key=lambda x: (x["rolloff_date"], x["last_name"], x["first_name"]))
+
         if rolloff_search.strip():
             _q = rolloff_search.strip().lower()
             all_upcoming = [
@@ -470,54 +617,36 @@ def dashboard_page(conn, building: str) -> None:
         if all_upcoming:
             html = []
             for r in all_upcoming:
-                days   = days_until(r["rolloff_date"])
-                is_ytd = r["type"] == "YTD Roll-Off"
-                tc = "#00b8e6" if is_ytd else "#4f8ef7"
-                tb = "rgba(0,184,230,.10)" if is_ytd else "rgba(79,142,247,.10)"
-                tbr= "rgba(0,184,230,.25)" if is_ytd else "rgba(79,142,247,.25)"
-                type_badge = (
-                    f"<span style='display:inline-block;padding:2px 8px;border-radius:6px;"
-                    f"font-size:.74rem;font-weight:700;color:{tc};background:{tb};"
-                    f"border:1px solid {tbr}'>{r['type']}</span>"
-                )
-                amt = float(r.get("amount") or 0)
+                days = days_until(r["rolloff_date"])
+                badge_html = []
+                for t in r["types"]:
+                    is_ytd = t == "YTD Roll-Off"
+                    tc = "#00b8e6" if is_ytd else "#4f8ef7"
+                    tb = "rgba(0,184,230,.10)" if is_ytd else "rgba(79,142,247,.10)"
+                    tbr = "rgba(0,184,230,.25)" if is_ytd else "rgba(79,142,247,.25)"
+                    badge_html.append(
+                        f"<span style='display:inline-block;padding:2px 8px;border-radius:6px;"
+                        f"font-size:.74rem;font-weight:700;color:{tc};background:{tb};"
+                        f"border:1px solid {tbr}'>{t}</span>"
+                    )
+
                 html.append(
                     f"<div class='list-row'>"
                     f"<div style='display:flex;justify-content:space-between;align-items:center'>"
                     f"<div><span style='font-weight:600;font-size:.9rem;color:#1a2744'>{r['last_name']}, {r['first_name']}</span>"
                     f"<span style='color:#8fa0b8;font-size:.78rem;margin-left:.4rem'>#{r['employee_id']}</span></div>"
-                    f"<div style='display:flex;gap:.3rem;align-items:center'>{type_badge}{days_badge(days)}</div>"
+                    f"<div style='display:flex;gap:.3rem;align-items:center'>{''.join(badge_html)}{days_badge(days)}</div>"
                     f"</div>"
                     f"<div style='display:flex;justify-content:space-between;margin-top:.22rem'>"
                     f"<span style='font-size:.75rem;color:#8fa0b8'>Due {fmt_date(r['rolloff_date'])}</span>"
-                    f"<span style='font-size:.78rem;font-weight:700;color:#e0394a'>{amt:.1f} pts</span>"
+                    f"<span style='font-size:.78rem;font-weight:700;color:#e0394a'>{r['total_rolloff']:.1f} pts rolling off</span>"
                     f"</div>"
                     f"</div>"
                 )
             st.markdown("".join(html), unsafe_allow_html=True)
         else:
-            info_box("No roll-offs are currently pending.")
+            info_box("No YTD or 2-month roll-offs in the next 31 days.")
 
-        divider()
-
-        section_label("Perfect Attendance Due ≤60 Days")
-        perfects = [dict(r) for r in fetchall(conn, sql_perfect, (*emp_ids, (today + timedelta(60)).isoformat()))]
-        if perfects:
-            html = []
-            for r in perfects:
-                days = days_until(r["perfect_attendance"])
-                html.append(
-                    f"<div class='list-row'>"
-                    f"<div style='display:flex;justify-content:space-between;align-items:center'>"
-                    f"<span style='font-weight:600;font-size:.9rem;color:#1a2744'>{r['last_name']}, {r['first_name']}</span>"
-                    f"{days_badge(days)}"
-                    f"</div>"
-                    f"<div style='font-size:.75rem;color:#8fa0b8;margin-top:.18rem'>Eligible {fmt_date(r['perfect_attendance'])}</div>"
-                    f"</div>"
-                )
-            st.markdown("".join(html), unsafe_allow_html=True)
-        else:
-            info_box("No perfect attendance milestones in the next 60 days.")
 
 
 # ── Employees ─────────────────────────────────────────────────────────────────
@@ -532,14 +661,6 @@ def employees_page(conn, building: str) -> None:
     if not rows:
         info_box("No matching employees found.")
         return
-
-    # Results table
-    df = pd.DataFrame(rows)[["employee_id", "last_name", "first_name", "location", "is_active"]]
-    df.columns = ["Emp #", "Last Name", "First Name", "Building", "Active"]
-    df["Emp #"] = df["Emp #"].astype(str)
-    st.dataframe(df, use_container_width=True, hide_index=True)
-
-    divider()
 
     # Detail view
     opts = [
@@ -580,12 +701,27 @@ def employees_page(conn, building: str) -> None:
     c4.metric("Last Point Entry", fmt_date(emp.get("last_point_date")))
 
     divider()
-    section_label("Point History (last 50 entries)")
-    hist = [dict(r) for r in repo.get_points_history(conn, emp_id, limit=50)]
+    section_label("Point History (all events)")
+    hist = [dict(r) for r in repo.get_points_history(conn, emp_id, limit=5000)]
+
+    pdf_bytes = build_point_history_pdf(emp, hist)
+    safe_last = str(emp.get("last_name") or "employee").replace(" ", "_")
+    safe_first = str(emp.get("first_name") or "").replace(" ", "_")
+    report_date = date.today().strftime("%Y%m%d")
+    st.download_button(
+        "Download Point History PDF",
+        data=pdf_bytes,
+        file_name=f"attendance-history-{emp_id}-{safe_last}-{safe_first}-{report_date}.pdf",
+        mime="application/pdf",
+        use_container_width=False,
+    )
+
     if hist:
         df_h = pd.DataFrame(hist)[["point_date", "points", "reason", "note", "point_total"]]
+        df_h["point_date"] = df_h["point_date"].apply(fmt_date)
+        df_h["points"] = df_h["points"].apply(lambda v: f"{float(v or 0):.1f}")
+        df_h["point_total"] = df_h["point_total"].apply(lambda v: f"{float(v or 0):.1f}")
         df_h.columns = ["Date", "Points", "Reason", "Note", "Running Total"]
-        df_h["Date"] = df_h["Date"].apply(fmt_date)
         st.dataframe(df_h, use_container_width=True, hide_index=True)
     else:
         info_box("No history entries yet for this employee.")
@@ -710,19 +846,21 @@ def points_ledger_page(conn, building: str) -> None:
                     try:
                         preview = services.preview_add_point(emp_id, p_date, float(points), reason, note)
                         services.add_point(conn, preview, flag_code=(flag_code or "").strip() or None)
-                        st.success(f"Added {float(points):+.1f} pts on {fmt_date(p_date)}.")
+                        st.success(f"Added {float(points):.1f} pts on {fmt_date(p_date)}.")
                         st.rerun()
                     except Exception as exc:
                         st.error(str(exc))
 
 
     with col_hist:
-        section_label("Transaction History")
-        hist = [dict(r) for r in repo.get_points_history(conn, emp_id, limit=100)]
+        section_label("Transaction History (all events)")
+        hist = [dict(r) for r in repo.get_points_history(conn, emp_id, limit=5000)]
         if hist:
             df_h = pd.DataFrame(hist)[["id", "point_date", "points", "reason", "note", "point_total"]]
+            df_h["point_date"] = df_h["point_date"].apply(fmt_date)
+            df_h["points"] = df_h["points"].apply(lambda v: f"{float(v or 0):.1f}")
+            df_h["point_total"] = df_h["point_total"].apply(lambda v: f"{float(v or 0):.1f}")
             df_h.columns = ["ID", "Date", "Pts", "Reason", "Note", "Running Total"]
-            df_h["Date"] = df_h["Date"].apply(fmt_date)
             st.dataframe(df_h.drop(columns=["ID"]), use_container_width=True, hide_index=True, height=430)
             if st.button("Undo Last Entry", key="undo_last"):
                 try:

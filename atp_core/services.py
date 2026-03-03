@@ -518,6 +518,18 @@ def advance_due_perfect_attendance_dates(
             continue
 
         with tx(conn):
+            repo.insert_points_history(
+                conn,
+                employee_id=int(rec["employee_id"]),
+                point_date=run_date,
+                points=0.0,
+                reason="Perfect Attendance",
+                note=(
+                    f"Perfect attendance milestone advanced "
+                    f"from {old_due.isoformat()} to {new_due.isoformat()}"
+                ),
+                flag_code="AUTO",
+            )
             _exec(
                 conn,
                 "UPDATE employees SET perfect_attendance = ? WHERE employee_id = ?",
