@@ -512,7 +512,7 @@ def dashboard_page(conn, building: str) -> None:
         "0": lambda pts: pts == 0,
         "1-4": lambda pts: 1 <= pts <= 4,
         "5-6": lambda pts: 5 <= pts <= 6,
-        "7": lambda pts: pts == 7,
+        "7": lambda pts: pts >= 7,
     }
     bucket_counts = {
         key: sum(1 for r in emp_detail_rows if fn(float(r.get("point_total") or 0)))
@@ -531,7 +531,7 @@ def dashboard_page(conn, building: str) -> None:
         ("0", "0 Points"),
         ("1-4", "1–4 Pts"),
         ("5-6", "5–6 Pts"),
-        ("7", "7-8 Pts"),
+        ("7", "7+ Pts"),
     ]
     active_bucket = st.session_state.get("dashboard_bucket")
     tile_palette = {
