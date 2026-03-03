@@ -717,9 +717,7 @@ def points_ledger_page(conn, building: str) -> None:
                     if ok:
                         st.success(f"Applied transaction to {ok} employee(s).")
                     if errors:
-                        st.error("Some entries failed:
-" + "
-".join(errors))
+                        st.error("Some entries failed:\n" + "\n".join(errors))
                     st.rerun()
 
     with col_hist:
