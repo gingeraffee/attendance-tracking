@@ -660,7 +660,7 @@ def employees_page(conn, building: str) -> None:
 
     if hist:
         df_h = pd.DataFrame(hist)[["point_date", "points", "reason", "note", "point_total"]]
-        df_h.columns = ["Date", "Points", "Reason", "Note", "Running Total"]
+        df_h.columns = ["Date", "Points", "Reason", "Note", "Point Total"]
         df_h["Date"] = df_h["Date"].apply(fmt_date)
         st.dataframe(df_h, use_container_width=True, hide_index=True)
     else:
@@ -797,7 +797,7 @@ def points_ledger_page(conn, building: str) -> None:
         hist = [dict(r) for r in repo.get_points_history(conn, emp_id, limit=100)]
         if hist:
             df_h = pd.DataFrame(hist)[["id", "point_date", "points", "reason", "note", "point_total"]]
-            df_h.columns = ["ID", "Date", "Pts", "Reason", "Note", "Running Total"]
+            df_h.columns = ["ID", "Date", "Pts", "Reason", "Note", "Point Total"]
             df_h["Date"] = df_h["Date"].apply(fmt_date)
             st.dataframe(df_h.drop(columns=["ID"]), use_container_width=True, hide_index=True, height=430)
             if st.button("Undo Last Entry", key="undo_last"):
