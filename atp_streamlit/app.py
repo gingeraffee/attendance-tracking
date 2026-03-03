@@ -555,9 +555,8 @@ def dashboard_page(conn, building: str) -> None:
         if col.button(f"View {label}", key=f"dash_bucket_{key}", use_container_width=True):
             st.session_state["dashboard_bucket"] = key
 
-    st.caption(
-        f"Roll Offs Due ≤30 Days: {len(roll_due_rows)}  •  Perfect Attendance Due ≤30 Days: {len(perf_due_rows)}"
-    )
+    if st.button("View All Employees", key="dash_bucket_all"):
+        st.session_state.pop("dashboard_bucket", None)
 
     col_left, col_right = st.columns([1.6, 1], gap="large")
 
