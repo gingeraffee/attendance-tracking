@@ -606,14 +606,6 @@ def employees_page(conn, building: str) -> None:
         info_box("No matching employees found.")
         return
 
-    # Results table
-    df = pd.DataFrame(rows)[["employee_id", "last_name", "first_name", "location", "is_active"]]
-    df.columns = ["Emp #", "Last Name", "First Name", "Building", "Active"]
-    df["Emp #"] = df["Emp #"].astype(str)
-    st.dataframe(df, use_container_width=True, hide_index=True)
-
-    divider()
-
     # Detail view
     opts = [
         (int(r["employee_id"]), f"#{r['employee_id']} — {r['last_name']}, {r['first_name']}")
