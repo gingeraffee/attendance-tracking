@@ -64,11 +64,6 @@ section[data-testid="stSidebar"] {
 }
 section[data-testid="stSidebar"] * { color: #bfcde6 !important; }
 
-/* Sidebar: make the Building filter select text readable (black on light control) */
-section[data-testid="stSidebar"] div[data-baseweb="select"] * { color: #000000 !important; }
-section[data-testid="stSidebar"] div[data-baseweb="select"] > div { background: #ffffff !important; }
-
-
 /* ── Metric tiles ── */
 div[data-testid="stMetric"] {
     background: var(--surface);
@@ -1099,6 +1094,13 @@ def main() -> None:
                 unsafe_allow_html=True,
             )
 
+        st.markdown("<span class='sidebar-nav-label'>Navigation</span>", unsafe_allow_html=True)
+        page = st.radio(
+            "nav",
+            ["Dashboard", "Employees", "Points Ledger", "Manage Employees", "Exports & Forecasts", "System Updates"],
+            key="page",
+            label_visibility="collapsed",
+        )
 
         st.markdown("<span class='sidebar-nav-label'>Building Filter</span>", unsafe_allow_html=True)
         building = st.selectbox(
@@ -1107,16 +1109,6 @@ def main() -> None:
             key="global_building",
             label_visibility="collapsed",
         )
-
-
-    # Top navigation (keyboard-friendly): single page renders at a time
-    page = st.radio(
-        "Page",
-        ["Dashboard", "Employees", "Points Ledger", "Manage Employees", "Exports & Forecasts", "System Updates"],
-        key="page",
-        horizontal=True,
-        label_visibility="collapsed",
-    )
 
     if page == "Dashboard":
         dashboard_page(conn, building)
