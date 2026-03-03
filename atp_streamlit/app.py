@@ -564,13 +564,52 @@ def points_ledger_page(conn, building: str) -> None:
         warn_box("No active employees found for this building filter.")
         return
 
-    opts = [
-        (int(e["employee_id"]), f"#{e['employee_id']} — {e['last_name']}, {e['first_name']}")
-        for e in employees
-    ]
-    selected = st.selectbox("Employee", opts, format_func=lambda x: x[1])
-    emp_id = selected[0]
-    emp = dict(repo.get_employee(conn, emp_id))
+    # --- Quick employee finder (built for batch work) -------------------------
+    # Streamlit reruns on each keystroke, so this search "auto-sifts" instantly.
+    q = st.text_input("Find employee (type last name, first name, or #)", value=st.session_state.get("ledger_q", ""), key="ledger_q")
+
+    def _label(e: dict) -> str:
+        return f"#{e['employee_id']} — {e['last_name']}, {e['first_name']}"
+
+    q_norm = (q or "").strip().lower()
+    filtered = []
+    for e in employees:
+        blob = f"{e.get('employee_id','')} {e.get('first_name','')} {e.get('last_name','')}".lower()
+        if (not q_norm) or (q_norm in blob):
+            filtered.append(e)
+
+    if not filtered:
+        info_box("No employees match that search in the current building filter.")
+        return
+
+    # Keep selection stable across reruns/posts
+    default_emp_id = int(st.session_state.get("ledger_emp_id", filtered[0]["employee_id"]))
+    filtered_ids = [int(e["employee_id"]) for e in filtered]
+    if default_emp_id not in filtered_ids:
+        default_emp_id = filtered_ids[0]
+
+    # Navigation helpers (fast when processing a list)
+    nav = st.columns([1, 1, 5], gap="small")
+    cur_idx = filtered_ids.index(default_emp_id)
+
+    with nav[0]:
+        if st.button("⬅️ Prev", use_container_width=True, disabled=(cur_idx == 0)):
+            st.session_state.ledger_emp_id = filtered_ids[cur_idx - 1]
+            st.rerun()
+    with nav[1]:
+        if st.button("Next ➡️", use_container_width=True, disabled=(cur_idx == len(filtered_ids) - 1)):
+            st.session_state.ledger_emp_id = filtered_ids[cur_idx + 1]
+            st.rerun()
+
+    emp_id = st.selectbox(
+        "Employee",
+        options=filtered_ids,
+        index=filtered_ids.index(default_emp_id),
+        format_func=lambda _id: _label(next(e for e in filtered if int(e["employee_id"]) == int(_id))),
+        key="ledger_emp_id",
+    )
+
+    emp = dict(repo.get_employee(conn, int(emp_id)))
     pts = float(emp.get("point_total") or 0)
 
     # Status strip
@@ -598,29 +637,94 @@ def points_ledger_page(conn, building: str) -> None:
     col_form, col_hist = st.columns([1, 2], gap="large")
 
     with col_form:
-        section_label("New Transaction")
-        with st.form("ledger_entry", clear_on_submit=True):
-            p_date  = st.date_input("Date", value=date.today())
-            points  = st.number_input("Points (+ add / − remove)", step=0.5, value=0.5, min_value=-20.0, max_value=20.0)
-            reason  = st.selectbox("Reason", REASON_OPTIONS)
-            note    = st.text_input("Note (optional)")
-            submit  = st.form_submit_button("Post Transaction", use_container_width=True)
+        section_label("Quick Post")
 
-        if submit:
+        # Defaults that persist while you work through a batch
+        st.session_state.setdefault("ledger_points", 0.5)
+        st.session_state.setdefault("ledger_reason", REASON_OPTIONS[0] if REASON_OPTIONS else "")
+        st.session_state.setdefault("ledger_note", "")
+        st.session_state.setdefault("ledger_date", date.today())
+        st.session_state.setdefault("ledger_auto_next", True)
+
+        with st.form("ledger_entry", clear_on_submit=False):
+            p_date = st.date_input("Date", value=st.session_state.ledger_date, key="ledger_date")
+            points = st.number_input(
+                "Points (+ add / − remove)",
+                step=0.5,
+                value=float(st.session_state.ledger_points),
+                min_value=-20.0,
+                max_value=20.0,
+                key="ledger_points",
+            )
+            reason = st.selectbox("Reason", REASON_OPTIONS, index=REASON_OPTIONS.index(st.session_state.ledger_reason) if st.session_state.ledger_reason in REASON_OPTIONS else 0, key="ledger_reason")
+            note = st.text_input("Note (optional)", value=st.session_state.ledger_note, key="ledger_note")
+
+            st.caption("Tip: Use **Prev/Next** above to fly through a filtered list. Post + auto-advance is great for batches.")
+            auto_next = st.toggle("Auto-advance to next employee after posting", value=bool(st.session_state.ledger_auto_next), key="ledger_auto_next")
+
+            c1, c2 = st.columns(2, gap="small")
+            post = c1.form_submit_button("Post", use_container_width=True)
+            post_next = c2.form_submit_button("Post & Next", use_container_width=True)
+
+        if post or post_next:
             if p_date > date.today():
                 st.error("Date cannot be in the future.")
+            elif float(points) == 0:
+                st.error("Points cannot be 0.")
             else:
                 try:
-                    preview = services.preview_add_point(emp_id, p_date, points, reason, note)
+                    preview = services.preview_add_point(int(emp_id), p_date, float(points), reason, note)
                     services.add_point(conn, preview)
-                    st.success(f"Posted {points:+.1f} pts on {fmt_date(p_date)}.")
+                    st.success(f"Posted {float(points):+.1f} pts to {_label(emp)} on {fmt_date(p_date)}.")
+
+                    # Optional auto-advance for batch entry
+                    if post_next or st.session_state.ledger_auto_next:
+                        idx = filtered_ids.index(int(emp_id))
+                        if idx < len(filtered_ids) - 1:
+                            st.session_state.ledger_emp_id = filtered_ids[idx + 1]
                     st.rerun()
                 except Exception as exc:
                     st.error(str(exc))
 
+        with st.expander("Batch apply (same transaction to multiple employees)", expanded=False):
+            st.caption("Use this when many employees get the *same* points/date/reason. It saves a ton of clicks.")
+            ms = st.multiselect(
+                "Employees",
+                options=[int(e["employee_id"]) for e in employees],
+                format_func=lambda _id: _label(next(e for e in employees if int(e["employee_id"]) == int(_id))),
+                default=[],
+                key="ledger_batch_ids",
+            )
+            b_cols = st.columns(2, gap="small")
+            b_apply = b_cols[0].button("Apply to selected", use_container_width=True)
+            if b_apply:
+                if not ms:
+                    st.warning("Select at least one employee.")
+                elif st.session_state.ledger_date > date.today():
+                    st.error("Date cannot be in the future.")
+                elif float(st.session_state.ledger_points) == 0:
+                    st.error("Points cannot be 0.")
+                else:
+                    ok = 0
+                    errors = []
+                    for _id in ms:
+                        try:
+                            prev = services.preview_add_point(int(_id), st.session_state.ledger_date, float(st.session_state.ledger_points), st.session_state.ledger_reason, st.session_state.ledger_note)
+                            services.add_point(conn, prev)
+                            ok += 1
+                        except Exception as exc:
+                            errors.append(f"#{_id}: {exc}")
+                    if ok:
+                        st.success(f"Applied transaction to {ok} employee(s).")
+                    if errors:
+                        st.error("Some entries failed:
+" + "
+".join(errors))
+                    st.rerun()
+
     with col_hist:
         section_label("Transaction History")
-        hist = [dict(r) for r in repo.get_points_history(conn, emp_id, limit=100)]
+        hist = [dict(r) for r in repo.get_points_history(conn, int(emp_id), limit=100)]
         if hist:
             df_h = pd.DataFrame(hist)[["id", "point_date", "points", "reason", "note", "point_total"]]
             df_h.columns = ["ID", "Date", "Pts", "Reason", "Note", "Running Total"]
@@ -628,13 +732,14 @@ def points_ledger_page(conn, building: str) -> None:
             st.dataframe(df_h.drop(columns=["ID"]), use_container_width=True, hide_index=True, height=430)
             if st.button("Undo Last Entry", key="undo_last"):
                 try:
-                    services.delete_point_history_entry(conn, point_id=int(df_h.iloc[0]["ID"]), employee_id=emp_id)
+                    services.delete_point_history_entry(conn, point_id=int(df_h.iloc[0]["ID"]), employee_id=int(emp_id))
                     st.success("Last entry removed.")
                     st.rerun()
                 except Exception as exc:
                     st.error(str(exc))
         else:
             info_box("No history entries for this employee yet.")
+
 
 
 # ── Manage Employees ──────────────────────────────────────────────────────────
