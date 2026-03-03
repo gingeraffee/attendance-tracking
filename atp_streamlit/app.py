@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from io import BytesIO
 from datetime import date, datetime, timedelta
+import math
 from pathlib import Path
 import sys
 
@@ -805,7 +806,7 @@ def dashboard_page(conn, building: str) -> None:
             info_box("No perfect attendance dates due in the next 30 days.")
 
     divider()
-    section_label("Building Snapshot (Last 30 Days)")
+    section_label("Building Snapshot (Average Points per Employee)")
 
     active_rows = [
         dict(r)
