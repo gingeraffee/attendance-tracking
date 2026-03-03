@@ -403,12 +403,15 @@ def dashboard_page(conn, building: str) -> None:
 
     if is_pg(conn):
         sql_emp_detail = f'''
-            SELECT employee_id, last_name, first_name,
-                   COALESCE("Location",'') AS building,
-                   COALESCE(point_total,0) AS point_total,
-                   last_point_date, rolloff_date, perfect_attendance
-              FROM employees
-             WHERE employee_id IN ({ph})
+            SELECT e.employee_id, e.last_name, e.first_name,
+                   COALESCE(e."Location",'') AS building,
+                   GREATEST(0.0, ROUND(COALESCE(SUM(ph.points), 0.0)::numeric, 1)::float8) AS point_total,
+                   e.last_point_date, e.rolloff_date, e.perfect_attendance
+              FROM employees e
+              LEFT JOIN points_history ph ON ph.employee_id = e.employee_id
+             WHERE e.employee_id IN ({ph})
+             GROUP BY e.employee_id, e.last_name, e.first_name, e."Location",
+                      e.last_point_date, e.rolloff_date, e.perfect_attendance
         '''
         sql_roll_due = f'''
             SELECT employee_id, last_name, first_name, COALESCE("Location",'') AS building,
@@ -454,12 +457,14 @@ def dashboard_page(conn, building: str) -> None:
         '''
     else:
         sql_emp_detail = f'''
-            SELECT employee_id, last_name, first_name,
-                   COALESCE("Location",'') AS building,
-                   COALESCE(point_total,0) AS point_total,
-                   last_point_date, rolloff_date, perfect_attendance
-              FROM employees
-             WHERE employee_id IN ({ph})
+            SELECT e.employee_id, e.last_name, e.first_name,
+                   COALESCE(e."Location",'') AS building,
+                   MAX(0.0, ROUND(COALESCE((
+                       SELECT SUM(ph.points) FROM points_history ph WHERE ph.employee_id = e.employee_id
+                   ), 0.0), 1)) AS point_total,
+                   e.last_point_date, e.rolloff_date, e.perfect_attendance
+              FROM employees e
+             WHERE e.employee_id IN ({ph})
         '''
         sql_roll_due = f'''
             SELECT employee_id, last_name, first_name, COALESCE("Location",'') AS building,
