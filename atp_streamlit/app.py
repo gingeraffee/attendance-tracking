@@ -479,6 +479,7 @@ def dashboard_page(conn, building: str) -> None:
                          FROM points_history ph2
                         WHERE ph2.employee_id = e.employee_id
                           AND (ph2.point_date::date) >= (%s::date)
+                          AND EXTRACT(DOW FROM ph2.point_date::date) NOT IN (0, 6)
                           AND COALESCE(ph2.reason, '') <> ''
                         GROUP BY ph2.reason
                         ORDER BY COUNT(*) DESC, MAX(ph2.point_date::date) DESC, ph2.reason
@@ -488,6 +489,7 @@ def dashboard_page(conn, building: str) -> None:
               JOIN points_history ph ON ph.employee_id = e.employee_id
              WHERE e.employee_id IN ({ph})
                AND (ph.point_date::date) >= (%s::date)
+               AND EXTRACT(DOW FROM ph.point_date::date) NOT IN (0, 6)
              GROUP BY e.employee_id, e.last_name, e.first_name, e."Location"
             HAVING COALESCE(SUM(ph.points), 0.0) > 1.0
              ORDER BY points_30d DESC, MAX(ph.point_date::date) DESC, lower(e.last_name), lower(e.first_name)
@@ -498,6 +500,7 @@ def dashboard_page(conn, building: str) -> None:
               FROM points_history ph
              WHERE ph.employee_id IN ({ph})
                AND (ph.point_date::date) >= (%s::date)
+               AND EXTRACT(DOW FROM ph.point_date::date) NOT IN (0, 6)
              GROUP BY ph.employee_id
         '''
         sql_trend_90d = f'''
@@ -506,6 +509,7 @@ def dashboard_page(conn, building: str) -> None:
               FROM points_history ph
              WHERE ph.employee_id IN ({ph})
                AND (ph.point_date::date) >= (%s::date)
+               AND EXTRACT(DOW FROM ph.point_date::date) NOT IN (0, 6)
              GROUP BY (ph.point_date::date)
              ORDER BY (ph.point_date::date)
         '''
@@ -516,6 +520,7 @@ def dashboard_page(conn, building: str) -> None:
               FROM points_history ph
              WHERE ph.employee_id IN ({ph})
                AND (ph.point_date::date) >= (%s::date)
+               AND EXTRACT(DOW FROM ph.point_date::date) NOT IN (0, 6)
              GROUP BY EXTRACT(DOW FROM ph.point_date::date)
              ORDER BY total_points DESC
         '''
@@ -596,6 +601,7 @@ def dashboard_page(conn, building: str) -> None:
                          FROM points_history ph2
                         WHERE ph2.employee_id = e.employee_id
                           AND date(ph2.point_date) >= date(?)
+                          AND strftime('%w', ph2.point_date) NOT IN ('0', '6')
                           AND COALESCE(ph2.reason, '') <> ''
                         GROUP BY ph2.reason
                         ORDER BY COUNT(*) DESC, MAX(date(ph2.point_date)) DESC, ph2.reason
@@ -605,6 +611,7 @@ def dashboard_page(conn, building: str) -> None:
               JOIN points_history ph ON ph.employee_id = e.employee_id
              WHERE e.employee_id IN ({ph})
                AND date(ph.point_date) >= date(?)
+               AND strftime('%w', ph.point_date) NOT IN ('0', '6')
              GROUP BY e.employee_id, e.last_name, e.first_name, e."Location"
             HAVING COALESCE(SUM(ph.points), 0.0) > 1.0
              ORDER BY points_30d DESC, MAX(date(ph.point_date)) DESC, lower(e.last_name), lower(e.first_name)
@@ -615,6 +622,7 @@ def dashboard_page(conn, building: str) -> None:
               FROM points_history ph
              WHERE ph.employee_id IN ({ph})
                AND date(ph.point_date) >= date(?)
+               AND strftime('%w', ph.point_date) NOT IN ('0', '6')
              GROUP BY ph.employee_id
         '''
         sql_trend_90d = f'''
@@ -623,6 +631,7 @@ def dashboard_page(conn, building: str) -> None:
               FROM points_history ph
              WHERE ph.employee_id IN ({ph})
                AND date(ph.point_date) >= date(?)
+               AND strftime('%w', ph.point_date) NOT IN ('0', '6')
              GROUP BY date(ph.point_date)
              ORDER BY date(ph.point_date)
         '''
@@ -633,6 +642,7 @@ def dashboard_page(conn, building: str) -> None:
               FROM points_history ph
              WHERE ph.employee_id IN ({ph})
                AND date(ph.point_date) >= date(?)
+               AND strftime('%w', ph.point_date) NOT IN ('0', '6')
              GROUP BY CAST(strftime('%w', ph.point_date) AS INTEGER)
              ORDER BY total_points DESC
         '''
@@ -864,12 +874,14 @@ def dashboard_page(conn, building: str) -> None:
     st.markdown("#### Trending Risk (Heuristic) — On track to exceed 8 points")
     pts60_rows = [dict(r) for r in fetchall(conn, sql_points_60d, (*emp_ids, since_60))]
     points60_by_emp = {int(r.get("employee_id")): float(r.get("points_60d") or 0.0) for r in pts60_rows}
+    weekdays_60 = max(len(pd.bdate_range(start=today - timedelta(days=60), end=today)), 1)
+    weekdays_30 = len(pd.bdate_range(start=today + timedelta(days=1), end=today + timedelta(days=30)))
     risk_rows = []
     for r in emp_detail_rows:
         emp_id = int(r["employee_id"])
         current_points = float(r.get("point_total") or 0.0)
         points_60d = float(points60_by_emp.get(emp_id) or 0.0)
-        projected_30d = points_60d / 2.0
+        projected_30d = (points_60d / weekdays_60) * weekdays_30
         projected_total = current_points + projected_30d
         if projected_total >= 8.0:
             risk_rows.append(
@@ -891,9 +903,9 @@ def dashboard_page(conn, building: str) -> None:
     else:
         info_box("No active employees currently trend to 8.0+ points in the next 30 days.")
 
-    st.markdown("#### Absenteeism Trend (Last 90 Days)")
+    st.markdown("#### Absenteeism Trend (Last 90 Days, Weekdays Only)")
     trend_rows = [dict(r) for r in fetchall(conn, sql_trend_90d, (*emp_ids, (today - timedelta(days=90)).isoformat()))]
-    all_days = pd.date_range(start=today - timedelta(days=90), end=today, freq="D")
+    all_days = pd.bdate_range(start=today - timedelta(days=90), end=today)
     trend_df = pd.DataFrame({"point_day": all_days, "Total Points": 0.0})
     if trend_rows:
         trend_points = pd.DataFrame(
@@ -908,9 +920,9 @@ def dashboard_page(conn, building: str) -> None:
     trend_df = trend_df.rename(columns={"point_day": "Date"}).set_index("Date")
     st.line_chart(trend_df)
 
-    st.markdown("#### Day-of-Week Hotspots (Last 365 Days)")
+    st.markdown("#### Day-of-Week Hotspots (Last 365 Days, Weekdays Only)")
     dow_rows = [dict(r) for r in fetchall(conn, sql_hotspots_365, (*emp_ids, (today - timedelta(days=365)).isoformat()))]
-    dow_map = {0: "Sun", 1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri", 6: "Sat"}
+    dow_map = {1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri"}
     if dow_rows:
         df_dow = pd.DataFrame(
             [
