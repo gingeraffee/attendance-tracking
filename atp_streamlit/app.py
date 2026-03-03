@@ -334,7 +334,7 @@ def dashboard_page(conn, building: str) -> None:
         sql_perf60  = f"SELECT COUNT(*) AS cnt FROM employees WHERE employee_id IN ({ph}) AND perfect_attendance IS NOT NULL AND (perfect_attendance::date) <= (%s::date)"
         sql_trend   = f"SELECT (point_date::date)::text AS d, COUNT(*) AS n FROM points_history WHERE employee_id IN ({ph}) AND points > 0 AND (point_date::date) >= (%s::date) GROUP BY 1 ORDER BY 1"
         sql_leaders = f"SELECT employee_id, last_name, first_name, COALESCE(\"Location\",'') AS loc, COALESCE(point_total,0) AS pts FROM employees WHERE employee_id IN ({ph}) ORDER BY pts DESC, last_name LIMIT %s"
-        sql_rolloffs= f"SELECT employee_id, last_name, first_name, rolloff_date, point_total FROM employees WHERE employee_id IN ({ph}) AND rolloff_date IS NOT NULL AND point_total > 0 AND (rolloff_date::date) >= (%s::date) ORDER BY rolloff_date LIMIT 12"
+        sql_rolloffs= f"SELECT employee_id, last_name, first_name, rolloff_date, point_total FROM employees WHERE employee_id IN ({ph}) AND rolloff_date IS NOT NULL AND point_total > 0 AND (rolloff_date::date) >= (%s::date) AND (rolloff_date::date) <= (%s::date) ORDER BY rolloff_date"
         sql_perfect = f"SELECT employee_id, last_name, first_name, perfect_attendance FROM employees WHERE employee_id IN ({ph}) AND perfect_attendance IS NOT NULL AND (perfect_attendance::date) <= (%s::date) ORDER BY perfect_attendance LIMIT 10"
     else:
         sql_active  = f"SELECT COUNT(DISTINCT employee_id) AS cnt FROM points_history WHERE employee_id IN ({ph}) AND points > 0 AND date(point_date) >= date(?)"
@@ -342,7 +342,7 @@ def dashboard_page(conn, building: str) -> None:
         sql_perf60  = f"SELECT COUNT(*) AS cnt FROM employees WHERE employee_id IN ({ph}) AND perfect_attendance IS NOT NULL AND date(perfect_attendance) <= date(?)"
         sql_trend   = f"SELECT date(point_date) AS d, COUNT(*) AS n FROM points_history WHERE employee_id IN ({ph}) AND points > 0 AND date(point_date) >= date(?) GROUP BY 1 ORDER BY 1"
         sql_leaders = f"SELECT employee_id, last_name, first_name, COALESCE(\"Location\",'') AS loc, COALESCE(point_total,0) AS pts FROM employees WHERE employee_id IN ({ph}) ORDER BY pts DESC, last_name LIMIT ?"
-        sql_rolloffs= f"SELECT employee_id, last_name, first_name, rolloff_date, point_total FROM employees WHERE employee_id IN ({ph}) AND rolloff_date IS NOT NULL AND point_total > 0 AND date(rolloff_date) >= date(?) ORDER BY rolloff_date LIMIT 12"
+        sql_rolloffs= f"SELECT employee_id, last_name, first_name, rolloff_date, point_total FROM employees WHERE employee_id IN ({ph}) AND rolloff_date IS NOT NULL AND point_total > 0 AND date(rolloff_date) >= date(?) AND date(rolloff_date) <= date(?) ORDER BY rolloff_date"
         sql_perfect = f"SELECT employee_id, last_name, first_name, perfect_attendance FROM employees WHERE employee_id IN ({ph}) AND perfect_attendance IS NOT NULL AND date(perfect_attendance) <= date(?) ORDER BY perfect_attendance LIMIT 10"
 
     # Access scalars by column name (works for both sqlite3.Row and pg dict rows)
@@ -394,7 +394,7 @@ def dashboard_page(conn, building: str) -> None:
 
     # ── Upcoming roll-offs + perfect attendance ───────────────────────────────
     with col_right:
-        section_label("Upcoming Roll-offs")
+        section_label("Upcoming Roll-offs (Next 31 Days)")
         rolloff_search = st.text_input(
             "Search roll-offs",
             placeholder="Filter by name or employee # …",
@@ -402,20 +402,17 @@ def dashboard_page(conn, building: str) -> None:
             label_visibility="collapsed",
         )
 
-        # 2-month roll-offs — only future dates (rolloff_date >= today)
-        rolloffs_2mo = [dict(r) for r in fetchall(conn, sql_rolloffs, (*emp_ids, today.isoformat()))]
+        # 2-month roll-offs — only within the next 31 days
+        cutoff_31 = (today + timedelta(31)).isoformat()
+        rolloffs_2mo = [dict(r) for r in fetchall(conn, sql_rolloffs, (*emp_ids, today.isoformat(), cutoff_31))]
 
-        # YTD roll-off previews — gather current + upcoming month schedules.
-        # This keeps YTD events visible in "Upcoming" even after the current
-        # month has already been applied in System Maintenance.
+        # YTD roll-off previews — look ahead up to 31 days (current + next month).
         emp_set    = set(emp_ids)
         emp_lookup = {int(e["employee_id"]): e for e in employees}
         ytd_entries: list[dict] = []
         try:
-            # Look ahead a few months so upcoming YTD dates continue to appear.
-            # 2-month roll-offs still come from employees.rolloff_date.
             seen_ytd: set[tuple[int, str]] = set()
-            for month_offset in range(0, 4):
+            for month_offset in range(0, 2):
                 run_month = (today.month - 1) + month_offset
                 run_year = today.year + (run_month // 12)
                 run_mon = (run_month % 12) + 1
@@ -430,7 +427,7 @@ def dashboard_page(conn, building: str) -> None:
                     roll_date = str(p[2]) if len(p) > 2 else ""
                     if eid not in emp_set or not roll_date:
                         continue
-                    if roll_date < today.isoformat():
+                    if roll_date < today.isoformat() or roll_date > cutoff_31:
                         continue
                     dedupe_key = (eid, roll_date)
                     if dedupe_key in seen_ytd:
@@ -450,8 +447,8 @@ def dashboard_page(conn, building: str) -> None:
         except Exception:
             pass
 
-        # Combine: tag 2-mo entries then append YTD entries; sort by date
-        all_upcoming = [{**r, "type": "2-Mo Roll-Off", "amount": -1.0} for r in rolloffs_2mo]
+        # Combine: tag 2-mo entries (policy always removes 1 pt) then append YTD; sort by date
+        all_upcoming = [{**r, "type": "2-Mo Roll-Off", "amount": 1.0} for r in rolloffs_2mo]
         all_upcoming += ytd_entries
         all_upcoming.sort(key=lambda x: str(x.get("rolloff_date") or "9999"))
 
@@ -466,30 +463,55 @@ def dashboard_page(conn, building: str) -> None:
                 or _q in str(r.get("employee_id") or "")
             ]
 
-        if all_upcoming:
+        # Group by employee: employees with both a YTD and 2-Mo roll-off share one card
+        merged_cards: list[dict] = []
+        seen_merge: dict[int, dict] = {}
+        for r in all_upcoming:
+            eid = int(r["employee_id"])
+            if eid not in seen_merge:
+                card = {
+                    "employee_id": eid,
+                    "last_name":   r["last_name"],
+                    "first_name":  r["first_name"],
+                    "rolloff_date": r["rolloff_date"],
+                    "types":   [r["type"]],
+                    "amounts": [float(r.get("amount") or 0)],
+                }
+                seen_merge[eid] = card
+                merged_cards.append(card)
+            else:
+                card = seen_merge[eid]
+                if r["type"] not in card["types"]:
+                    card["types"].append(r["type"])
+                    card["amounts"].append(float(r.get("amount") or 0))
+                if str(r["rolloff_date"]) < str(card["rolloff_date"]):
+                    card["rolloff_date"] = r["rolloff_date"]
+
+        if merged_cards:
+            _BADGE_COLORS = {
+                "YTD Roll-Off":  ("#00b8e6", "rgba(0,184,230,.10)", "rgba(0,184,230,.25)"),
+                "2-Mo Roll-Off": ("#4f8ef7", "rgba(79,142,247,.10)", "rgba(79,142,247,.25)"),
+            }
             html = []
-            for r in all_upcoming:
-                days   = days_until(r["rolloff_date"])
-                is_ytd = r["type"] == "YTD Roll-Off"
-                tc = "#00b8e6" if is_ytd else "#4f8ef7"
-                tb = "rgba(0,184,230,.10)" if is_ytd else "rgba(79,142,247,.10)"
-                tbr= "rgba(0,184,230,.25)" if is_ytd else "rgba(79,142,247,.25)"
-                type_badge = (
+            for card in merged_cards:
+                days = days_until(card["rolloff_date"])
+                total_pts = sum(card["amounts"])
+                badges_html = "".join(
                     f"<span style='display:inline-block;padding:2px 8px;border-radius:6px;"
-                    f"font-size:.74rem;font-weight:700;color:{tc};background:{tb};"
-                    f"border:1px solid {tbr}'>{r['type']}</span>"
+                    f"font-size:.74rem;font-weight:700;color:{_BADGE_COLORS[t][0]};"
+                    f"background:{_BADGE_COLORS[t][1]};border:1px solid {_BADGE_COLORS[t][2]}'>{t}</span>"
+                    for t in card["types"]
                 )
-                amt = float(r.get("amount") or 0)
                 html.append(
                     f"<div class='list-row'>"
                     f"<div style='display:flex;justify-content:space-between;align-items:center'>"
-                    f"<div><span style='font-weight:600;font-size:.9rem;color:#1a2744'>{r['last_name']}, {r['first_name']}</span>"
-                    f"<span style='color:#8fa0b8;font-size:.78rem;margin-left:.4rem'>#{r['employee_id']}</span></div>"
-                    f"<div style='display:flex;gap:.3rem;align-items:center'>{type_badge}{days_badge(days)}</div>"
+                    f"<div><span style='font-weight:600;font-size:.9rem;color:#1a2744'>{card['last_name']}, {card['first_name']}</span>"
+                    f"<span style='color:#8fa0b8;font-size:.78rem;margin-left:.4rem'>#{card['employee_id']}</span></div>"
+                    f"<div style='display:flex;gap:.3rem;align-items:center'>{badges_html}{days_badge(days)}</div>"
                     f"</div>"
                     f"<div style='display:flex;justify-content:space-between;margin-top:.22rem'>"
-                    f"<span style='font-size:.75rem;color:#8fa0b8'>Due {fmt_date(r['rolloff_date'])}</span>"
-                    f"<span style='font-size:.78rem;font-weight:700;color:#e0394a'>{amt:.1f} pts</span>"
+                    f"<span style='font-size:.75rem;color:#8fa0b8'>Due {fmt_date(card['rolloff_date'])}</span>"
+                    f"<span style='font-size:.78rem;font-weight:700;color:#e0394a'>{total_pts:.1f} pts</span>"
                     f"</div>"
                     f"</div>"
                 )
