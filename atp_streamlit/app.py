@@ -605,36 +605,19 @@ def points_ledger_page(conn, building: str) -> None:
         for e in employees
     ]
 
-    # Type-to-filter employee picker (fast for batch entry)
-    q = st.text_input(
-        "Find employee (type last name, first name, or employee #)",
-        value=st.session_state.get("ledger_emp_q", ""),
-        key="ledger_emp_q",
-        placeholder="Start typing…",
-    ).strip().lower()
-
-    def _match(label: str, emp_id: int) -> bool:
-        if not q:
-            return True
-        return (q in label.lower()) or (q in str(emp_id))
-
-    filtered = [o for o in opts if _match(o[1], o[0])]
-    if not filtered:
-        st.info("No employees match that search.")
-        return
-
-    # Keep last selected employee sticky (even while filtering)
+    # Employee picker (Streamlit selectbox has built-in type-to-search: focus it and start typing)
+    # Kept keyboard-friendly: Tab into the dropdown, type a few letters, use arrows + Enter.
     prev_emp = st.session_state.get("ledger_emp_id")
     default_idx = 0
     if prev_emp is not None:
-        for i, o in enumerate(filtered):
+        for i, o in enumerate(opts):
             if o[0] == prev_emp:
                 default_idx = i
                 break
 
     selected = st.selectbox(
         "Employee",
-        filtered,
+        opts,
         index=default_idx,
         format_func=lambda x: x[1],
         key="ledger_emp_select",
