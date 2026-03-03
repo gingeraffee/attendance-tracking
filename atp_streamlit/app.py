@@ -27,7 +27,7 @@ from atp_core.schema import ensure_schema
 from atp_core import repo, services
 from atp_core.rules import REASON_OPTIONS
 
-BUILDINGS = ["Building A", "Building B", "Building C"]
+BUILDINGS = ["APIM", "APIS", "API"]
 
 
 # ── Theme ─────────────────────────────────────────────────────────────────────
