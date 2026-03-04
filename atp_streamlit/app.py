@@ -1149,21 +1149,6 @@ def dashboard_page(conn, building: str) -> None:
                 if 0 <= idx < len(df_emps):
                     st.session_state["selected_employee_id"] = int(df_emps.iloc[idx]["employee_id"])
 
-            spotlight_emp = get_employee_spotlight(conn, st.session_state.get("selected_employee_id"))
-            if spotlight_emp:
-                divider()
-                section_label("Employee Spotlight")
-                full_name = f"{spotlight_emp.get('first_name') or ''} {spotlight_emp.get('last_name') or ''}".strip() or "Unknown Employee"
-                st.markdown(
-                    "<div class='card-sm'>"
-                    f"<div style='font-size:.95rem;font-weight:800;color:#1a2744;margin-bottom:.25rem'>{full_name}</div>"
-                    f"<div style='font-size:.8rem;color:#5c6f8c;margin:.1rem 0'><strong>Employee #:</strong> {spotlight_emp.get('employee_id') or '—'}</div>"
-                    f"<div style='font-size:.8rem;color:#5c6f8c;margin:.1rem 0'><strong>Last Point Date:</strong> {fmt_date(spotlight_emp.get('last_positive_point_date'))}</div>"
-                    f"<div style='font-size:.8rem;color:#5c6f8c;margin:.1rem 0'><strong>2 Month Roll Off Date:</strong> {fmt_date(spotlight_emp.get('rolloff_date'))}</div>"
-                    f"<div style='font-size:.8rem;color:#5c6f8c;margin:.1rem 0'><strong>Perfect Attendance Date:</strong> {fmt_date(spotlight_emp.get('perfect_attendance'))}</div>"
-                    "</div>",
-                    unsafe_allow_html=True,
-                )
         else:
             info_box("None 🎉")
 
