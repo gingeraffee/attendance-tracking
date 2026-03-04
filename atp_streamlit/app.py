@@ -6,7 +6,6 @@ from __future__ import annotations
 from io import BytesIO
 from datetime import date, datetime, timedelta
 import math
-import os
 from pathlib import Path
 import secrets
 import sys
