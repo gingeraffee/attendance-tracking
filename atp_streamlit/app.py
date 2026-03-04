@@ -1339,7 +1339,7 @@ def dashboard_page(conn, building: str) -> None:
     else:
         info_box("No employees over 1.0 points in the last 30 days.")
 
-    st.markdown("#### Trending Risk (Heuristic) — On track to exceed 8 points")
+    st.markdown("#### Trending Risks  — On track to exceed 8 points")
     pts60_rows = [dict(r) for r in fetchall(conn, sql_points_60d, (*emp_ids, since_60))]
     points60_by_emp = {int(r.get("employee_id")): float(r.get("points_60d") or 0.0) for r in pts60_rows}
     weekdays_60 = max(len(pd.bdate_range(start=today - timedelta(days=60), end=today)), 1)
@@ -1371,7 +1371,7 @@ def dashboard_page(conn, building: str) -> None:
     else:
         info_box("No active employees currently trend to 8.0+ points in the next 30 days.")
 
-    st.markdown("#### Absenteeism Trend (Last 90 Days, Weekdays Only)")
+    st.markdown("#### Absenteeism Trend (90 Days)")
     trend_rows = [dict(r) for r in fetchall(conn, sql_trend_90d, (*emp_ids, (today - timedelta(days=90)).isoformat()))]
     all_days = pd.bdate_range(start=today - timedelta(days=90), end=today)
     trend_df = pd.DataFrame({"point_day": all_days, "Total Points": 0.0})
