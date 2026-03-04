@@ -391,6 +391,7 @@ def ensure_session_defaults() -> None:
         "selected_employee_id": None,
         "dashboard_bucket": None,
         "authenticated": False,
+        "login_error": False,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -492,12 +493,16 @@ def login_page() -> None:
             expected = os.environ.get("ACCESS_CODE", "attendance2024")
             if access_code == expected:
                 st.session_state["authenticated"] = True
+                st.session_state["login_error"] = False
                 st.rerun()
             else:
-                st.markdown(
-                    "<div class='login-error'>Incorrect access code. Please try again.</div>",
-                    unsafe_allow_html=True,
-                )
+                st.session_state["login_error"] = True
+
+        if st.session_state.get("login_error"):
+            st.markdown(
+                "<div class='login-error'>Incorrect access code. Please try again.</div>",
+                unsafe_allow_html=True,
+            )
 
 
 def build_point_history_pdf(employee: dict, history: list[dict]) -> bytes:
