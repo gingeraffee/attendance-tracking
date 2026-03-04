@@ -847,16 +847,40 @@ def dashboard_page(conn, building: str) -> None:
              ORDER BY (ph.point_date::date)
         '''
         sql_weekday_window = f'''
-            SELECT EXTRACT(DOW FROM ph.point_date::date)::int AS dow,
-                   ROUND(COALESCE(SUM(ph.points), 0.0)::numeric, 1)::float8 AS total_points,
-                   COUNT(*) AS incidents,
-                   COUNT(DISTINCT ph.employee_id) AS employees_pointed
-              FROM points_history ph
-             WHERE ph.employee_id IN ({ph})
-               AND (ph.point_date::date) >= (%s::date)
-               AND (ph.point_date::date) < (%s::date)
-               AND COALESCE(ph.points, 0.0) > 0.0
-             GROUP BY EXTRACT(DOW FROM ph.point_date::date)
+            WITH totals AS (
+                SELECT EXTRACT(DOW FROM ph.point_date::date)::int AS dow,
+                       ROUND(COALESCE(SUM(ph.points), 0.0)::numeric, 1)::float8 AS total_points,
+                       COUNT(*) AS incidents
+                  FROM points_history ph
+                 WHERE ph.employee_id IN ({ph})
+                   AND (ph.point_date::date) >= (%s::date)
+                   AND (ph.point_date::date) < (%s::date)
+                   AND COALESCE(ph.points, 0.0) > 0.0
+                 GROUP BY EXTRACT(DOW FROM ph.point_date::date)
+            ),
+            emp_counts AS (
+                SELECT d.dow,
+                       COUNT(*) AS employees_pointed
+                  FROM (
+                        SELECT EXTRACT(DOW FROM ph.point_date::date)::int AS dow,
+                               ph.employee_id,
+                               SUM(COALESCE(ph.points, 0.0)) AS employee_points
+                          FROM points_history ph
+                         WHERE ph.employee_id IN ({ph})
+                           AND (ph.point_date::date) >= (%s::date)
+                           AND (ph.point_date::date) < (%s::date)
+                           AND COALESCE(ph.points, 0.0) > 0.0
+                         GROUP BY EXTRACT(DOW FROM ph.point_date::date), ph.employee_id
+                        HAVING SUM(COALESCE(ph.points, 0.0)) >= 1.0
+                  ) d
+                 GROUP BY d.dow
+            )
+            SELECT t.dow,
+                   t.total_points,
+                   t.incidents,
+                   COALESCE(e.employees_pointed, 0) AS employees_pointed
+              FROM totals t
+              LEFT JOIN emp_counts e ON e.dow = t.dow
         '''
         sql_weekday_reason = f'''
             SELECT ph.reason, COUNT(*) AS n
@@ -987,16 +1011,40 @@ def dashboard_page(conn, building: str) -> None:
              ORDER BY date(ph.point_date)
         '''
         sql_weekday_window = f'''
-            SELECT CAST(strftime('%w', ph.point_date) AS INTEGER) AS dow,
-                   ROUND(COALESCE(SUM(ph.points), 0.0), 1) AS total_points,
-                   COUNT(*) AS incidents,
-                   COUNT(DISTINCT ph.employee_id) AS employees_pointed
-              FROM points_history ph
-             WHERE ph.employee_id IN ({ph})
-               AND date(ph.point_date) >= date(?)
-               AND date(ph.point_date) < date(?)
-               AND COALESCE(ph.points, 0.0) > 0.0
-             GROUP BY CAST(strftime('%w', ph.point_date) AS INTEGER)
+            WITH totals AS (
+                SELECT CAST(strftime('%w', ph.point_date) AS INTEGER) AS dow,
+                       ROUND(COALESCE(SUM(ph.points), 0.0), 1) AS total_points,
+                       COUNT(*) AS incidents
+                  FROM points_history ph
+                 WHERE ph.employee_id IN ({ph})
+                   AND date(ph.point_date) >= date(?)
+                   AND date(ph.point_date) < date(?)
+                   AND COALESCE(ph.points, 0.0) > 0.0
+                 GROUP BY CAST(strftime('%w', ph.point_date) AS INTEGER)
+            ),
+            emp_counts AS (
+                SELECT d.dow,
+                       COUNT(*) AS employees_pointed
+                  FROM (
+                        SELECT CAST(strftime('%w', ph.point_date) AS INTEGER) AS dow,
+                               ph.employee_id,
+                               SUM(COALESCE(ph.points, 0.0)) AS employee_points
+                          FROM points_history ph
+                         WHERE ph.employee_id IN ({ph})
+                           AND date(ph.point_date) >= date(?)
+                           AND date(ph.point_date) < date(?)
+                           AND COALESCE(ph.points, 0.0) > 0.0
+                         GROUP BY CAST(strftime('%w', ph.point_date) AS INTEGER), ph.employee_id
+                        HAVING SUM(COALESCE(ph.points, 0.0)) >= 1.0
+                  ) d
+                 GROUP BY d.dow
+            )
+            SELECT t.dow,
+                   t.total_points,
+                   t.incidents,
+                   COALESCE(e.employees_pointed, 0) AS employees_pointed
+              FROM totals t
+              LEFT JOIN emp_counts e ON e.dow = t.dow
         '''
         sql_weekday_reason = f'''
             SELECT ph.reason, COUNT(*) AS n
@@ -1360,11 +1408,11 @@ def dashboard_page(conn, building: str) -> None:
 
     current_rows = [
         dict(r)
-        for r in fetchall(conn, sql_weekday_window, (*emp_ids, window_start.isoformat(), window_end.isoformat()))
+        for r in fetchall(conn, sql_weekday_window, (*emp_ids, window_start.isoformat(), window_end.isoformat(), *emp_ids, window_start.isoformat(), window_end.isoformat()))
     ]
     prior_rows = [
         dict(r)
-        for r in fetchall(conn, sql_weekday_window, (*emp_ids, prior_start.isoformat(), prior_end.isoformat()))
+        for r in fetchall(conn, sql_weekday_window, (*emp_ids, prior_start.isoformat(), prior_end.isoformat(), *emp_ids, prior_start.isoformat(), prior_end.isoformat()))
     ]
 
     current_by_dow = {
