@@ -6,7 +6,6 @@ from __future__ import annotations
 from io import BytesIO
 from datetime import date, datetime, timedelta
 import math
-import os
 from pathlib import Path
 import sys
 
@@ -1864,8 +1863,5 @@ def main() -> None:
     with spotlight_placeholder.container():
         selected_employee_sidebar(conn, st.session_state.get("selected_employee_id"))
 
-ensure_session_defaults()
-if not st.session_state["authenticated"]:
-    login_page()
-else:
+if __name__ == "__main__":
     main()
