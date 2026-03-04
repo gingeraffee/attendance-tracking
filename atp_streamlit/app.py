@@ -1370,8 +1370,8 @@ def dashboard_page(conn, building: str) -> None:
         for r in prior_rows
     }
 
-    dow_order = [1, 2, 3, 4, 5, 6, 0]
-    dow_labels = {1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri", 6: "Sat", 0: "Sun"}
+    dow_order = [1, 2, 3, 4, 5]
+    dow_labels = {1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri"}
 
     denominator_count = max(len(emp_ids), 1)
     if metric_choice == "Rate":
@@ -1392,16 +1392,25 @@ def dashboard_page(conn, building: str) -> None:
         stats = current_by_dow.get(dow, {"incidents": 0, "points": 0.0})
         incidents = int(stats.get("incidents") or 0)
         points = float(stats.get("points") or 0.0)
-        rate = (incidents / denominator_count) * 100.0
         selected_val = metric_value(stats, metric_choice)
         metric_values[dow] = selected_val
+
+        weekday_reason_rows = [
+            dict(r)
+            for r in fetchall(
+                conn,
+                sql_weekday_reason,
+                (*emp_ids, window_start.isoformat(), window_end.isoformat(), dow),
+            )
+        ]
+        top_reason_day = (weekday_reason_rows[0].get("reason") if weekday_reason_rows else None) or "—"
+
         table_rows.append(
             {
                 "Weekday": dow_labels[dow],
                 "Incidents": incidents,
                 "Total Points": round(points, 1),
-                "Rate (per 100 active)": round(rate, 2),
-                f"Selected ({metric_choice})": round(selected_val, 2) if metric_choice == "Rate" else round(selected_val, 1),
+                "Top Reason": top_reason_day,
             }
         )
 
