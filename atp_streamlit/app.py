@@ -1393,9 +1393,10 @@ def dashboard_page(conn, building: str) -> None:
 
     def metric_value(stats: dict, metric: str) -> float:
         incidents = float(stats.get("incidents") or 0)
+        employees_pointed = float(stats.get("employees_pointed") or 0)
         points = float(stats.get("points") or 0)
         if metric == "Count":
-            return incidents
+            return employees_pointed
         if metric == "Points":
             return points
         return (incidents / denominator_count) * 100.0
@@ -1435,7 +1436,7 @@ def dashboard_page(conn, building: str) -> None:
     worst_label = dow_labels[worst_dow]
     worst_value = metric_values.get(worst_dow, 0.0)
     if metric_choice == "Count":
-        worst_value_txt = f"{int(round(worst_value))} incidents"
+        worst_value_txt = f"{int(round(worst_value))} employees pointed"
     elif metric_choice == "Points":
         worst_value_txt = f"{worst_value:.1f} points"
     else:
