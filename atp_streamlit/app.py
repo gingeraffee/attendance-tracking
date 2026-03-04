@@ -372,6 +372,11 @@ def to_csv(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False).encode("utf-8")
 
 
+def round_to_half_point(value: float) -> float:
+    """Round a positive value to the nearest 0.5 increment."""
+    return math.floor((float(value) * 2.0) + 0.5) / 2.0
+
+
 def ensure_session_defaults() -> None:
     defaults = {
         "selected_employee_id": None,
@@ -459,9 +464,12 @@ def selected_employee_sidebar(conn, employee_id: int | None) -> None:
                    e.first_name,
                    e.last_name,
                    COALESCE(e."Location", '') AS building,
-                   GREATEST(0.0, ROUND(COALESCE((
-                       SELECT SUM(ph.points) FROM points_history ph WHERE ph.employee_id = e.employee_id
-                   ), 0.0), 1)) AS point_total,
+                   GREATEST(
+                       0.0::float8,
+                       ROUND(COALESCE((
+                           SELECT SUM(ph.points) FROM points_history ph WHERE ph.employee_id = e.employee_id
+                       ), 0.0)::numeric, 1)::float8
+                   ) AS point_total,
                    (
                        SELECT MAX(ph2.point_date::date)
                          FROM points_history ph2
@@ -660,17 +668,18 @@ def dashboard_page(conn, building: str) -> None:
              GROUP BY (ph.point_date::date)
              ORDER BY (ph.point_date::date)
         '''
-        sql_hotspots_365 = f'''
+        sql_hotspots_6m = f'''
             SELECT EXTRACT(DOW FROM ph.point_date::date)::int AS dow,
-                   ROUND(COALESCE(SUM(ph.points), 0.0)::numeric, 1)::float8 AS total_points,
+                   COALESCE(e."Location", '') AS building,
                    COUNT(*) AS incidents
               FROM points_history ph
+              JOIN employees e ON e.employee_id = ph.employee_id
              WHERE ph.employee_id IN ({ph})
                AND (ph.point_date::date) >= (%s::date)
                AND EXTRACT(DOW FROM ph.point_date::date) NOT IN (0, 6)
                AND COALESCE(ph.points, 0.0) > 0.0
-             GROUP BY EXTRACT(DOW FROM ph.point_date::date)
-             ORDER BY total_points DESC
+             GROUP BY EXTRACT(DOW FROM ph.point_date::date), COALESCE(e."Location", '')
+             ORDER BY EXTRACT(DOW FROM ph.point_date::date), COALESCE(e."Location", '')
         '''
     else:
         sql_emp_detail = f'''
@@ -787,17 +796,18 @@ def dashboard_page(conn, building: str) -> None:
              GROUP BY date(ph.point_date)
              ORDER BY date(ph.point_date)
         '''
-        sql_hotspots_365 = f'''
+        sql_hotspots_6m = f'''
             SELECT CAST(strftime('%w', ph.point_date) AS INTEGER) AS dow,
-                   ROUND(COALESCE(SUM(ph.points), 0.0), 1) AS total_points,
+                   COALESCE(e."Location", '') AS building,
                    COUNT(*) AS incidents
               FROM points_history ph
+              JOIN employees e ON e.employee_id = ph.employee_id
              WHERE ph.employee_id IN ({ph})
                AND date(ph.point_date) >= date(?)
                AND strftime('%w', ph.point_date) NOT IN ('0', '6')
                AND COALESCE(ph.points, 0.0) > 0.0
-             GROUP BY CAST(strftime('%w', ph.point_date) AS INTEGER)
-             ORDER BY total_points DESC
+             GROUP BY CAST(strftime('%w', ph.point_date) AS INTEGER), COALESCE(e."Location", '')
+             ORDER BY CAST(strftime('%w', ph.point_date) AS INTEGER), COALESCE(e."Location", '')
         '''
 
     emp_detail_rows = [dict(r) for r in fetchall(conn, sql_emp_detail, tuple(emp_ids))]
@@ -972,15 +982,25 @@ def dashboard_page(conn, building: str) -> None:
     current_points = {r.get("building") or "": float(r.get("pts") or 0.0) for r in current_rows}
     prior_points = {r.get("building") or "": float(r.get("pts") or 0.0) for r in prior_rows}
 
+    active_emp_point_rows = [dict(r) for r in fetchall(conn, sql_active_emp_points)]
+    point_totals_by_building = {b: [] for b in BUILDINGS}
+    for r in active_emp_point_rows:
+        b = (r.get("building") or "").strip()
+        if b in point_totals_by_building:
+            point_totals_by_building[b].append(float(r.get("point_total") or 0.0))
+
     snap_rows = []
     for b in BUILDINGS:
         headcount = int(active_by_build.get(b) or 0)
         cur_total = float(current_points.get(b) or 0.0)
         prev_total = float(prior_points.get(b) or 0.0)
-        cur_rate = (cur_total / headcount * 100.0) if headcount else 0.0
-        prev_rate = (prev_total / headcount * 100.0) if headcount else 0.0
-        if prev_rate > 0:
-            pct_change = ((cur_rate - prev_rate) / prev_rate) * 100.0
+        employee_point_totals = point_totals_by_building.get(b) or []
+        avg_point_total = (sum(employee_point_totals) / headcount) if headcount else 0.0
+        rounded_avg_point_total = round_to_half_point(avg_point_total)
+        cur_avg = (cur_total / headcount) if headcount else 0.0
+        prev_avg = (prev_total / headcount) if headcount else 0.0
+        if prev_avg > 0:
+            pct_change = ((cur_avg - prev_avg) / prev_avg) * 100.0
             pct_txt = f"{pct_change:+.1f}%"
         else:
             pct_txt = "—"
@@ -990,7 +1010,7 @@ def dashboard_page(conn, building: str) -> None:
             {
                 "Building": b,
                 "Active Employees": headcount,
-                "Points / 100 Active (30d)": f"{cur_rate:.1f}",
+                "Avg Point Total / Employee": f"{rounded_avg_point_total:.1f}",
                 "% Change vs Prior 30 Days": pct_txt,
                 "Most Common Reason (30d)": most_common_reason,
             }
@@ -1073,24 +1093,31 @@ def dashboard_page(conn, building: str) -> None:
     trend_df = trend_df.rename(columns={"point_day": "Date"}).set_index("Date")
     st.line_chart(trend_df)
 
-    st.markdown("#### Day-of-Week Hotspots (Last 365 Days, Weekdays Only)")
-    dow_rows = [dict(r) for r in fetchall(conn, sql_hotspots_365, (*emp_ids, (today - timedelta(days=365)).isoformat()))]
+    st.markdown("#### Day-of-Week Hotspots (Last 6 Months, Weekdays Only)")
+    since_6m = (today - timedelta(days=182)).isoformat()
+    dow_rows = [dict(r) for r in fetchall(conn, sql_hotspots_6m, (*emp_ids, since_6m))]
     dow_map = {1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri"}
     if dow_rows:
+        count_map = {}
+        for r in dow_rows:
+            dow = int(r.get("dow") or 0)
+            building = (r.get("building") or "").strip()
+            count_map[(dow, building)] = int(r.get("incidents") or 0)
+
         df_dow = pd.DataFrame(
             [
                 {
-                    "Day of Week": dow_map.get(int(r.get("dow") or 0), str(r.get("dow") or "—")),
-                    "Total Points": f"{float(r.get('total_points') or 0.0):.1f}",
-                    "Incidents": int(r.get("incidents") or 0),
-                    "Avg Points/Incident": f"{(float(r.get('total_points') or 0.0) / max(int(r.get('incidents') or 0), 1)):.2f}",
+                    "Day of Week": dow_map[d],
+                    "APIM": count_map.get((d, "APIM"), 0),
+                    "APIS": count_map.get((d, "APIS"), 0),
+                    "AAP": count_map.get((d, "AAP"), 0),
                 }
-                for r in dow_rows
+                for d in [1, 2, 3, 4, 5]
             ]
         )
         st.dataframe(df_dow, use_container_width=True, hide_index=True)
     else:
-        info_box("No point incidents in the last 365 days for this filter.")
+        info_box("No weekday point incidents in the last 6 months for this filter.")
 
 
 # ── Employees ─────────────────────────────────────────────────────────────────
