@@ -498,9 +498,7 @@ def login_page() -> None:
             font-weight: 600;
             margin-top: .6rem;
         }}
-        </style>
-
-        <div style="display:none">{logo_tag}</div>""",
+        </style>""",
         unsafe_allow_html=True,
     )
 
