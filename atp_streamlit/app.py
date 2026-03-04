@@ -1008,8 +1008,8 @@ def dashboard_page(conn, building: str) -> None:
 
     bucket_defs = {
         "0": lambda pts: pts == 0,
-        "1-4": lambda pts: 1 <= pts <= 4,
-        "5-6": lambda pts: 5 <= pts <= 6,
+        "1-4": lambda pts: 1 <= pts <= 4.5,
+        "5-6": lambda pts: 5 <= pts <= 6.5,
         "7": lambda pts: pts >= 7,
     }
     bucket_counts = {
@@ -1057,8 +1057,8 @@ def dashboard_page(conn, building: str) -> None:
     tile_specs = [
         ("all", "All Employees"),
         ("0", "0 Points"),
-        ("1-4", "1–4 Pts"),
-        ("5-6", "5–6 Pts"),
+        ("1-4", "1–4.5 Pts"),
+        ("5-6", "5–6.5 Pts"),
         ("7", "7+ Pts"),
     ]
     active_bucket = st.session_state.get("dashboard_bucket")
@@ -1104,7 +1104,8 @@ def dashboard_page(conn, building: str) -> None:
         source_rows = list(emp_detail_rows)
         if bucket_key in bucket_defs:
             source_rows = [r for r in emp_detail_rows if bucket_defs[bucket_key](float(r.get("point_total") or 0))]
-            st.caption(f"Filtered by threshold tile: {bucket_key}")
+            bucket_label_map = dict(tile_specs)
+            st.caption(f"Filtered by threshold tile: {bucket_label_map.get(bucket_key, bucket_key)}")
 
         source_rows = sorted(
             source_rows,
