@@ -73,6 +73,16 @@ section[data-testid="stSidebar"] {
     width: 276px !important;
 }
 section[data-testid="stSidebar"] * { color: #bfcde6 !important; }
+section[data-testid="stSidebar"] div[data-baseweb="select"] > div {
+    background: #ffffff !important;
+    color: #111827 !important;
+}
+section[data-testid="stSidebar"] div[data-baseweb="select"] input,
+section[data-testid="stSidebar"] div[data-baseweb="select"] span,
+section[data-testid="stSidebar"] div[data-baseweb="select"] div {
+    color: #111827 !important;
+    -webkit-text-fill-color: #111827 !important;
+}
 
 /* ── Metric tiles ── */
 div[data-testid="stMetric"] {
@@ -178,9 +188,9 @@ p, label { color: var(--muted) !important; }
     margin-top: 1.1rem;
     padding: 1rem .9rem .85rem;
     border-radius: 16px;
-    border: 1px solid rgba(100,149,255,.22);
-    background: linear-gradient(145deg, rgba(15,28,62,.92) 0%, rgba(9,19,44,.97) 100%);
-    box-shadow: 0 8px 32px rgba(4,10,26,.45), inset 0 1px 0 rgba(120,160,255,.12);
+    border: 1px solid rgba(26,39,68,.14);
+    background: #ffffff;
+    box-shadow: 0 8px 24px rgba(15,32,68,.12);
     position: relative;
     overflow: hidden;
 }
@@ -189,7 +199,7 @@ p, label { color: var(--muted) !important; }
     position: absolute;
     top: 0; left: 0; right: 0;
     height: 2px;
-    background: linear-gradient(90deg, #4f8ef7, #00b8e6, #4f8ef7);
+    background: linear-gradient(90deg, #e0394a, #cc2229, #e0394a);
     opacity: .85;
 }
 .sidebar-employee-title {
@@ -197,18 +207,18 @@ p, label { color: var(--muted) !important; }
     letter-spacing: .16em;
     text-transform: uppercase;
     font-weight: 700;
-    color: #4f8ef7 !important;
+    color: #e0394a !important;
     margin-bottom: .45rem;
 }
 .sidebar-employee-name {
     font-size: 1.05rem;
     font-weight: 800;
-    color: #f0f6ff !important;
+    color: #111827 !important;
     letter-spacing: -.015em;
     line-height: 1.2;
     margin-bottom: .7rem;
     padding-bottom: .6rem;
-    border-bottom: 1px solid rgba(255,255,255,.07);
+    border-bottom: 1px solid rgba(17,24,39,.10);
 }
 .sidebar-employee-grid {
     display: grid;
@@ -216,8 +226,8 @@ p, label { color: var(--muted) !important; }
     gap: .35rem;
 }
 .sidebar-employee-item {
-    background: rgba(255,255,255,.04);
-    border: 1px solid rgba(255,255,255,.06);
+    background: #f8fafc;
+    border: 1px solid #e5e7eb;
     border-radius: 8px;
     padding: .38rem .45rem;
 }
@@ -229,7 +239,7 @@ p, label { color: var(--muted) !important; }
     font-size: .56rem;
     letter-spacing: .10em;
     text-transform: uppercase;
-    color: #4a6490 !important;
+    color: #6b7280 !important;
     font-weight: 700;
     margin-bottom: .12rem;
 }
@@ -237,11 +247,11 @@ p, label { color: var(--muted) !important; }
     display: block;
     font-size: .78rem;
     font-weight: 600;
-    color: #c8d8f4 !important;
+    color: #1f2937 !important;
     letter-spacing: -.01em;
 }
 .sidebar-employee-item .value.highlight {
-    color: #4f8ef7 !important;
+    color: #e0394a !important;
     font-size: .9rem;
     font-weight: 800;
 }
@@ -382,6 +392,7 @@ def ensure_session_defaults() -> None:
         "authenticated": False,
         "login_error": False,
         "_auth_token": None,
+        "_auth_redirect_pending": False,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -389,19 +400,25 @@ def ensure_session_defaults() -> None:
 
 
 def is_authenticated() -> bool:
-    """Auth requires both session-state flag AND a matching URL token.
+    """Auth requires the in-session auth flag plus token validation.
 
-    On a true page reload, Streamlit creates a fresh session (empty
-    session_state), so _auth_token is None and the check fails even though
-    the URL still carries the old token — forcing the user to log in again.
+    During login submit, query params can lag one rerun behind session_state.
+    To avoid a flash of the login screen, allow a one-rerun grace period while
+    the URL token is being written.
     """
     session_token = st.session_state.get("_auth_token")
     url_token = st.query_params.get("_s")
-    return (
-        st.session_state.get("authenticated", False)
-        and session_token is not None
-        and session_token == url_token
-    )
+    if not st.session_state.get("authenticated", False) or session_token is None:
+        return False
+
+    if session_token == url_token:
+        st.session_state["_auth_redirect_pending"] = False
+        return True
+
+    if st.session_state.get("_auth_redirect_pending") and not url_token:
+        return True
+
+    return False
 
 
 # ── Login ──────────────────────────────────────────────────────────────────────
@@ -529,6 +546,7 @@ def login_page() -> None:
                 token = secrets.token_urlsafe(16)
                 st.session_state["authenticated"] = True
                 st.session_state["_auth_token"] = token
+                st.session_state["_auth_redirect_pending"] = True
                 st.session_state["login_error"] = False
                 st.query_params["_s"] = token
                 st.rerun()
@@ -609,9 +627,9 @@ def build_point_history_pdf(employee: dict, history: list[dict]) -> bytes:
     return buffer.getvalue()
 
 
-def selected_employee_sidebar(conn, employee_id: int | None) -> None:
+def get_employee_spotlight(conn, employee_id: int | None) -> dict | None:
     if not employee_id:
-        return
+        return None
 
     if is_pg(conn):
         sql = '''
@@ -621,7 +639,7 @@ def selected_employee_sidebar(conn, employee_id: int | None) -> None:
                    COALESCE(e."Location", '') AS building,
                    GREATEST(0.0, ROUND(COALESCE((
                        SELECT SUM(ph.points) FROM points_history ph WHERE ph.employee_id = e.employee_id
-                   ), 0.0), 1)) AS point_total,
+                   ), 0.0)::numeric, 1)::float8) AS point_total,
                    (
                        SELECT MAX(ph2.point_date::date)
                          FROM points_history ph2
@@ -659,9 +677,14 @@ def selected_employee_sidebar(conn, employee_id: int | None) -> None:
         rows = fetchall(conn, sql, (employee_id,))
 
     if not rows:
-        return
+        return None
+    return dict(rows[0])
 
-    emp = dict(rows[0])
+
+def selected_employee_sidebar(conn, employee_id: int | None) -> None:
+    emp = get_employee_spotlight(conn, employee_id)
+    if not emp:
+        return
     full_name = f"{emp.get('first_name') or ''} {emp.get('last_name') or ''}".strip() or "Unknown Employee"
     st.markdown(
         "<div class='sidebar-employee-card'>"
@@ -820,17 +843,29 @@ def dashboard_page(conn, building: str) -> None:
              GROUP BY (ph.point_date::date)
              ORDER BY (ph.point_date::date)
         '''
-        sql_hotspots_365 = f'''
+        sql_weekday_window = f'''
             SELECT EXTRACT(DOW FROM ph.point_date::date)::int AS dow,
                    ROUND(COALESCE(SUM(ph.points), 0.0)::numeric, 1)::float8 AS total_points,
                    COUNT(*) AS incidents
               FROM points_history ph
              WHERE ph.employee_id IN ({ph})
                AND (ph.point_date::date) >= (%s::date)
-               AND EXTRACT(DOW FROM ph.point_date::date) NOT IN (0, 6)
+               AND (ph.point_date::date) < (%s::date)
                AND COALESCE(ph.points, 0.0) > 0.0
              GROUP BY EXTRACT(DOW FROM ph.point_date::date)
-             ORDER BY total_points DESC
+        '''
+        sql_weekday_reason = f'''
+            SELECT ph.reason, COUNT(*) AS n
+              FROM points_history ph
+             WHERE ph.employee_id IN ({ph})
+               AND (ph.point_date::date) >= (%s::date)
+               AND (ph.point_date::date) < (%s::date)
+               AND EXTRACT(DOW FROM ph.point_date::date)::int = (%s)
+               AND COALESCE(ph.points, 0.0) > 0.0
+               AND COALESCE(ph.reason, '') <> ''
+             GROUP BY ph.reason
+             ORDER BY n DESC, ph.reason
+             LIMIT 1
         '''
     else:
         sql_emp_detail = f'''
@@ -947,17 +982,29 @@ def dashboard_page(conn, building: str) -> None:
              GROUP BY date(ph.point_date)
              ORDER BY date(ph.point_date)
         '''
-        sql_hotspots_365 = f'''
+        sql_weekday_window = f'''
             SELECT CAST(strftime('%w', ph.point_date) AS INTEGER) AS dow,
                    ROUND(COALESCE(SUM(ph.points), 0.0), 1) AS total_points,
                    COUNT(*) AS incidents
               FROM points_history ph
              WHERE ph.employee_id IN ({ph})
                AND date(ph.point_date) >= date(?)
-               AND strftime('%w', ph.point_date) NOT IN ('0', '6')
+               AND date(ph.point_date) < date(?)
                AND COALESCE(ph.points, 0.0) > 0.0
              GROUP BY CAST(strftime('%w', ph.point_date) AS INTEGER)
-             ORDER BY total_points DESC
+        '''
+        sql_weekday_reason = f'''
+            SELECT ph.reason, COUNT(*) AS n
+              FROM points_history ph
+             WHERE ph.employee_id IN ({ph})
+               AND date(ph.point_date) >= date(?)
+               AND date(ph.point_date) < date(?)
+               AND CAST(strftime('%w', ph.point_date) AS INTEGER) = ?
+               AND COALESCE(ph.points, 0.0) > 0.0
+               AND COALESCE(ph.reason, '') <> ''
+             GROUP BY ph.reason
+             ORDER BY n DESC, ph.reason
+             LIMIT 1
         '''
 
     emp_detail_rows = [dict(r) for r in fetchall(conn, sql_emp_detail, tuple(emp_ids))]
@@ -966,8 +1013,8 @@ def dashboard_page(conn, building: str) -> None:
 
     bucket_defs = {
         "0": lambda pts: pts == 0,
-        "1-4": lambda pts: 1 <= pts <= 4,
-        "5-6": lambda pts: 5 <= pts <= 6,
+        "1-4": lambda pts: 1 <= pts <= 4.5,
+        "5-6": lambda pts: 5 <= pts <= 6.5,
         "7": lambda pts: pts >= 7,
     }
     bucket_counts = {
@@ -975,50 +1022,84 @@ def dashboard_page(conn, building: str) -> None:
         for key, fn in bucket_defs.items()
     }
 
-    selected_bucket = st.query_params.get("dashboard_bucket")
-    if selected_bucket in bucket_defs:
-        st.session_state["dashboard_bucket"] = selected_bucket
-    elif selected_bucket == "all":
-        st.session_state.pop("dashboard_bucket", None)
+
+    st.markdown(
+        """<style>
+        .st-key-dashboard_bucket_all div[data-testid="stButton"],
+        .st-key-dashboard_bucket_0 div[data-testid="stButton"],
+        .st-key-dashboard_bucket_1-4 div[data-testid="stButton"],
+        .st-key-dashboard_bucket_5-6 div[data-testid="stButton"],
+        .st-key-dashboard_bucket_7 div[data-testid="stButton"] {
+            margin-top: -92px !important;
+            position: relative;
+            z-index: 30;
+        }
+        .st-key-dashboard_bucket_all div[data-testid="stButton"] > button,
+        .st-key-dashboard_bucket_0 div[data-testid="stButton"] > button,
+        .st-key-dashboard_bucket_1-4 div[data-testid="stButton"] > button,
+        .st-key-dashboard_bucket_5-6 div[data-testid="stButton"] > button,
+        .st-key-dashboard_bucket_7 div[data-testid="stButton"] > button {
+            background: transparent !important;
+            border: 0 !important;
+            box-shadow: none !important;
+            min-height: 92px !important;
+            width: 100% !important;
+            padding: 0 !important;
+        }
+        .st-key-dashboard_bucket_all div[data-testid="stButton"] > button p,
+        .st-key-dashboard_bucket_0 div[data-testid="stButton"] > button p,
+        .st-key-dashboard_bucket_1-4 div[data-testid="stButton"] > button p,
+        .st-key-dashboard_bucket_5-6 div[data-testid="stButton"] > button p,
+        .st-key-dashboard_bucket_7 div[data-testid="stButton"] > button p {
+            opacity: 0 !important;
+            margin: 0 !important;
+        }
+        </style>""",
+        unsafe_allow_html=True,
+    )
 
     tile_cols = st.columns(5)
     tile_specs = [
         ("all", "All Employees"),
         ("0", "0 Points"),
-        ("1-4", "1–4 Pts"),
-        ("5-6", "5–6 Pts"),
+        ("1-4", "1–4.5 Pts"),
+        ("5-6", "5–6.5 Pts"),
         ("7", "7+ Pts"),
     ]
     active_bucket = st.session_state.get("dashboard_bucket")
-    tile_palette = {
-        "all": {"accent": "#5c6f8c", "glow": "rgba(92,111,140,.22)"},
-        "0": {"accent": "#00a87a", "glow": "rgba(0,168,122,.25)"},
-        "1-4": {"accent": "#4f8ef7", "glow": "rgba(79,142,247,.25)"},
-        "5-6": {"accent": "#e6960a", "glow": "rgba(230,150,10,.28)"},
-        "7": {"accent": "#e0394a", "glow": "rgba(224,57,74,.32)"},
-    }
 
     for col, (key, label) in zip(tile_cols, tile_specs):
         selected = (active_bucket == key) if key != "all" else (active_bucket not in bucket_defs)
-        accent = tile_palette[key]["accent"]
-        glow = tile_palette[key]["glow"]
-        border = "rgba(26,39,68,.16)" if not selected else accent
-        shadow = f"0 0 0 2px {glow}, 0 8px 18px rgba(15,32,68,.12)" if selected else "0 4px 14px rgba(15,32,68,.08)"
+        accent, glow = {
+            "all": ("#5c6f8c", "rgba(92,111,140,.22)"),
+            "0": ("#00a87a", "rgba(0,168,122,.25)"),
+            "1-4": ("#4f8ef7", "rgba(79,142,247,.25)"),
+            "5-6": ("#e6960a", "rgba(230,150,10,.28)"),
+            "7": ("#e0394a", "rgba(224,57,74,.32)"),
+        }.get(key, ("#5c6f8c", "rgba(92,111,140,.22)"))
+        # Keep style vars local and explicit to avoid NameError in f-string interpolation.
+        card_border = "rgba(26,39,68,.16)" if not selected else accent
+        card_shadow = f"0 0 0 2px {glow}, 0 8px 18px rgba(15,32,68,.12)" if selected else "0 4px 14px rgba(15,32,68,.08)"
         employees_count = len(emp_detail_rows) if key == "all" else bucket_counts[key]
+
         col.markdown(
-            f"<a href='?dashboard_bucket={key}' target='_self' style='text-decoration:none;display:block'>"
             f"<div class='card-sm' style='margin-bottom:.45rem;padding:.72rem .9rem;"
-            f"background:#ffffff;border:1px solid {border};box-shadow:{shadow};cursor:pointer;'>"
+            f"background:#ffffff;border:1px solid {card_border};box-shadow:{card_shadow};cursor:pointer;pointer-events:none;'>"
             f"<div style='height:4px;border-radius:999px;background:{accent};margin:-.2rem 0 .6rem 0'></div>"
-            f"<div style='font-size:.68rem;letter-spacing:.09em;text-transform:uppercase;color:#5c6f8c;font-weight:700'>{label}</div>"
+            f"<div style='font-size:.68rem;letter-spacing:.09em;text-transform:uppercase;color:{accent};font-weight:700'>{label}</div>"
             f"<div style='display:flex;align-items:baseline;justify-content:space-between;margin-top:.18rem'>"
             f"<span style='font-size:1.95rem;font-weight:800;color:#1a2744;line-height:1'>{employees_count}</span>"
             f"<span style='font-size:.72rem;font-weight:700;color:{accent};text-transform:uppercase;letter-spacing:.05em'>&nbsp;employees</span>"
-            f"</div>"
-            f"</div>"
-            f"</a>",
+            f"</div></div>",
             unsafe_allow_html=True,
         )
+
+        if col.button("filter", key=f"dashboard_bucket_{key}", use_container_width=True):
+            if key == "all":
+                st.session_state.pop("dashboard_bucket", None)
+            else:
+                st.session_state["dashboard_bucket"] = key
+            st.rerun()
 
     col_left, col_right = st.columns([1.6, 1], gap="large")
 
@@ -1028,7 +1109,8 @@ def dashboard_page(conn, building: str) -> None:
         source_rows = list(emp_detail_rows)
         if bucket_key in bucket_defs:
             source_rows = [r for r in emp_detail_rows if bucket_defs[bucket_key](float(r.get("point_total") or 0))]
-            st.caption(f"Filtered by threshold tile: {bucket_key}")
+            bucket_label_map = dict(tile_specs)
+            st.caption(f"Filtered by threshold tile: {bucket_label_map.get(bucket_key, bucket_key)}")
 
         source_rows = sorted(
             source_rows,
@@ -1066,6 +1148,7 @@ def dashboard_page(conn, building: str) -> None:
                 idx = int(selected_rows[0])
                 if 0 <= idx < len(df_emps):
                     st.session_state["selected_employee_id"] = int(df_emps.iloc[idx]["employee_id"])
+
         else:
             info_box("None 🎉")
 
@@ -1115,13 +1198,31 @@ def dashboard_page(conn, building: str) -> None:
         dict(r)
         for r in fetchall(
             conn,
-            """SELECT COALESCE("Location", '') AS building, COUNT(*) AS n FROM employees WHERE COALESCE(is_active,1)=1 GROUP BY COALESCE("Location", '')""",
+            """SELECT COALESCE("Location", '') AS building, COUNT(*) AS n
+               FROM employees
+              WHERE COALESCE(is_active,1)=1
+              GROUP BY COALESCE("Location", '')""",
+        )
+    ]
+    avg_total_rows = [
+        dict(r)
+        for r in fetchall(
+            conn,
+            """SELECT COALESCE("Location", '') AS building,
+                      AVG(COALESCE(point_total, 0.0)) AS avg_point_total
+               FROM employees
+              WHERE COALESCE(is_active,1)=1
+              GROUP BY COALESCE("Location", '')""",
         )
     ]
     active_by_build = {b: 0 for b in BUILDINGS}
+    avg_total_by_build = {b: 0.0 for b in BUILDINGS}
     for r in active_rows:
         if r["building"] in active_by_build:
             active_by_build[r["building"]] = int(r["n"] or 0)
+    for r in avg_total_rows:
+        if r["building"] in avg_total_by_build:
+            avg_total_by_build[r["building"]] = float(r.get("avg_point_total") or 0.0)
 
     since_30 = (today - timedelta(days=30)).isoformat()
     since_60 = (today - timedelta(days=60)).isoformat()
@@ -1135,12 +1236,13 @@ def dashboard_page(conn, building: str) -> None:
     snap_rows = []
     for b in BUILDINGS:
         headcount = int(active_by_build.get(b) or 0)
+        avg_point_total = float(avg_total_by_build.get(b) or 0.0)
         cur_total = float(current_points.get(b) or 0.0)
         prev_total = float(prior_points.get(b) or 0.0)
-        cur_rate = (cur_total / headcount * 100.0) if headcount else 0.0
-        prev_rate = (prev_total / headcount * 100.0) if headcount else 0.0
-        if prev_rate > 0:
-            pct_change = ((cur_rate - prev_rate) / prev_rate) * 100.0
+        cur_avg_30d = (cur_total / headcount) if headcount else 0.0
+        prev_avg_30d = (prev_total / headcount) if headcount else 0.0
+        if prev_avg_30d > 0:
+            pct_change = ((cur_avg_30d - prev_avg_30d) / prev_avg_30d) * 100.0
             pct_txt = f"{pct_change:+.1f}%"
         else:
             pct_txt = "—"
@@ -1150,8 +1252,8 @@ def dashboard_page(conn, building: str) -> None:
             {
                 "Building": b,
                 "Active Employees": headcount,
-                "Points / 100 Active (30d)": f"{cur_rate:.1f}",
-                "% Change vs Prior 30 Days": pct_txt,
+                "Avg Point Total / Employee": f"{avg_point_total:.2f}",
+                "% Change in Avg Points (30d)": pct_txt,
                 "Most Common Reason (30d)": most_common_reason,
             }
         )
@@ -1233,24 +1335,134 @@ def dashboard_page(conn, building: str) -> None:
     trend_df = trend_df.rename(columns={"point_day": "Date"}).set_index("Date")
     st.line_chart(trend_df)
 
-    st.markdown("#### Day-of-Week Hotspots (Last 365 Days, Weekdays Only)")
-    dow_rows = [dict(r) for r in fetchall(conn, sql_hotspots_365, (*emp_ids, (today - timedelta(days=365)).isoformat()))]
-    dow_map = {1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri"}
-    if dow_rows:
-        df_dow = pd.DataFrame(
-            [
-                {
-                    "Day of Week": dow_map.get(int(r.get("dow") or 0), str(r.get("dow") or "—")),
-                    "Total Points": f"{float(r.get('total_points') or 0.0):.1f}",
-                    "Incidents": int(r.get("incidents") or 0),
-                    "Avg Points/Incident": f"{(float(r.get('total_points') or 0.0) / max(int(r.get('incidents') or 0), 1)):.2f}",
-                }
-                for r in dow_rows
-            ]
+    st.markdown("#### Day-of-Week Trend")
+    ctrl_col1, ctrl_col2 = st.columns([1.2, 1])
+    with ctrl_col1:
+        window_label = st.selectbox(
+            "Window",
+            ["Last 30 days", "Last 90 days", "Last 12 months"],
+            index=1,
+            key="dow_window",
         )
-        st.dataframe(df_dow, use_container_width=True, hide_index=True)
+    with ctrl_col2:
+        metric_choice = st.radio("Metric", ["Count", "Points", "Rate"], index=0, horizontal=True, key="dow_metric")
+
+    window_days = {"Last 30 days": 30, "Last 90 days": 90, "Last 12 months": 365}[window_label]
+    window_start = today - timedelta(days=window_days - 1)
+    window_end = today + timedelta(days=1)
+    prior_start = window_start - timedelta(days=window_days)
+    prior_end = window_start
+
+    current_rows = [
+        dict(r)
+        for r in fetchall(conn, sql_weekday_window, (*emp_ids, window_start.isoformat(), window_end.isoformat()))
+    ]
+    prior_rows = [
+        dict(r)
+        for r in fetchall(conn, sql_weekday_window, (*emp_ids, prior_start.isoformat(), prior_end.isoformat()))
+    ]
+
+    current_by_dow = {
+        int(r.get("dow") or 0): {
+            "incidents": int(r.get("incidents") or 0),
+            "points": float(r.get("total_points") or 0.0),
+        }
+        for r in current_rows
+    }
+    prior_by_dow = {
+        int(r.get("dow") or 0): {
+            "incidents": int(r.get("incidents") or 0),
+            "points": float(r.get("total_points") or 0.0),
+        }
+        for r in prior_rows
+    }
+
+    dow_order = [1, 2, 3, 4, 5]
+    dow_labels = {1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri"}
+
+    denominator_count = max(len(emp_ids), 1)
+    if metric_choice == "Rate":
+        st.caption("Rate uses approximate active-headcount denominator: incidents ÷ active employees × 100.")
+
+    def metric_value(stats: dict, metric: str) -> float:
+        incidents = float(stats.get("incidents") or 0)
+        points = float(stats.get("points") or 0)
+        if metric == "Count":
+            return incidents
+        if metric == "Points":
+            return points
+        return (incidents / denominator_count) * 100.0
+
+    table_rows = []
+    metric_values = {}
+    for dow in dow_order:
+        stats = current_by_dow.get(dow, {"incidents": 0, "points": 0.0})
+        incidents = int(stats.get("incidents") or 0)
+        points = float(stats.get("points") or 0.0)
+        selected_val = metric_value(stats, metric_choice)
+        metric_values[dow] = selected_val
+
+        weekday_reason_rows = [
+            dict(r)
+            for r in fetchall(
+                conn,
+                sql_weekday_reason,
+                (*emp_ids, window_start.isoformat(), window_end.isoformat(), dow),
+            )
+        ]
+        top_reason_day = (weekday_reason_rows[0].get("reason") if weekday_reason_rows else None) or "—"
+
+        table_rows.append(
+            {
+                "Weekday": dow_labels[dow],
+                "Incidents": incidents,
+                "Total Points": round(points, 1),
+                "Top Reason": top_reason_day,
+            }
+        )
+
+    st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True)
+
+    worst_dow = max(dow_order, key=lambda d: metric_values.get(d, 0.0))
+    worst_label = dow_labels[worst_dow]
+    worst_value = metric_values.get(worst_dow, 0.0)
+    if metric_choice == "Count":
+        worst_value_txt = f"{int(round(worst_value))} incidents"
+    elif metric_choice == "Points":
+        worst_value_txt = f"{worst_value:.1f} points"
     else:
-        info_box("No point incidents in the last 365 days for this filter.")
+        worst_value_txt = f"{worst_value:.2f} incidents per 100 active"
+    st.markdown(f"• Worst weekday ({metric_choice.lower()}): **{worst_label}** — **{worst_value_txt}**")
+
+    delta_rows = []
+    for dow in dow_order:
+        cur_val = metric_value(current_by_dow.get(dow, {"incidents": 0, "points": 0.0}), metric_choice)
+        prev_val = metric_value(prior_by_dow.get(dow, {"incidents": 0, "points": 0.0}), metric_choice)
+        if prev_val > 0:
+            pct = ((cur_val - prev_val) / prev_val) * 100.0
+            pct_txt = f"{pct:+.1f}%"
+        elif cur_val > 0:
+            pct_txt = "new activity"
+        else:
+            pct_txt = "0.0%"
+        delta_rows.append((dow, abs(cur_val - prev_val), pct_txt))
+
+    if delta_rows:
+        ch_dow, _, pct_txt = max(delta_rows, key=lambda x: x[1])
+        st.markdown(f"• Biggest change vs prior matching window: **{dow_labels[ch_dow]}** — **{pct_txt}**")
+
+    reason_rows = [
+        dict(r)
+        for r in fetchall(
+            conn,
+            sql_weekday_reason,
+            (*emp_ids, window_start.isoformat(), window_end.isoformat(), worst_dow),
+        )
+    ]
+    top_reason = (reason_rows[0].get("reason") if reason_rows else None) or "—"
+    if top_reason != "—":
+        st.markdown(f"• Most common reason on {worst_label}: **{top_reason}**")
+
 
 
 # ── Employees ─────────────────────────────────────────────────────────────────
