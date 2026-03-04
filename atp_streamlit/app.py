@@ -194,13 +194,13 @@ p, label { color: var(--muted) !important; }
     letter-spacing: .16em;
     text-transform: uppercase;
     font-weight: 700;
-    color: #4f8ef7 !important;
+    color: #dc2626 !important;
     margin-bottom: .45rem;
 }
 .sidebar-employee-name {
     font-size: 1.05rem;
     font-weight: 800;
-    color: #111827 !important;
+    color: #000000 !important;
     letter-spacing: -.015em;
     line-height: 1.2;
     margin-bottom: .7rem;
