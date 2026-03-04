@@ -3,10 +3,13 @@ Full remodel: clean layout, status badges, live countdown, improved workflows.
 """
 from __future__ import annotations
 
+import base64
 from io import BytesIO
 from datetime import date, datetime, timedelta
 import math
+import os
 from pathlib import Path
+import secrets
 import sys
 
 import pandas as pd
@@ -376,10 +379,169 @@ def ensure_session_defaults() -> None:
     defaults = {
         "selected_employee_id": None,
         "dashboard_bucket": None,
+        "authenticated": False,
+        "login_error": False,
+        "_auth_token": None,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
+
+
+def is_authenticated() -> bool:
+    """Auth requires both session-state flag AND a matching URL token.
+
+    On a true page reload, Streamlit creates a fresh session (empty
+    session_state), so _auth_token is None and the check fails even though
+    the URL still carries the old token — forcing the user to log in again.
+    """
+    session_token = st.session_state.get("_auth_token")
+    url_token = st.query_params.get("_s")
+    return (
+        st.session_state.get("authenticated", False)
+        and session_token is not None
+        and session_token == url_token
+    )
+
+
+# ── Login ──────────────────────────────────────────────────────────────────────
+def login_page() -> None:
+    """Render a centered access-code login screen matching the reference design."""
+    # Embed logo as base64 so it renders inside custom HTML
+    logo_path = REPO_ROOT / "assets" / "logo.png"
+    logo_tag = ""
+    if logo_path.exists():
+        logo_b64 = base64.b64encode(logo_path.read_bytes()).decode()
+        logo_tag = (
+            f'<img src="data:image/png;base64,{logo_b64}"'
+            ' style="max-height:110px;max-width:100%;object-fit:contain;'
+            'margin-bottom:1.1rem;" />'
+        )
+
+    st.markdown(
+        f"""<style>
+        section[data-testid="stSidebar"] {{ display: none !important; }}
+        .block-container {{ padding-top: 3rem !important; max-width: 100% !important; }}
+        footer, #MainMenu {{ visibility: hidden; }}
+
+        /* Page background */
+        [data-testid="stAppViewContainer"] > .main {{
+            background: #e8eaed !important;
+        }}
+        .stApp {{ background: #e8eaed !important; }}
+
+        /* Branding card — logo + title only, red top accent */
+        .login-brand-card {{
+            background: #ffffff;
+            border-radius: 12px;
+            border-top: 6px solid #cc2229;
+            padding: 2.2rem 2rem 1.8rem 2rem;
+            text-align: center;
+            margin-bottom: 1.4rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,.09);
+        }}
+        .login-title {{
+            font-size: 1.45rem;
+            font-weight: 700;
+            color: #111827;
+            margin: 0;
+            letter-spacing: -.01em;
+        }}
+
+        /* Field label */
+        .login-field-label {{
+            display: block;
+            font-size: .88rem;
+            font-weight: 600;
+            color: #111827;
+            margin-bottom: .3rem;
+            margin-top: 0;
+        }}
+
+        /* Inputs */
+        div[data-testid="stTextInput"] input {{
+            background: #ffffff !important;
+            border: 1px solid #d1d5db !important;
+            border-radius: 7px !important;
+            font-size: .95rem !important;
+        }}
+        div[data-testid="stTextInput"] input:focus {{
+            border-color: #6b7280 !important;
+            box-shadow: none !important;
+        }}
+
+        /* Start button — dark */
+        .stButton > button {{
+            background: #111827 !important;
+            color: #ffffff !important;
+            border: none !important;
+            border-radius: 7px !important;
+            font-size: .97rem !important;
+            font-weight: 600 !important;
+            width: 100% !important;
+            padding: .7rem !important;
+            margin-top: .9rem !important;
+            letter-spacing: .02em !important;
+            transition: background .15s !important;
+        }}
+        .stButton > button:hover {{
+            background: #1f2937 !important;
+        }}
+
+        /* Error message */
+        .login-error {{
+            background: #fee2e2;
+            color: #b91c1c;
+            border-radius: 7px;
+            padding: .5rem .9rem;
+            font-size: .84rem;
+            font-weight: 600;
+            margin-top: .6rem;
+        }}
+        </style>
+
+        <div style="display:none">{logo_tag}</div>""",
+        unsafe_allow_html=True,
+    )
+
+    _, col, _ = st.columns([1, 1.8, 1])
+    with col:
+        # Branding card
+        st.markdown(
+            f'<div class="login-brand-card">'
+            f'{logo_tag}'
+            f'<div class="login-title">Attendance Tracking</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+        # Form below card
+        st.markdown("<span class='login-field-label'>Access Code</span>", unsafe_allow_html=True)
+        access_code = st.text_input(
+            "Access Code",
+            type="password",
+            placeholder="",
+            label_visibility="collapsed",
+        )
+        start_clicked = st.button("Start", use_container_width=True)
+
+        if start_clicked:
+            expected = os.environ.get("ACCESS_CODE", "attendance2024")
+            if access_code == expected:
+                token = secrets.token_urlsafe(16)
+                st.session_state["authenticated"] = True
+                st.session_state["_auth_token"] = token
+                st.session_state["login_error"] = False
+                st.query_params["_s"] = token
+                st.rerun()
+            else:
+                st.session_state["login_error"] = True
+
+        if st.session_state.get("login_error"):
+            st.markdown(
+                "<div class='login-error'>Incorrect access code. Please try again.</div>",
+                unsafe_allow_html=True,
+            )
 
 
 def build_point_history_pdf(employee: dict, history: list[dict]) -> bytes:
@@ -1710,6 +1872,8 @@ def main() -> None:
     with spotlight_placeholder.container():
         selected_employee_sidebar(conn, st.session_state.get("selected_employee_id"))
 
-
-if __name__ == "__main__":
+ensure_session_defaults()
+if not is_authenticated():
+    login_page()
+else:
     main()
