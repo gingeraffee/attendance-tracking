@@ -1472,8 +1472,8 @@ def dashboard_page(conn, building: str) -> None:
         table_rows.append(
             {
                 "Weekday": dow_labels[dow],
-                "Employees Pointed": employees_pointed,
-                "Total Points": round(points, 1),
+                "# of Employees Pointed": employees_pointed,
+                "Total Points Issued": round(points, 1),
                 "Top Reason": top_reason_day,
             }
         )
