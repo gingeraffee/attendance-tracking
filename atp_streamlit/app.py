@@ -6,6 +6,7 @@ from __future__ import annotations
 from io import BytesIO
 from datetime import date, datetime, timedelta
 import math
+import os
 from pathlib import Path
 import sys
 
@@ -389,10 +390,114 @@ def ensure_session_defaults() -> None:
     defaults = {
         "selected_employee_id": None,
         "dashboard_bucket": None,
+        "authenticated": False,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
+
+
+# ── Login ──────────────────────────────────────────────────────────────────────
+def login_page() -> None:
+    """Render a centered access-code login screen."""
+    st.markdown(
+        """<style>
+        /* Hide sidebar and default chrome on login */
+        section[data-testid="stSidebar"] { display: none !important; }
+        .block-container { padding-top: 0 !important; max-width: 100% !important; }
+        footer, #MainMenu { visibility: hidden; }
+
+        /* Full-page centered layout */
+        .login-wrapper {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background: #f0f4fa;
+        }
+        .login-card {
+            background: #ffffff;
+            border-radius: 18px;
+            box-shadow: 0 4px 32px rgba(15,32,68,.13);
+            padding: 3rem 2.5rem 2.5rem 2.5rem;
+            width: 380px;
+            text-align: center;
+        }
+        .login-logo {
+            width: 90px;
+            margin-bottom: 1.4rem;
+        }
+        .login-title {
+            font-size: 1.75rem;
+            font-weight: 800;
+            color: #1a2744;
+            letter-spacing: -0.03em;
+            margin-bottom: 1.8rem;
+        }
+        .login-error {
+            background: #fde8ea;
+            color: #c0303e;
+            border-radius: 8px;
+            padding: .55rem 1rem;
+            font-size: .85rem;
+            font-weight: 600;
+            margin-top: .75rem;
+        }
+        /* Style the Streamlit input inside the card */
+        .login-card input[type="password"],
+        .login-card input[type="text"] {
+            border-radius: 8px !important;
+            border: 1.5px solid #d0daea !important;
+            font-size: 1rem !important;
+        }
+        /* Start button */
+        .login-card .stButton > button {
+            background: linear-gradient(90deg, #4f8ef7 0%, #3a75e0 100%) !important;
+            color: #fff !important;
+            border: none !important;
+            border-radius: 8px !important;
+            font-size: 1rem !important;
+            font-weight: 700 !important;
+            width: 100% !important;
+            padding: .65rem 0 !important;
+            margin-top: .5rem !important;
+            letter-spacing: .01em !important;
+            cursor: pointer !important;
+        }
+        .login-card .stButton > button:hover {
+            background: linear-gradient(90deg, #3a75e0 0%, #2d5ec7 100%) !important;
+        }
+        </style>""",
+        unsafe_allow_html=True,
+    )
+
+    # Outer centering wrapper (Streamlit can't do 100vh easily, so we use columns)
+    _, col, _ = st.columns([1, 1.4, 1])
+    with col:
+        logo_path = REPO_ROOT / "assets" / "logo.png"
+        if logo_path.exists():
+            st.image(str(logo_path), width=90)
+
+        st.markdown("<div class='login-title'>Attendance Tracking</div>", unsafe_allow_html=True)
+
+        access_code = st.text_input(
+            "Access Code",
+            type="password",
+            placeholder="Enter access code",
+            label_visibility="collapsed",
+        )
+        start_clicked = st.button("Start", use_container_width=True)
+
+        if start_clicked:
+            expected = os.environ.get("ACCESS_CODE", "attendance2024")
+            if access_code == expected:
+                st.session_state["authenticated"] = True
+                st.rerun()
+            else:
+                st.markdown(
+                    "<div class='login-error'>Incorrect access code. Please try again.</div>",
+                    unsafe_allow_html=True,
+                )
 
 
 def build_point_history_pdf(employee: dict, history: list[dict]) -> bytes:
@@ -1754,5 +1859,8 @@ def main() -> None:
     with spotlight_placeholder.container():
         selected_employee_sidebar(conn, st.session_state.get("selected_employee_id"))
 
-if __name__ == "__main__":
+ensure_session_defaults()
+if not st.session_state["authenticated"]:
+    login_page()
+else:
     main()
