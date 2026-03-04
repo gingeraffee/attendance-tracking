@@ -73,6 +73,16 @@ section[data-testid="stSidebar"] {
     width: 276px !important;
 }
 section[data-testid="stSidebar"] * { color: #bfcde6 !important; }
+section[data-testid="stSidebar"] div[data-baseweb="select"] > div {
+    background: #ffffff !important;
+    color: #111827 !important;
+}
+section[data-testid="stSidebar"] div[data-baseweb="select"] input,
+section[data-testid="stSidebar"] div[data-baseweb="select"] span,
+section[data-testid="stSidebar"] div[data-baseweb="select"] div {
+    color: #111827 !important;
+    -webkit-text-fill-color: #111827 !important;
+}
 
 /* ── Metric tiles ── */
 div[data-testid="stMetric"] {
@@ -382,6 +392,7 @@ def ensure_session_defaults() -> None:
         "authenticated": False,
         "login_error": False,
         "_auth_token": None,
+        "_auth_redirect_pending": False,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -389,19 +400,25 @@ def ensure_session_defaults() -> None:
 
 
 def is_authenticated() -> bool:
-    """Auth requires both session-state flag AND a matching URL token.
+    """Auth requires the in-session auth flag plus token validation.
 
-    On a true page reload, Streamlit creates a fresh session (empty
-    session_state), so _auth_token is None and the check fails even though
-    the URL still carries the old token — forcing the user to log in again.
+    During login submit, query params can lag one rerun behind session_state.
+    To avoid a flash of the login screen, allow a one-rerun grace period while
+    the URL token is being written.
     """
     session_token = st.session_state.get("_auth_token")
     url_token = st.query_params.get("_s")
-    return (
-        st.session_state.get("authenticated", False)
-        and session_token is not None
-        and session_token == url_token
-    )
+    if not st.session_state.get("authenticated", False) or session_token is None:
+        return False
+
+    if session_token == url_token:
+        st.session_state["_auth_redirect_pending"] = False
+        return True
+
+    if st.session_state.get("_auth_redirect_pending") and not url_token:
+        return True
+
+    return False
 
 
 # ── Login ──────────────────────────────────────────────────────────────────────
@@ -529,6 +546,7 @@ def login_page() -> None:
                 token = secrets.token_urlsafe(16)
                 st.session_state["authenticated"] = True
                 st.session_state["_auth_token"] = token
+                st.session_state["_auth_redirect_pending"] = True
                 st.session_state["login_error"] = False
                 st.query_params["_s"] = token
                 st.rerun()
