@@ -73,6 +73,16 @@ section[data-testid="stSidebar"] {
     width: 276px !important;
 }
 section[data-testid="stSidebar"] * { color: #bfcde6 !important; }
+section[data-testid="stSidebar"] div[data-baseweb="select"] > div {
+    background: #ffffff !important;
+    color: #111827 !important;
+}
+section[data-testid="stSidebar"] div[data-baseweb="select"] input,
+section[data-testid="stSidebar"] div[data-baseweb="select"] span,
+section[data-testid="stSidebar"] div[data-baseweb="select"] div {
+    color: #111827 !important;
+    -webkit-text-fill-color: #111827 !important;
+}
 
 /* ── Metric tiles ── */
 div[data-testid="stMetric"] {
