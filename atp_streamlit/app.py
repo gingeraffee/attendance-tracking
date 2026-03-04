@@ -838,17 +838,29 @@ def dashboard_page(conn, building: str) -> None:
              GROUP BY (ph.point_date::date)
              ORDER BY (ph.point_date::date)
         '''
-        sql_hotspots_365 = f'''
+        sql_weekday_window = f'''
             SELECT EXTRACT(DOW FROM ph.point_date::date)::int AS dow,
                    ROUND(COALESCE(SUM(ph.points), 0.0)::numeric, 1)::float8 AS total_points,
                    COUNT(*) AS incidents
               FROM points_history ph
              WHERE ph.employee_id IN ({ph})
                AND (ph.point_date::date) >= (%s::date)
-               AND EXTRACT(DOW FROM ph.point_date::date) NOT IN (0, 6)
+               AND (ph.point_date::date) < (%s::date)
                AND COALESCE(ph.points, 0.0) > 0.0
              GROUP BY EXTRACT(DOW FROM ph.point_date::date)
-             ORDER BY total_points DESC
+        '''
+        sql_weekday_reason = f'''
+            SELECT ph.reason, COUNT(*) AS n
+              FROM points_history ph
+             WHERE ph.employee_id IN ({ph})
+               AND (ph.point_date::date) >= (%s::date)
+               AND (ph.point_date::date) < (%s::date)
+               AND EXTRACT(DOW FROM ph.point_date::date)::int = (%s)
+               AND COALESCE(ph.points, 0.0) > 0.0
+               AND COALESCE(ph.reason, '') <> ''
+             GROUP BY ph.reason
+             ORDER BY n DESC, ph.reason
+             LIMIT 1
         '''
     else:
         sql_emp_detail = f'''
@@ -965,17 +977,29 @@ def dashboard_page(conn, building: str) -> None:
              GROUP BY date(ph.point_date)
              ORDER BY date(ph.point_date)
         '''
-        sql_hotspots_365 = f'''
+        sql_weekday_window = f'''
             SELECT CAST(strftime('%w', ph.point_date) AS INTEGER) AS dow,
                    ROUND(COALESCE(SUM(ph.points), 0.0), 1) AS total_points,
                    COUNT(*) AS incidents
               FROM points_history ph
              WHERE ph.employee_id IN ({ph})
                AND date(ph.point_date) >= date(?)
-               AND strftime('%w', ph.point_date) NOT IN ('0', '6')
+               AND date(ph.point_date) < date(?)
                AND COALESCE(ph.points, 0.0) > 0.0
              GROUP BY CAST(strftime('%w', ph.point_date) AS INTEGER)
-             ORDER BY total_points DESC
+        '''
+        sql_weekday_reason = f'''
+            SELECT ph.reason, COUNT(*) AS n
+              FROM points_history ph
+             WHERE ph.employee_id IN ({ph})
+               AND date(ph.point_date) >= date(?)
+               AND date(ph.point_date) < date(?)
+               AND CAST(strftime('%w', ph.point_date) AS INTEGER) = ?
+               AND COALESCE(ph.points, 0.0) > 0.0
+               AND COALESCE(ph.reason, '') <> ''
+             GROUP BY ph.reason
+             ORDER BY n DESC, ph.reason
+             LIMIT 1
         '''
 
     emp_detail_rows = [dict(r) for r in fetchall(conn, sql_emp_detail, tuple(emp_ids))]
@@ -1304,24 +1328,115 @@ def dashboard_page(conn, building: str) -> None:
     trend_df = trend_df.rename(columns={"point_day": "Date"}).set_index("Date")
     st.line_chart(trend_df)
 
-    st.markdown("#### Day-of-Week Hotspots (Last 365 Days, Weekdays Only)")
-    dow_rows = [dict(r) for r in fetchall(conn, sql_hotspots_365, (*emp_ids, (today - timedelta(days=365)).isoformat()))]
-    dow_map = {1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri"}
-    if dow_rows:
-        df_dow = pd.DataFrame(
-            [
-                {
-                    "Day of Week": dow_map.get(int(r.get("dow") or 0), str(r.get("dow") or "—")),
-                    "Total Points": f"{float(r.get('total_points') or 0.0):.1f}",
-                    "Incidents": int(r.get("incidents") or 0),
-                    "Avg Points/Incident": f"{(float(r.get('total_points') or 0.0) / max(int(r.get('incidents') or 0), 1)):.2f}",
-                }
-                for r in dow_rows
-            ]
+    st.markdown("#### Day-of-Week Trend")
+    ctrl_col1, ctrl_col2 = st.columns([1.2, 1])
+    with ctrl_col1:
+        window_label = st.selectbox(
+            "Window",
+            ["Last 30 days", "Last 90 days", "Last 12 months"],
+            index=1,
+            key="dow_window",
         )
-        st.dataframe(df_dow, use_container_width=True, hide_index=True)
+    with ctrl_col2:
+        metric_choice = st.radio("Metric", ["Count", "Points", "Rate"], index=0, horizontal=True, key="dow_metric")
+
+    window_days = {"Last 30 days": 30, "Last 90 days": 90, "Last 12 months": 365}[window_label]
+    window_start = today - timedelta(days=window_days - 1)
+    window_end = today + timedelta(days=1)
+    prior_start = window_start - timedelta(days=window_days)
+    prior_end = window_start
+
+    current_rows = [
+        dict(r)
+        for r in fetchall(conn, sql_weekday_window, (*emp_ids, window_start.isoformat(), window_end.isoformat()))
+    ]
+    prior_rows = [
+        dict(r)
+        for r in fetchall(conn, sql_weekday_window, (*emp_ids, prior_start.isoformat(), prior_end.isoformat()))
+    ]
+
+    current_by_dow = {
+        int(r.get("dow") or 0): {
+            "incidents": int(r.get("incidents") or 0),
+            "points": float(r.get("total_points") or 0.0),
+        }
+        for r in current_rows
+    }
+    prior_by_dow = {
+        int(r.get("dow") or 0): {
+            "incidents": int(r.get("incidents") or 0),
+            "points": float(r.get("total_points") or 0.0),
+        }
+        for r in prior_rows
+    }
+
+    dow_order = [1, 2, 3, 4, 5, 6, 0]
+    dow_labels = {1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri", 6: "Sat", 0: "Sun"}
+
+    denominator_count = max(len(emp_ids), 1)
+    if metric_choice == "Rate":
+        st.caption("Rate uses approximate active-headcount denominator: incidents ÷ active employees × 100.")
+
+    def metric_value(stats: dict, metric: str) -> float:
+        incidents = float(stats.get("incidents") or 0)
+        points = float(stats.get("points") or 0)
+        if metric == "Count":
+            return incidents
+        if metric == "Points":
+            return points
+        return (incidents / denominator_count) * 100.0
+
+    chart_rows = []
+    metric_values = {}
+    for dow in dow_order:
+        stats = current_by_dow.get(dow, {"incidents": 0, "points": 0.0})
+        val = metric_value(stats, metric_choice)
+        metric_values[dow] = val
+        chart_rows.append({"Weekday": dow_labels[dow], "Value": val})
+
+    chart_df = pd.DataFrame(chart_rows).set_index("Weekday")
+    st.bar_chart(chart_df)
+
+    worst_dow = max(dow_order, key=lambda d: metric_values.get(d, 0.0))
+    worst_label = dow_labels[worst_dow]
+    worst_value = metric_values.get(worst_dow, 0.0)
+    if metric_choice == "Count":
+        worst_value_txt = f"{int(round(worst_value))} incidents"
+    elif metric_choice == "Points":
+        worst_value_txt = f"{worst_value:.1f} points"
     else:
-        info_box("No point incidents in the last 365 days for this filter.")
+        worst_value_txt = f"{worst_value:.2f} incidents per 100 active"
+    st.markdown(f"• Worst weekday ({metric_choice.lower()}): **{worst_label}** — **{worst_value_txt}**")
+
+    delta_rows = []
+    for dow in dow_order:
+        cur_val = metric_value(current_by_dow.get(dow, {"incidents": 0, "points": 0.0}), metric_choice)
+        prev_val = metric_value(prior_by_dow.get(dow, {"incidents": 0, "points": 0.0}), metric_choice)
+        if prev_val > 0:
+            pct = ((cur_val - prev_val) / prev_val) * 100.0
+            pct_txt = f"{pct:+.1f}%"
+        elif cur_val > 0:
+            pct_txt = "new activity"
+        else:
+            pct_txt = "0.0%"
+        delta_rows.append((dow, abs(cur_val - prev_val), pct_txt))
+
+    if delta_rows:
+        ch_dow, _, pct_txt = max(delta_rows, key=lambda x: x[1])
+        st.markdown(f"• Biggest change vs prior matching window: **{dow_labels[ch_dow]}** — **{pct_txt}**")
+
+    reason_rows = [
+        dict(r)
+        for r in fetchall(
+            conn,
+            sql_weekday_reason,
+            (*emp_ids, window_start.isoformat(), window_end.isoformat(), worst_dow),
+        )
+    ]
+    top_reason = (reason_rows[0].get("reason") if reason_rows else None) or "—"
+    if top_reason != "—":
+        st.markdown(f"• Most common reason on {worst_label}: **{top_reason}**")
+
 
 
 # ── Employees ─────────────────────────────────────────────────────────────────
