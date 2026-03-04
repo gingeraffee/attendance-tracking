@@ -456,6 +456,17 @@ def build_point_history_pdf(employee: dict, history: list[dict]) -> bytes:
 
 def selected_employee_sidebar(conn, employee_id: int | None) -> None:
     if not employee_id:
+        st.markdown(
+            "<div class='sidebar-employee-card'>"
+            "<div class='sidebar-employee-title'>&#9673; Employee Spotlight</div>"
+            "<div class='sidebar-employee-name'>No employee selected</div>"
+            "<div class='sidebar-employee-item full-width'>"
+            "<span class='label'>Tip</span>"
+            "<span class='value'>Select an employee from a table to view their spotlight details here.</span>"
+            "</div>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
         return
 
     if is_pg(conn):
@@ -916,7 +927,6 @@ def dashboard_page(conn, building: str) -> None:
                     new_selected_id = int(df_emps.iloc[idx]["employee_id"])
                     if st.session_state.get("selected_employee_id") != new_selected_id:
                         st.session_state["selected_employee_id"] = new_selected_id
-                        st.rerun()
         else:
             info_box("None 🎉")
 
