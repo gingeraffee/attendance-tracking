@@ -184,7 +184,7 @@ p, label { color: var(--muted) !important; }
     margin: 1rem 0 .3rem 0 !important; display: block;
 }
 
-.sidebar-employee-card {
+section[data-testid="stSidebar"] .sidebar-employee-card {
     margin-top: 1.1rem;
     padding: 1rem .9rem .85rem;
     border-radius: 16px;
@@ -194,7 +194,7 @@ p, label { color: var(--muted) !important; }
     position: relative;
     overflow: hidden;
 }
-.sidebar-employee-card::before {
+section[data-testid="stSidebar"] .sidebar-employee-card::before {
     content: '';
     position: absolute;
     top: 0; left: 0; right: 0;
@@ -202,56 +202,59 @@ p, label { color: var(--muted) !important; }
     background: linear-gradient(90deg, #e0394a, #cc2229, #e0394a);
     opacity: .85;
 }
-.sidebar-employee-title {
-    font-size: .6rem;
+section[data-testid="stSidebar"] .sidebar-employee-title {
+    font-size: .72rem;
     letter-spacing: .16em;
     text-transform: uppercase;
     font-weight: 700;
     color: #e0394a !important;
+    -webkit-text-fill-color: #e0394a !important;
     margin-bottom: .45rem;
 }
-.sidebar-employee-name {
-    font-size: 1.05rem;
+section[data-testid="stSidebar"] .sidebar-employee-name {
+    font-size: 1.32rem;
     font-weight: 800;
     color: #111827 !important;
+    -webkit-text-fill-color: #111827 !important;
     letter-spacing: -.015em;
     line-height: 1.2;
     margin-bottom: .7rem;
     padding-bottom: .6rem;
     border-bottom: 1px solid rgba(17,24,39,.10);
 }
-.sidebar-employee-grid {
+section[data-testid="stSidebar"] .sidebar-employee-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: .35rem;
 }
-.sidebar-employee-item {
+section[data-testid="stSidebar"] .sidebar-employee-item {
     background: #f8fafc;
     border: 1px solid #e5e7eb;
     border-radius: 8px;
     padding: .38rem .45rem;
 }
-.sidebar-employee-item.full-width {
+section[data-testid="stSidebar"] .sidebar-employee-item.full-width {
     grid-column: 1 / -1;
 }
-.sidebar-employee-item .label {
+section[data-testid="stSidebar"] .sidebar-employee-item .label {
     display: block;
-    font-size: .56rem;
+    font-size: .62rem;
     letter-spacing: .10em;
     text-transform: uppercase;
     color: #6b7280 !important;
     font-weight: 700;
     margin-bottom: .12rem;
 }
-.sidebar-employee-item .value {
+section[data-testid="stSidebar"] .sidebar-employee-item .value {
     display: block;
-    font-size: .78rem;
+    font-size: .9rem;
     font-weight: 600;
     color: #1f2937 !important;
     letter-spacing: -.01em;
 }
-.sidebar-employee-item .value.highlight {
+section[data-testid="stSidebar"] .sidebar-employee-item .value.highlight {
     color: #e0394a !important;
+    -webkit-text-fill-color: #e0394a !important;
     font-size: .9rem;
     font-weight: 800;
 }
