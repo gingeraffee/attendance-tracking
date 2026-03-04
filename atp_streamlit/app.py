@@ -188,9 +188,9 @@ p, label { color: var(--muted) !important; }
     margin-top: 1.1rem;
     padding: 1rem .9rem .85rem;
     border-radius: 16px;
-    border: 1px solid rgba(100,149,255,.22);
-    background: linear-gradient(145deg, rgba(15,28,62,.92) 0%, rgba(9,19,44,.97) 100%);
-    box-shadow: 0 8px 32px rgba(4,10,26,.45), inset 0 1px 0 rgba(120,160,255,.12);
+    border: 1px solid rgba(26,39,68,.14);
+    background: #ffffff;
+    box-shadow: 0 8px 24px rgba(15,32,68,.12);
     position: relative;
     overflow: hidden;
 }
@@ -199,7 +199,7 @@ p, label { color: var(--muted) !important; }
     position: absolute;
     top: 0; left: 0; right: 0;
     height: 2px;
-    background: linear-gradient(90deg, #4f8ef7, #00b8e6, #4f8ef7);
+    background: linear-gradient(90deg, #e0394a, #cc2229, #e0394a);
     opacity: .85;
 }
 .sidebar-employee-title {
@@ -207,18 +207,18 @@ p, label { color: var(--muted) !important; }
     letter-spacing: .16em;
     text-transform: uppercase;
     font-weight: 700;
-    color: #4f8ef7 !important;
+    color: #e0394a !important;
     margin-bottom: .45rem;
 }
 .sidebar-employee-name {
     font-size: 1.05rem;
     font-weight: 800;
-    color: #f0f6ff !important;
+    color: #111827 !important;
     letter-spacing: -.015em;
     line-height: 1.2;
     margin-bottom: .7rem;
     padding-bottom: .6rem;
-    border-bottom: 1px solid rgba(255,255,255,.07);
+    border-bottom: 1px solid rgba(17,24,39,.10);
 }
 .sidebar-employee-grid {
     display: grid;
@@ -226,8 +226,8 @@ p, label { color: var(--muted) !important; }
     gap: .35rem;
 }
 .sidebar-employee-item {
-    background: rgba(255,255,255,.04);
-    border: 1px solid rgba(255,255,255,.06);
+    background: #f8fafc;
+    border: 1px solid #e5e7eb;
     border-radius: 8px;
     padding: .38rem .45rem;
 }
@@ -239,7 +239,7 @@ p, label { color: var(--muted) !important; }
     font-size: .56rem;
     letter-spacing: .10em;
     text-transform: uppercase;
-    color: #4a6490 !important;
+    color: #6b7280 !important;
     font-weight: 700;
     margin-bottom: .12rem;
 }
@@ -247,11 +247,11 @@ p, label { color: var(--muted) !important; }
     display: block;
     font-size: .78rem;
     font-weight: 600;
-    color: #c8d8f4 !important;
+    color: #1f2937 !important;
     letter-spacing: -.01em;
 }
 .sidebar-employee-item .value.highlight {
-    color: #4f8ef7 !important;
+    color: #e0394a !important;
     font-size: .9rem;
     font-weight: 800;
 }
