@@ -73,6 +73,16 @@ section[data-testid="stSidebar"] {
     width: 276px !important;
 }
 section[data-testid="stSidebar"] * { color: #bfcde6 !important; }
+section[data-testid="stSidebar"] div[data-baseweb="select"] > div {
+    background: #ffffff !important;
+    color: #111827 !important;
+}
+section[data-testid="stSidebar"] div[data-baseweb="select"] input,
+section[data-testid="stSidebar"] div[data-baseweb="select"] span,
+section[data-testid="stSidebar"] div[data-baseweb="select"] div {
+    color: #111827 !important;
+    -webkit-text-fill-color: #111827 !important;
+}
 
 /* ── Metric tiles ── */
 div[data-testid="stMetric"] {
@@ -382,6 +392,7 @@ def ensure_session_defaults() -> None:
         "authenticated": False,
         "login_error": False,
         "_auth_token": None,
+        "_auth_redirect_pending": False,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -389,19 +400,25 @@ def ensure_session_defaults() -> None:
 
 
 def is_authenticated() -> bool:
-    """Auth requires both session-state flag AND a matching URL token.
+    """Auth requires the in-session auth flag plus token validation.
 
-    On a true page reload, Streamlit creates a fresh session (empty
-    session_state), so _auth_token is None and the check fails even though
-    the URL still carries the old token — forcing the user to log in again.
+    During login submit, query params can lag one rerun behind session_state.
+    To avoid a flash of the login screen, allow a one-rerun grace period while
+    the URL token is being written.
     """
     session_token = st.session_state.get("_auth_token")
     url_token = st.query_params.get("_s")
-    return (
-        st.session_state.get("authenticated", False)
-        and session_token is not None
-        and session_token == url_token
-    )
+    if not st.session_state.get("authenticated", False) or session_token is None:
+        return False
+
+    if session_token == url_token:
+        st.session_state["_auth_redirect_pending"] = False
+        return True
+
+    if st.session_state.get("_auth_redirect_pending") and not url_token:
+        return True
+
+    return False
 
 
 # ── Login ──────────────────────────────────────────────────────────────────────
@@ -529,6 +546,7 @@ def login_page() -> None:
                 token = secrets.token_urlsafe(16)
                 st.session_state["authenticated"] = True
                 st.session_state["_auth_token"] = token
+                st.session_state["_auth_redirect_pending"] = True
                 st.session_state["login_error"] = False
                 st.query_params["_s"] = token
                 st.rerun()
@@ -975,11 +993,41 @@ def dashboard_page(conn, building: str) -> None:
         for key, fn in bucket_defs.items()
     }
 
-    selected_bucket = st.query_params.get("dashboard_bucket")
-    if selected_bucket in bucket_defs:
-        st.session_state["dashboard_bucket"] = selected_bucket
-    elif selected_bucket == "all":
-        st.session_state.pop("dashboard_bucket", None)
+
+    st.markdown(
+        """<style>
+        .st-key-dashboard_bucket_all div[data-testid="stButton"],
+        .st-key-dashboard_bucket_0 div[data-testid="stButton"],
+        .st-key-dashboard_bucket_1-4 div[data-testid="stButton"],
+        .st-key-dashboard_bucket_5-6 div[data-testid="stButton"],
+        .st-key-dashboard_bucket_7 div[data-testid="stButton"] {
+            margin-top: -92px !important;
+            position: relative;
+            z-index: 30;
+        }
+        .st-key-dashboard_bucket_all div[data-testid="stButton"] > button,
+        .st-key-dashboard_bucket_0 div[data-testid="stButton"] > button,
+        .st-key-dashboard_bucket_1-4 div[data-testid="stButton"] > button,
+        .st-key-dashboard_bucket_5-6 div[data-testid="stButton"] > button,
+        .st-key-dashboard_bucket_7 div[data-testid="stButton"] > button {
+            background: transparent !important;
+            border: 0 !important;
+            box-shadow: none !important;
+            min-height: 92px !important;
+            width: 100% !important;
+            padding: 0 !important;
+        }
+        .st-key-dashboard_bucket_all div[data-testid="stButton"] > button p,
+        .st-key-dashboard_bucket_0 div[data-testid="stButton"] > button p,
+        .st-key-dashboard_bucket_1-4 div[data-testid="stButton"] > button p,
+        .st-key-dashboard_bucket_5-6 div[data-testid="stButton"] > button p,
+        .st-key-dashboard_bucket_7 div[data-testid="stButton"] > button p {
+            opacity: 0 !important;
+            margin: 0 !important;
+        }
+        </style>""",
+        unsafe_allow_html=True,
+    )
 
     tile_cols = st.columns(5)
     tile_specs = [
@@ -990,35 +1038,39 @@ def dashboard_page(conn, building: str) -> None:
         ("7", "7+ Pts"),
     ]
     active_bucket = st.session_state.get("dashboard_bucket")
-    tile_palette = {
-        "all": {"accent": "#5c6f8c", "glow": "rgba(92,111,140,.22)"},
-        "0": {"accent": "#00a87a", "glow": "rgba(0,168,122,.25)"},
-        "1-4": {"accent": "#4f8ef7", "glow": "rgba(79,142,247,.25)"},
-        "5-6": {"accent": "#e6960a", "glow": "rgba(230,150,10,.28)"},
-        "7": {"accent": "#e0394a", "glow": "rgba(224,57,74,.32)"},
-    }
 
     for col, (key, label) in zip(tile_cols, tile_specs):
         selected = (active_bucket == key) if key != "all" else (active_bucket not in bucket_defs)
-        accent = tile_palette[key]["accent"]
-        glow = tile_palette[key]["glow"]
-        border = "rgba(26,39,68,.16)" if not selected else accent
-        shadow = f"0 0 0 2px {glow}, 0 8px 18px rgba(15,32,68,.12)" if selected else "0 4px 14px rgba(15,32,68,.08)"
+        accent, glow = {
+            "all": ("#5c6f8c", "rgba(92,111,140,.22)"),
+            "0": ("#00a87a", "rgba(0,168,122,.25)"),
+            "1-4": ("#4f8ef7", "rgba(79,142,247,.25)"),
+            "5-6": ("#e6960a", "rgba(230,150,10,.28)"),
+            "7": ("#e0394a", "rgba(224,57,74,.32)"),
+        }.get(key, ("#5c6f8c", "rgba(92,111,140,.22)"))
+        # Keep style vars local and explicit to avoid NameError in f-string interpolation.
+        card_border = "rgba(26,39,68,.16)" if not selected else accent
+        card_shadow = f"0 0 0 2px {glow}, 0 8px 18px rgba(15,32,68,.12)" if selected else "0 4px 14px rgba(15,32,68,.08)"
         employees_count = len(emp_detail_rows) if key == "all" else bucket_counts[key]
+
         col.markdown(
-            f"<a href='?dashboard_bucket={key}' target='_self' style='text-decoration:none;display:block'>"
             f"<div class='card-sm' style='margin-bottom:.45rem;padding:.72rem .9rem;"
-            f"background:#ffffff;border:1px solid {border};box-shadow:{shadow};cursor:pointer;'>"
+            f"background:#ffffff;border:1px solid {card_border};box-shadow:{card_shadow};cursor:pointer;pointer-events:none;'>"
             f"<div style='height:4px;border-radius:999px;background:{accent};margin:-.2rem 0 .6rem 0'></div>"
-            f"<div style='font-size:.68rem;letter-spacing:.09em;text-transform:uppercase;color:#5c6f8c;font-weight:700'>{label}</div>"
+            f"<div style='font-size:.68rem;letter-spacing:.09em;text-transform:uppercase;color:{accent};font-weight:700'>{label}</div>"
             f"<div style='display:flex;align-items:baseline;justify-content:space-between;margin-top:.18rem'>"
             f"<span style='font-size:1.95rem;font-weight:800;color:#1a2744;line-height:1'>{employees_count}</span>"
             f"<span style='font-size:.72rem;font-weight:700;color:{accent};text-transform:uppercase;letter-spacing:.05em'>&nbsp;employees</span>"
-            f"</div>"
-            f"</div>"
-            f"</a>",
+            f"</div></div>",
             unsafe_allow_html=True,
         )
+
+        if col.button("filter", key=f"dashboard_bucket_{key}", use_container_width=True):
+            if key == "all":
+                st.session_state.pop("dashboard_bucket", None)
+            else:
+                st.session_state["dashboard_bucket"] = key
+            st.rerun()
 
     col_left, col_right = st.columns([1.6, 1], gap="large")
 
@@ -1115,13 +1167,31 @@ def dashboard_page(conn, building: str) -> None:
         dict(r)
         for r in fetchall(
             conn,
-            """SELECT COALESCE("Location", '') AS building, COUNT(*) AS n FROM employees WHERE COALESCE(is_active,1)=1 GROUP BY COALESCE("Location", '')""",
+            """SELECT COALESCE("Location", '') AS building, COUNT(*) AS n
+               FROM employees
+              WHERE COALESCE(is_active,1)=1
+              GROUP BY COALESCE("Location", '')""",
+        )
+    ]
+    avg_total_rows = [
+        dict(r)
+        for r in fetchall(
+            conn,
+            """SELECT COALESCE("Location", '') AS building,
+                      AVG(COALESCE(point_total, 0.0)) AS avg_point_total
+               FROM employees
+              WHERE COALESCE(is_active,1)=1
+              GROUP BY COALESCE("Location", '')""",
         )
     ]
     active_by_build = {b: 0 for b in BUILDINGS}
+    avg_total_by_build = {b: 0.0 for b in BUILDINGS}
     for r in active_rows:
         if r["building"] in active_by_build:
             active_by_build[r["building"]] = int(r["n"] or 0)
+    for r in avg_total_rows:
+        if r["building"] in avg_total_by_build:
+            avg_total_by_build[r["building"]] = float(r.get("avg_point_total") or 0.0)
 
     since_30 = (today - timedelta(days=30)).isoformat()
     since_60 = (today - timedelta(days=60)).isoformat()
@@ -1135,12 +1205,13 @@ def dashboard_page(conn, building: str) -> None:
     snap_rows = []
     for b in BUILDINGS:
         headcount = int(active_by_build.get(b) or 0)
+        avg_point_total = float(avg_total_by_build.get(b) or 0.0)
         cur_total = float(current_points.get(b) or 0.0)
         prev_total = float(prior_points.get(b) or 0.0)
-        cur_rate = (cur_total / headcount * 100.0) if headcount else 0.0
-        prev_rate = (prev_total / headcount * 100.0) if headcount else 0.0
-        if prev_rate > 0:
-            pct_change = ((cur_rate - prev_rate) / prev_rate) * 100.0
+        cur_avg_30d = (cur_total / headcount) if headcount else 0.0
+        prev_avg_30d = (prev_total / headcount) if headcount else 0.0
+        if prev_avg_30d > 0:
+            pct_change = ((cur_avg_30d - prev_avg_30d) / prev_avg_30d) * 100.0
             pct_txt = f"{pct_change:+.1f}%"
         else:
             pct_txt = "—"
@@ -1150,8 +1221,8 @@ def dashboard_page(conn, building: str) -> None:
             {
                 "Building": b,
                 "Active Employees": headcount,
-                "Points / 100 Active (30d)": f"{cur_rate:.1f}",
-                "% Change vs Prior 30 Days": pct_txt,
+                "Avg Point Total / Employee": f"{avg_point_total:.2f}",
+                "% Change in Avg Points (30d)": pct_txt,
                 "Most Common Reason (30d)": most_common_reason,
             }
         )
