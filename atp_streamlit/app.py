@@ -1167,13 +1167,31 @@ def dashboard_page(conn, building: str) -> None:
         dict(r)
         for r in fetchall(
             conn,
-            """SELECT COALESCE("Location", '') AS building, COUNT(*) AS n FROM employees WHERE COALESCE(is_active,1)=1 GROUP BY COALESCE("Location", '')""",
+            """SELECT COALESCE("Location", '') AS building, COUNT(*) AS n
+               FROM employees
+              WHERE COALESCE(is_active,1)=1
+              GROUP BY COALESCE("Location", '')""",
+        )
+    ]
+    avg_total_rows = [
+        dict(r)
+        for r in fetchall(
+            conn,
+            """SELECT COALESCE("Location", '') AS building,
+                      AVG(COALESCE(point_total, 0.0)) AS avg_point_total
+               FROM employees
+              WHERE COALESCE(is_active,1)=1
+              GROUP BY COALESCE("Location", '')""",
         )
     ]
     active_by_build = {b: 0 for b in BUILDINGS}
+    avg_total_by_build = {b: 0.0 for b in BUILDINGS}
     for r in active_rows:
         if r["building"] in active_by_build:
             active_by_build[r["building"]] = int(r["n"] or 0)
+    for r in avg_total_rows:
+        if r["building"] in avg_total_by_build:
+            avg_total_by_build[r["building"]] = float(r.get("avg_point_total") or 0.0)
 
     since_30 = (today - timedelta(days=30)).isoformat()
     since_60 = (today - timedelta(days=60)).isoformat()
@@ -1187,12 +1205,13 @@ def dashboard_page(conn, building: str) -> None:
     snap_rows = []
     for b in BUILDINGS:
         headcount = int(active_by_build.get(b) or 0)
+        avg_point_total = float(avg_total_by_build.get(b) or 0.0)
         cur_total = float(current_points.get(b) or 0.0)
         prev_total = float(prior_points.get(b) or 0.0)
-        cur_rate = (cur_total / headcount * 100.0) if headcount else 0.0
-        prev_rate = (prev_total / headcount * 100.0) if headcount else 0.0
-        if prev_rate > 0:
-            pct_change = ((cur_rate - prev_rate) / prev_rate) * 100.0
+        cur_avg_30d = (cur_total / headcount) if headcount else 0.0
+        prev_avg_30d = (prev_total / headcount) if headcount else 0.0
+        if prev_avg_30d > 0:
+            pct_change = ((cur_avg_30d - prev_avg_30d) / prev_avg_30d) * 100.0
             pct_txt = f"{pct_change:+.1f}%"
         else:
             pct_txt = "—"
@@ -1202,8 +1221,8 @@ def dashboard_page(conn, building: str) -> None:
             {
                 "Building": b,
                 "Active Employees": headcount,
-                "Points / 100 Active (30d)": f"{cur_rate:.1f}",
-                "% Change vs Prior 30 Days": pct_txt,
+                "Avg Point Total / Employee": f"{avg_point_total:.2f}",
+                "% Change in Avg Points (30d)": pct_txt,
                 "Most Common Reason (30d)": most_common_reason,
             }
         )
