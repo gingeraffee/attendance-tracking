@@ -1041,8 +1041,13 @@ def dashboard_page(conn, building: str) -> None:
 
     for col, (key, label) in zip(tile_cols, tile_specs):
         selected = (active_bucket == key) if key != "all" else (active_bucket not in bucket_defs)
-        accent = tile_palette[key]["accent"]
-        glow = tile_palette[key]["glow"]
+        accent, glow = {
+            "all": ("#5c6f8c", "rgba(92,111,140,.22)"),
+            "0": ("#00a87a", "rgba(0,168,122,.25)"),
+            "1-4": ("#4f8ef7", "rgba(79,142,247,.25)"),
+            "5-6": ("#e6960a", "rgba(230,150,10,.28)"),
+            "7": ("#e0394a", "rgba(224,57,74,.32)"),
+        }.get(key, ("#5c6f8c", "rgba(92,111,140,.22)"))
         # Keep style vars local and explicit to avoid NameError in f-string interpolation.
         card_border = "rgba(26,39,68,.16)" if not selected else accent
         card_shadow = f"0 0 0 2px {glow}, 0 8px 18px rgba(15,32,68,.12)" if selected else "0 4px 14px rgba(15,32,68,.08)"
