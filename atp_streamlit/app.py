@@ -3,7 +3,6 @@ Full remodel: clean layout, status badges, live countdown, improved workflows.
 """
 from __future__ import annotations
 
-import base64
 from io import BytesIO
 from datetime import date, datetime, timedelta
 import math
@@ -419,121 +418,91 @@ def is_authenticated() -> bool:
 
 # ── Login ──────────────────────────────────────────────────────────────────────
 def login_page() -> None:
-    """Render a centered access-code login screen matching the reference design."""
-    # Embed logo as base64 so it renders inside custom HTML
-    logo_path = REPO_ROOT / "assets" / "logo.png"
-    logo_tag = ""
-    if logo_path.exists():
-        logo_b64 = base64.b64encode(logo_path.read_bytes()).decode()
-        logo_tag = (
-            f'<img src="data:image/png;base64,{logo_b64}"'
-            ' style="max-height:110px;max-width:100%;object-fit:contain;'
-            'margin-bottom:1.1rem;" />'
-        )
-
+    """Render a centered access-code login screen."""
     st.markdown(
-        f"""<style>
-        section[data-testid="stSidebar"] {{ display: none !important; }}
-        .block-container {{ padding-top: 3rem !important; max-width: 100% !important; }}
-        footer, #MainMenu {{ visibility: hidden; }}
+        """<style>
+        /* Hide sidebar and default chrome on login */
+        section[data-testid="stSidebar"] { display: none !important; }
+        .block-container { padding-top: 0 !important; max-width: 100% !important; }
+        footer, #MainMenu { visibility: hidden; }
 
-        /* Page background */
-        [data-testid="stAppViewContainer"] > .main {{
-            background: #e8eaed !important;
-        }}
-        .stApp {{ background: #e8eaed !important; }}
-
-        /* Branding card — logo + title only, red top accent */
-        .login-brand-card {{
+        /* Full-page centered layout */
+        .login-wrapper {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background: #f0f4fa;
+        }
+        .login-card {
             background: #ffffff;
-            border-radius: 12px;
-            border-top: 6px solid #cc2229;
-            padding: 2.2rem 2rem 1.8rem 2rem;
+            border-radius: 18px;
+            box-shadow: 0 4px 32px rgba(15,32,68,.13);
+            padding: 3rem 2.5rem 2.5rem 2.5rem;
+            width: 380px;
             text-align: center;
+        }
+        .login-logo {
+            width: 90px;
             margin-bottom: 1.4rem;
-            box-shadow: 0 2px 10px rgba(0,0,0,.09);
-        }}
-        .login-title {{
-            font-size: 1.45rem;
-            font-weight: 700;
-            color: #111827;
-            margin: 0;
-            letter-spacing: -.01em;
-        }}
-
-        /* Field label */
-        .login-field-label {{
-            display: block;
-            font-size: .88rem;
+        }
+        .login-title {
+            font-size: 1.75rem;
+            font-weight: 800;
+            color: #1a2744;
+            letter-spacing: -0.03em;
+            margin-bottom: 1.8rem;
+        }
+        .login-error {
+            background: #fde8ea;
+            color: #c0303e;
+            border-radius: 8px;
+            padding: .55rem 1rem;
+            font-size: .85rem;
             font-weight: 600;
-            color: #111827;
-            margin-bottom: .3rem;
-            margin-top: 0;
-        }}
-
-        /* Inputs */
-        div[data-testid="stTextInput"] input {{
-            background: #ffffff !important;
-            border: 1px solid #d1d5db !important;
-            border-radius: 7px !important;
-            font-size: .95rem !important;
-        }}
-        div[data-testid="stTextInput"] input:focus {{
-            border-color: #6b7280 !important;
-            box-shadow: none !important;
-        }}
-
-        /* Start button — dark */
-        .stButton > button {{
-            background: #111827 !important;
-            color: #ffffff !important;
+            margin-top: .75rem;
+        }
+        /* Style the Streamlit input inside the card */
+        .login-card input[type="password"],
+        .login-card input[type="text"] {
+            border-radius: 8px !important;
+            border: 1.5px solid #d0daea !important;
+            font-size: 1rem !important;
+        }
+        /* Start button */
+        .login-card .stButton > button {
+            background: linear-gradient(90deg, #4f8ef7 0%, #3a75e0 100%) !important;
+            color: #fff !important;
             border: none !important;
-            border-radius: 7px !important;
-            font-size: .97rem !important;
-            font-weight: 600 !important;
+            border-radius: 8px !important;
+            font-size: 1rem !important;
+            font-weight: 700 !important;
             width: 100% !important;
-            padding: .7rem !important;
-            margin-top: .9rem !important;
-            letter-spacing: .02em !important;
-            transition: background .15s !important;
-        }}
-        .stButton > button:hover {{
-            background: #1f2937 !important;
-        }}
-
-        /* Error message */
-        .login-error {{
-            background: #fee2e2;
-            color: #b91c1c;
-            border-radius: 7px;
-            padding: .5rem .9rem;
-            font-size: .84rem;
-            font-weight: 600;
-            margin-top: .6rem;
-        }}
-        </style>
-
-        <div style="display:none">{logo_tag}</div>""",
+            padding: .65rem 0 !important;
+            margin-top: .5rem !important;
+            letter-spacing: .01em !important;
+            cursor: pointer !important;
+        }
+        .login-card .stButton > button:hover {
+            background: linear-gradient(90deg, #3a75e0 0%, #2d5ec7 100%) !important;
+        }
+        </style>""",
         unsafe_allow_html=True,
     )
 
-    _, col, _ = st.columns([1, 1.8, 1])
+    # Outer centering wrapper (Streamlit can't do 100vh easily, so we use columns)
+    _, col, _ = st.columns([1, 1.4, 1])
     with col:
-        # Branding card
-        st.markdown(
-            f'<div class="login-brand-card">'
-            f'{logo_tag}'
-            f'<div class="login-title">Attendance Tracking</div>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
+        logo_path = REPO_ROOT / "assets" / "logo.png"
+        if logo_path.exists():
+            st.image(str(logo_path), width=90)
 
-        # Form below card
-        st.markdown("<span class='login-field-label'>Access Code</span>", unsafe_allow_html=True)
+        st.markdown("<div class='login-title'>Attendance Tracking</div>", unsafe_allow_html=True)
+
         access_code = st.text_input(
             "Access Code",
             type="password",
-            placeholder="",
+            placeholder="Enter access code",
             label_visibility="collapsed",
         )
         start_clicked = st.button("Start", use_container_width=True)
