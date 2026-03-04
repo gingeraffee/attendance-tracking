@@ -6,9 +6,7 @@ from __future__ import annotations
 from io import BytesIO
 from datetime import date, datetime, timedelta
 import math
-import os
 from pathlib import Path
-import secrets
 import sys
 
 import pandas as pd
@@ -175,11 +173,11 @@ p, label { color: var(--muted) !important; }
 
 .sidebar-employee-card {
     margin-top: 1.1rem;
-    padding: 1.15rem 1rem .95rem;
+    padding: 1rem .9rem .85rem;
     border-radius: 16px;
-    border: 1px solid rgba(0,0,0,.12);
-    background: #ffffff;
-    box-shadow: 0 8px 22px rgba(10,20,40,.14);
+    border: 1px solid rgba(100,149,255,.22);
+    background: linear-gradient(145deg, rgba(15,28,62,.92) 0%, rgba(9,19,44,.97) 100%);
+    box-shadow: 0 8px 32px rgba(4,10,26,.45), inset 0 1px 0 rgba(120,160,255,.12);
     position: relative;
     overflow: hidden;
 }
@@ -192,65 +190,57 @@ p, label { color: var(--muted) !important; }
     opacity: .85;
 }
 .sidebar-employee-title {
-    font-size: .66rem;
-    letter-spacing: .15em;
+    font-size: .6rem;
+    letter-spacing: .16em;
     text-transform: uppercase;
     font-weight: 700;
-    color: #dc2626 !important;
-    margin-bottom: .4rem;
+    color: #4f8ef7 !important;
+    margin-bottom: .45rem;
 }
 .sidebar-employee-name {
-    font-size: 1.25rem;
+    font-size: 1.05rem;
     font-weight: 800;
-    color: #000000 !important;
+    color: #f0f6ff !important;
     letter-spacing: -.015em;
     line-height: 1.2;
-    margin-bottom: .55rem;
-    padding-bottom: .5rem;
-    border-bottom: 1px solid rgba(17,24,39,.12);
+    margin-bottom: .7rem;
+    padding-bottom: .6rem;
+    border-bottom: 1px solid rgba(255,255,255,.07);
 }
 .sidebar-employee-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: .45rem;
+    gap: .35rem;
 }
 .sidebar-employee-item {
-    background: #f8fafc;
-    border: 1px solid rgba(17,24,39,.10);
+    background: rgba(255,255,255,.04);
+    border: 1px solid rgba(255,255,255,.06);
     border-radius: 8px;
-    padding: .52rem .58rem;
+    padding: .38rem .45rem;
 }
 .sidebar-employee-item.full-width {
     grid-column: 1 / -1;
 }
 .sidebar-employee-item .label {
     display: block;
-    font-size: .58rem;
-    letter-spacing: .09em;
+    font-size: .56rem;
+    letter-spacing: .10em;
     text-transform: uppercase;
-    color: #475569 !important;
+    color: #4a6490 !important;
     font-weight: 700;
-    margin-bottom: .16rem;
+    margin-bottom: .12rem;
 }
 .sidebar-employee-item .value {
     display: block;
-    font-size: .95rem;
+    font-size: .78rem;
     font-weight: 600;
-    color: #0f172a !important;
+    color: #c8d8f4 !important;
     letter-spacing: -.01em;
 }
 .sidebar-employee-item .value.highlight {
     color: #4f8ef7 !important;
-    font-size: 1.08rem;
+    font-size: .9rem;
     font-weight: 800;
-}
-
-/* Ensure spotlight colors override sidebar-wide text color rule */
-section[data-testid="stSidebar"] .sidebar-employee-title {
-    color: #dc2626 !important;
-}
-section[data-testid="stSidebar"] .sidebar-employee-name {
-    color: #000000 !important;
 }
 </style>""",
         unsafe_allow_html=True,
@@ -382,148 +372,14 @@ def to_csv(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False).encode("utf-8")
 
 
-def round_to_half_point(value: float) -> float:
-    """Round a positive value to the nearest 0.5 increment."""
-    return math.floor((float(value) * 2.0) + 0.5) / 2.0
-
-
 def ensure_session_defaults() -> None:
     defaults = {
         "selected_employee_id": None,
         "dashboard_bucket": None,
-        "authenticated": False,
-        "login_error": False,
-        "_auth_token": None,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
-
-
-def is_authenticated() -> bool:
-    """Auth requires both session-state flag AND a matching URL token.
-
-    On a true page reload, Streamlit creates a fresh session (empty
-    session_state), so _auth_token is None and the check fails even though
-    the URL still carries the old token — forcing the user to log in again.
-    """
-    session_token = st.session_state.get("_auth_token")
-    url_token = st.query_params.get("_s")
-    return (
-        st.session_state.get("authenticated", False)
-        and session_token is not None
-        and session_token == url_token
-    )
-
-
-# ── Login ──────────────────────────────────────────────────────────────────────
-def login_page() -> None:
-    """Render a centered access-code login screen."""
-    st.markdown(
-        """<style>
-        /* Hide sidebar and default chrome on login */
-        section[data-testid="stSidebar"] { display: none !important; }
-        .block-container { padding-top: 0 !important; max-width: 100% !important; }
-        footer, #MainMenu { visibility: hidden; }
-
-        /* Full-page centered layout */
-        .login-wrapper {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            background: #f0f4fa;
-        }
-        .login-card {
-            background: #ffffff;
-            border-radius: 18px;
-            box-shadow: 0 4px 32px rgba(15,32,68,.13);
-            padding: 3rem 2.5rem 2.5rem 2.5rem;
-            width: 380px;
-            text-align: center;
-        }
-        .login-logo {
-            width: 90px;
-            margin-bottom: 1.4rem;
-        }
-        .login-title {
-            font-size: 1.75rem;
-            font-weight: 800;
-            color: #1a2744;
-            letter-spacing: -0.03em;
-            margin-bottom: 1.8rem;
-        }
-        .login-error {
-            background: #fde8ea;
-            color: #c0303e;
-            border-radius: 8px;
-            padding: .55rem 1rem;
-            font-size: .85rem;
-            font-weight: 600;
-            margin-top: .75rem;
-        }
-        /* Style the Streamlit input inside the card */
-        .login-card input[type="password"],
-        .login-card input[type="text"] {
-            border-radius: 8px !important;
-            border: 1.5px solid #d0daea !important;
-            font-size: 1rem !important;
-        }
-        /* Start button */
-        .login-card .stButton > button {
-            background: linear-gradient(90deg, #4f8ef7 0%, #3a75e0 100%) !important;
-            color: #fff !important;
-            border: none !important;
-            border-radius: 8px !important;
-            font-size: 1rem !important;
-            font-weight: 700 !important;
-            width: 100% !important;
-            padding: .65rem 0 !important;
-            margin-top: .5rem !important;
-            letter-spacing: .01em !important;
-            cursor: pointer !important;
-        }
-        .login-card .stButton > button:hover {
-            background: linear-gradient(90deg, #3a75e0 0%, #2d5ec7 100%) !important;
-        }
-        </style>""",
-        unsafe_allow_html=True,
-    )
-
-    # Outer centering wrapper (Streamlit can't do 100vh easily, so we use columns)
-    _, col, _ = st.columns([1, 1.4, 1])
-    with col:
-        logo_path = REPO_ROOT / "assets" / "logo.png"
-        if logo_path.exists():
-            st.image(str(logo_path), width=90)
-
-        st.markdown("<div class='login-title'>Attendance Tracking</div>", unsafe_allow_html=True)
-
-        access_code = st.text_input(
-            "Access Code",
-            type="password",
-            placeholder="Enter access code",
-            label_visibility="collapsed",
-        )
-        start_clicked = st.button("Start", use_container_width=True)
-
-        if start_clicked:
-            expected = os.environ.get("ACCESS_CODE", "attendance2024")
-            if access_code == expected:
-                token = secrets.token_urlsafe(16)
-                st.session_state["authenticated"] = True
-                st.session_state["_auth_token"] = token
-                st.session_state["login_error"] = False
-                st.query_params["_s"] = token
-                st.rerun()
-            else:
-                st.session_state["login_error"] = True
-
-        if st.session_state.get("login_error"):
-            st.markdown(
-                "<div class='login-error'>Incorrect access code. Please try again.</div>",
-                unsafe_allow_html=True,
-            )
 
 
 def build_point_history_pdf(employee: dict, history: list[dict]) -> bytes:
@@ -595,17 +451,6 @@ def build_point_history_pdf(employee: dict, history: list[dict]) -> bytes:
 
 def selected_employee_sidebar(conn, employee_id: int | None) -> None:
     if not employee_id:
-        st.markdown(
-            "<div class='sidebar-employee-card'>"
-            "<div class='sidebar-employee-title'>&#9673; Employee Spotlight</div>"
-            "<div class='sidebar-employee-name'>No employee selected</div>"
-            "<div class='sidebar-employee-item full-width'>"
-            "<span class='label'>Tip</span>"
-            "<span class='value'>Select an employee from a table to view their spotlight details here.</span>"
-            "</div>"
-            "</div>",
-            unsafe_allow_html=True,
-        )
         return
 
     if is_pg(conn):
@@ -614,12 +459,9 @@ def selected_employee_sidebar(conn, employee_id: int | None) -> None:
                    e.first_name,
                    e.last_name,
                    COALESCE(e."Location", '') AS building,
-                   GREATEST(
-                       0.0::float8,
-                       ROUND(COALESCE((
-                           SELECT SUM(ph.points) FROM points_history ph WHERE ph.employee_id = e.employee_id
-                       ), 0.0)::numeric, 1)::float8
-                   ) AS point_total,
+                   GREATEST(0.0, ROUND(COALESCE((
+                       SELECT SUM(ph.points) FROM points_history ph WHERE ph.employee_id = e.employee_id
+                   ), 0.0), 1)) AS point_total,
                    (
                        SELECT MAX(ph2.point_date::date)
                          FROM points_history ph2
@@ -818,17 +660,17 @@ def dashboard_page(conn, building: str) -> None:
              GROUP BY (ph.point_date::date)
              ORDER BY (ph.point_date::date)
         '''
-        sql_hotspots_6m = f'''
+        sql_hotspots_365 = f'''
             SELECT EXTRACT(DOW FROM ph.point_date::date)::int AS dow,
-                   COALESCE(e."Location", '') AS building,
+                   ROUND(COALESCE(SUM(ph.points), 0.0)::numeric, 1)::float8 AS total_points,
                    COUNT(*) AS incidents
               FROM points_history ph
-              JOIN employees e ON e.employee_id = ph.employee_id
-             WHERE (ph.point_date::date) >= (%s::date)
+             WHERE ph.employee_id IN ({ph})
+               AND (ph.point_date::date) >= (%s::date)
                AND EXTRACT(DOW FROM ph.point_date::date) NOT IN (0, 6)
                AND COALESCE(ph.points, 0.0) > 0.0
-             GROUP BY EXTRACT(DOW FROM ph.point_date::date), COALESCE(e."Location", '')
-             ORDER BY EXTRACT(DOW FROM ph.point_date::date), COALESCE(e."Location", '')
+             GROUP BY EXTRACT(DOW FROM ph.point_date::date)
+             ORDER BY total_points DESC
         '''
     else:
         sql_emp_detail = f'''
@@ -945,17 +787,17 @@ def dashboard_page(conn, building: str) -> None:
              GROUP BY date(ph.point_date)
              ORDER BY date(ph.point_date)
         '''
-        sql_hotspots_6m = f'''
+        sql_hotspots_365 = f'''
             SELECT CAST(strftime('%w', ph.point_date) AS INTEGER) AS dow,
-                   COALESCE(e."Location", '') AS building,
+                   ROUND(COALESCE(SUM(ph.points), 0.0), 1) AS total_points,
                    COUNT(*) AS incidents
               FROM points_history ph
-              JOIN employees e ON e.employee_id = ph.employee_id
-             WHERE date(ph.point_date) >= date(?)
+             WHERE ph.employee_id IN ({ph})
+               AND date(ph.point_date) >= date(?)
                AND strftime('%w', ph.point_date) NOT IN ('0', '6')
                AND COALESCE(ph.points, 0.0) > 0.0
-             GROUP BY CAST(strftime('%w', ph.point_date) AS INTEGER), COALESCE(e."Location", '')
-             ORDER BY CAST(strftime('%w', ph.point_date) AS INTEGER), COALESCE(e."Location", '')
+             GROUP BY CAST(strftime('%w', ph.point_date) AS INTEGER)
+             ORDER BY total_points DESC
         '''
 
     emp_detail_rows = [dict(r) for r in fetchall(conn, sql_emp_detail, tuple(emp_ids))]
@@ -1063,9 +905,7 @@ def dashboard_page(conn, building: str) -> None:
             if selected_rows:
                 idx = int(selected_rows[0])
                 if 0 <= idx < len(df_emps):
-                    new_selected_id = int(df_emps.iloc[idx]["employee_id"])
-                    if st.session_state.get("selected_employee_id") != new_selected_id:
-                        st.session_state["selected_employee_id"] = new_selected_id
+                    st.session_state["selected_employee_id"] = int(df_emps.iloc[idx]["employee_id"])
         else:
             info_box("None 🎉")
 
@@ -1132,25 +972,15 @@ def dashboard_page(conn, building: str) -> None:
     current_points = {r.get("building") or "": float(r.get("pts") or 0.0) for r in current_rows}
     prior_points = {r.get("building") or "": float(r.get("pts") or 0.0) for r in prior_rows}
 
-    active_emp_point_rows = [dict(r) for r in fetchall(conn, sql_active_emp_points)]
-    point_totals_by_building = {b: [] for b in BUILDINGS}
-    for r in active_emp_point_rows:
-        b = (r.get("building") or "").strip()
-        if b in point_totals_by_building:
-            point_totals_by_building[b].append(float(r.get("point_total") or 0.0))
-
     snap_rows = []
     for b in BUILDINGS:
         headcount = int(active_by_build.get(b) or 0)
         cur_total = float(current_points.get(b) or 0.0)
         prev_total = float(prior_points.get(b) or 0.0)
-        employee_point_totals = point_totals_by_building.get(b) or []
-        avg_point_total = (sum(employee_point_totals) / headcount) if headcount else 0.0
-        rounded_avg_point_total = round_to_half_point(avg_point_total)
-        cur_avg = (cur_total / headcount) if headcount else 0.0
-        prev_avg = (prev_total / headcount) if headcount else 0.0
-        if prev_avg > 0:
-            pct_change = ((cur_avg - prev_avg) / prev_avg) * 100.0
+        cur_rate = (cur_total / headcount * 100.0) if headcount else 0.0
+        prev_rate = (prev_total / headcount * 100.0) if headcount else 0.0
+        if prev_rate > 0:
+            pct_change = ((cur_rate - prev_rate) / prev_rate) * 100.0
             pct_txt = f"{pct_change:+.1f}%"
         else:
             pct_txt = "—"
@@ -1160,7 +990,7 @@ def dashboard_page(conn, building: str) -> None:
             {
                 "Building": b,
                 "Active Employees": headcount,
-                "Avg Point Total / Employee": f"{rounded_avg_point_total:.1f}",
+                "Points / 100 Active (30d)": f"{cur_rate:.1f}",
                 "% Change vs Prior 30 Days": pct_txt,
                 "Most Common Reason (30d)": most_common_reason,
             }
@@ -1243,31 +1073,24 @@ def dashboard_page(conn, building: str) -> None:
     trend_df = trend_df.rename(columns={"point_day": "Date"}).set_index("Date")
     st.line_chart(trend_df)
 
-    st.markdown("#### Day-of-Week Hotspots (Last 6 Months, Weekdays Only)")
-    since_6m = (today - timedelta(days=182)).isoformat()
-    dow_rows = [dict(r) for r in fetchall(conn, sql_hotspots_6m, (since_6m,))]
+    st.markdown("#### Day-of-Week Hotspots (Last 365 Days, Weekdays Only)")
+    dow_rows = [dict(r) for r in fetchall(conn, sql_hotspots_365, (*emp_ids, (today - timedelta(days=365)).isoformat()))]
     dow_map = {1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri"}
     if dow_rows:
-        count_map = {}
-        for r in dow_rows:
-            dow = int(r.get("dow") or 0)
-            building = (r.get("building") or "").strip()
-            count_map[(dow, building)] = int(r.get("incidents") or 0)
-
         df_dow = pd.DataFrame(
             [
                 {
-                    "Day of Week": dow_map[d],
-                    "APIM": count_map.get((d, "APIM"), 0),
-                    "APIS": count_map.get((d, "APIS"), 0),
-                    "AAP": count_map.get((d, "AAP"), 0),
+                    "Day of Week": dow_map.get(int(r.get("dow") or 0), str(r.get("dow") or "—")),
+                    "Total Points": f"{float(r.get('total_points') or 0.0):.1f}",
+                    "Incidents": int(r.get("incidents") or 0),
+                    "Avg Points/Incident": f"{(float(r.get('total_points') or 0.0) / max(int(r.get('incidents') or 0), 1)):.2f}",
                 }
-                for d in [1, 2, 3, 4, 5]
+                for r in dow_rows
             ]
         )
         st.dataframe(df_dow, use_container_width=True, hide_index=True)
     else:
-        info_box("No weekday point incidents in the last 6 months for this filter.")
+        info_box("No point incidents in the last 365 days for this filter.")
 
 
 # ── Employees ─────────────────────────────────────────────────────────────────
@@ -1866,6 +1689,8 @@ def main() -> None:
             key="global_building",
             label_visibility="collapsed",
         )
+
+        # Placeholder so the spotlight renders AFTER page content updates session state
         spotlight_placeholder = st.empty()
 
     if page == "Dashboard":
@@ -1881,12 +1706,10 @@ def main() -> None:
     else:
         system_updates_page(conn)
 
-    # Render spotlight after page logic so selection changes apply immediately.
+    # Render spotlight after page runs so it always reflects the current selection
     with spotlight_placeholder.container():
         selected_employee_sidebar(conn, st.session_state.get("selected_employee_id"))
 
-ensure_session_defaults()
-if not is_authenticated():
-    login_page()
-else:
+
+if __name__ == "__main__":
     main()
