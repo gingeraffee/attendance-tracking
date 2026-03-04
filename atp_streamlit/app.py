@@ -1043,6 +1043,7 @@ def dashboard_page(conn, building: str) -> None:
         selected = (active_bucket == key) if key != "all" else (active_bucket not in bucket_defs)
         accent = tile_palette[key]["accent"]
         glow = tile_palette[key]["glow"]
+        # Keep style vars local and explicit to avoid NameError in f-string interpolation.
         card_border = "rgba(26,39,68,.16)" if not selected else accent
         card_shadow = f"0 0 0 2px {glow}, 0 8px 18px rgba(15,32,68,.12)" if selected else "0 4px 14px rgba(15,32,68,.08)"
         employees_count = len(emp_detail_rows) if key == "all" else bucket_counts[key]
