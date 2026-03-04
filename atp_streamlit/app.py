@@ -8,6 +8,7 @@ from datetime import date, datetime, timedelta
 import math
 import os
 from pathlib import Path
+import secrets
 import sys
 
 import pandas as pd
@@ -392,10 +393,27 @@ def ensure_session_defaults() -> None:
         "dashboard_bucket": None,
         "authenticated": False,
         "login_error": False,
+        "_auth_token": None,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
+
+
+def is_authenticated() -> bool:
+    """Auth requires both session-state flag AND a matching URL token.
+
+    On a true page reload, Streamlit creates a fresh session (empty
+    session_state), so _auth_token is None and the check fails even though
+    the URL still carries the old token — forcing the user to log in again.
+    """
+    session_token = st.session_state.get("_auth_token")
+    url_token = st.query_params.get("_s")
+    return (
+        st.session_state.get("authenticated", False)
+        and session_token is not None
+        and session_token == url_token
+    )
 
 
 # ── Login ──────────────────────────────────────────────────────────────────────
@@ -492,8 +510,11 @@ def login_page() -> None:
         if start_clicked:
             expected = os.environ.get("ACCESS_CODE", "attendance2024")
             if access_code == expected:
+                token = secrets.token_urlsafe(16)
                 st.session_state["authenticated"] = True
+                st.session_state["_auth_token"] = token
                 st.session_state["login_error"] = False
+                st.query_params["_s"] = token
                 st.rerun()
             else:
                 st.session_state["login_error"] = True
@@ -1865,7 +1886,7 @@ def main() -> None:
         selected_employee_sidebar(conn, st.session_state.get("selected_employee_id"))
 
 ensure_session_defaults()
-if not st.session_state["authenticated"]:
+if not is_authenticated():
     login_page()
 else:
     main()
