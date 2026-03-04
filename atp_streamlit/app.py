@@ -1727,8 +1727,7 @@ def main() -> None:
             key="global_building",
             label_visibility="collapsed",
         )
-
-        selected_employee_sidebar(conn, st.session_state.get("selected_employee_id"))
+        spotlight_placeholder = st.empty()
 
     if page == "Dashboard":
         dashboard_page(conn, building)
@@ -1742,6 +1741,10 @@ def main() -> None:
         exports_page(conn, building)
     else:
         system_updates_page(conn)
+
+    # Render spotlight after page logic so selection changes apply immediately.
+    with spotlight_placeholder.container():
+        selected_employee_sidebar(conn, st.session_state.get("selected_employee_id"))
 
 if __name__ == "__main__":
     main()
