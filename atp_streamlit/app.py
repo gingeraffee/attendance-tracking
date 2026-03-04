@@ -849,7 +849,8 @@ def dashboard_page(conn, building: str) -> None:
         sql_weekday_window = f'''
             SELECT EXTRACT(DOW FROM ph.point_date::date)::int AS dow,
                    ROUND(COALESCE(SUM(ph.points), 0.0)::numeric, 1)::float8 AS total_points,
-                   COUNT(*) AS incidents
+                   COUNT(*) AS incidents,
+                   COUNT(DISTINCT ph.employee_id) AS employees_pointed
               FROM points_history ph
              WHERE ph.employee_id IN ({ph})
                AND (ph.point_date::date) >= (%s::date)
@@ -988,7 +989,8 @@ def dashboard_page(conn, building: str) -> None:
         sql_weekday_window = f'''
             SELECT CAST(strftime('%w', ph.point_date) AS INTEGER) AS dow,
                    ROUND(COALESCE(SUM(ph.points), 0.0), 1) AS total_points,
-                   COUNT(*) AS incidents
+                   COUNT(*) AS incidents,
+                   COUNT(DISTINCT ph.employee_id) AS employees_pointed
               FROM points_history ph
              WHERE ph.employee_id IN ({ph})
                AND date(ph.point_date) >= date(?)
@@ -1368,6 +1370,7 @@ def dashboard_page(conn, building: str) -> None:
     current_by_dow = {
         int(r.get("dow") or 0): {
             "incidents": int(r.get("incidents") or 0),
+            "employees_pointed": int(r.get("employees_pointed") or 0),
             "points": float(r.get("total_points") or 0.0),
         }
         for r in current_rows
@@ -1375,6 +1378,7 @@ def dashboard_page(conn, building: str) -> None:
     prior_by_dow = {
         int(r.get("dow") or 0): {
             "incidents": int(r.get("incidents") or 0),
+            "employees_pointed": int(r.get("employees_pointed") or 0),
             "points": float(r.get("total_points") or 0.0),
         }
         for r in prior_rows
@@ -1399,8 +1403,9 @@ def dashboard_page(conn, building: str) -> None:
     table_rows = []
     metric_values = {}
     for dow in dow_order:
-        stats = current_by_dow.get(dow, {"incidents": 0, "points": 0.0})
+        stats = current_by_dow.get(dow, {"incidents": 0, "employees_pointed": 0, "points": 0.0})
         incidents = int(stats.get("incidents") or 0)
+        employees_pointed = int(stats.get("employees_pointed") or 0)
         points = float(stats.get("points") or 0.0)
         selected_val = metric_value(stats, metric_choice)
         metric_values[dow] = selected_val
@@ -1418,7 +1423,7 @@ def dashboard_page(conn, building: str) -> None:
         table_rows.append(
             {
                 "Weekday": dow_labels[dow],
-                "Employees Pointed": incidents,
+                "Employees Pointed": employees_pointed,
                 "Total Points": round(points, 1),
                 "Top Reason": top_reason_day,
             }
@@ -1439,8 +1444,8 @@ def dashboard_page(conn, building: str) -> None:
 
     delta_rows = []
     for dow in dow_order:
-        cur_val = metric_value(current_by_dow.get(dow, {"incidents": 0, "points": 0.0}), metric_choice)
-        prev_val = metric_value(prior_by_dow.get(dow, {"incidents": 0, "points": 0.0}), metric_choice)
+        cur_val = metric_value(current_by_dow.get(dow, {"incidents": 0, "employees_pointed": 0, "points": 0.0}), metric_choice)
+        prev_val = metric_value(prior_by_dow.get(dow, {"incidents": 0, "employees_pointed": 0, "points": 0.0}), metric_choice)
         if prev_val > 0:
             pct = ((cur_val - prev_val) / prev_val) * 100.0
             pct_txt = f"{pct:+.1f}%"
