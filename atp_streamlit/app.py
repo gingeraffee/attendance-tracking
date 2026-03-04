@@ -627,9 +627,9 @@ def build_point_history_pdf(employee: dict, history: list[dict]) -> bytes:
     return buffer.getvalue()
 
 
-def selected_employee_sidebar(conn, employee_id: int | None) -> None:
+def get_employee_spotlight(conn, employee_id: int | None) -> dict | None:
     if not employee_id:
-        return
+        return None
 
     if is_pg(conn):
         sql = '''
@@ -677,9 +677,14 @@ def selected_employee_sidebar(conn, employee_id: int | None) -> None:
         rows = fetchall(conn, sql, (employee_id,))
 
     if not rows:
-        return
+        return None
+    return dict(rows[0])
 
-    emp = dict(rows[0])
+
+def selected_employee_sidebar(conn, employee_id: int | None) -> None:
+    emp = get_employee_spotlight(conn, employee_id)
+    if not emp:
+        return
     full_name = f"{emp.get('first_name') or ''} {emp.get('last_name') or ''}".strip() or "Unknown Employee"
     st.markdown(
         "<div class='sidebar-employee-card'>"
@@ -1143,6 +1148,22 @@ def dashboard_page(conn, building: str) -> None:
                 idx = int(selected_rows[0])
                 if 0 <= idx < len(df_emps):
                     st.session_state["selected_employee_id"] = int(df_emps.iloc[idx]["employee_id"])
+
+            spotlight_emp = get_employee_spotlight(conn, st.session_state.get("selected_employee_id"))
+            if spotlight_emp:
+                divider()
+                section_label("Employee Spotlight")
+                full_name = f"{spotlight_emp.get('first_name') or ''} {spotlight_emp.get('last_name') or ''}".strip() or "Unknown Employee"
+                st.markdown(
+                    "<div class='card-sm'>"
+                    f"<div style='font-size:.95rem;font-weight:800;color:#1a2744;margin-bottom:.25rem'>{full_name}</div>"
+                    f"<div style='font-size:.8rem;color:#5c6f8c;margin:.1rem 0'><strong>Employee #:</strong> {spotlight_emp.get('employee_id') or '—'}</div>"
+                    f"<div style='font-size:.8rem;color:#5c6f8c;margin:.1rem 0'><strong>Last Point Date:</strong> {fmt_date(spotlight_emp.get('last_positive_point_date'))}</div>"
+                    f"<div style='font-size:.8rem;color:#5c6f8c;margin:.1rem 0'><strong>2 Month Roll Off Date:</strong> {fmt_date(spotlight_emp.get('rolloff_date'))}</div>"
+                    f"<div style='font-size:.8rem;color:#5c6f8c;margin:.1rem 0'><strong>Perfect Attendance Date:</strong> {fmt_date(spotlight_emp.get('perfect_attendance'))}</div>"
+                    "</div>",
+                    unsafe_allow_html=True,
+                )
         else:
             info_box("None 🎉")
 
