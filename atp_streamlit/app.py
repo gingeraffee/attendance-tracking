@@ -993,12 +993,6 @@ def dashboard_page(conn, building: str) -> None:
         for key, fn in bucket_defs.items()
     }
 
-    selected_bucket = st.query_params.get("dashboard_bucket")
-    if selected_bucket in bucket_defs:
-        st.session_state["dashboard_bucket"] = selected_bucket
-    elif selected_bucket == "all":
-        st.session_state.pop("dashboard_bucket", None)
-
     tile_cols = st.columns(5)
     tile_specs = [
         ("all", "All Employees"),
@@ -1008,35 +1002,20 @@ def dashboard_page(conn, building: str) -> None:
         ("7", "7+ Pts"),
     ]
     active_bucket = st.session_state.get("dashboard_bucket")
-    tile_palette = {
-        "all": {"accent": "#5c6f8c", "glow": "rgba(92,111,140,.22)"},
-        "0": {"accent": "#00a87a", "glow": "rgba(0,168,122,.25)"},
-        "1-4": {"accent": "#4f8ef7", "glow": "rgba(79,142,247,.25)"},
-        "5-6": {"accent": "#e6960a", "glow": "rgba(230,150,10,.28)"},
-        "7": {"accent": "#e0394a", "glow": "rgba(224,57,74,.32)"},
-    }
 
     for col, (key, label) in zip(tile_cols, tile_specs):
-        selected = (active_bucket == key) if key != "all" else (active_bucket not in bucket_defs)
-        accent = tile_palette[key]["accent"]
-        glow = tile_palette[key]["glow"]
-        border = "rgba(26,39,68,.16)" if not selected else accent
-        shadow = f"0 0 0 2px {glow}, 0 8px 18px rgba(15,32,68,.12)" if selected else "0 4px 14px rgba(15,32,68,.08)"
         employees_count = len(emp_detail_rows) if key == "all" else bucket_counts[key]
-        col.markdown(
-            f"<a href='?dashboard_bucket={key}' target='_self' style='text-decoration:none;display:block'>"
-            f"<div class='card-sm' style='margin-bottom:.45rem;padding:.72rem .9rem;"
-            f"background:#ffffff;border:1px solid {border};box-shadow:{shadow};cursor:pointer;'>"
-            f"<div style='height:4px;border-radius:999px;background:{accent};margin:-.2rem 0 .6rem 0'></div>"
-            f"<div style='font-size:.68rem;letter-spacing:.09em;text-transform:uppercase;color:#5c6f8c;font-weight:700'>{label}</div>"
-            f"<div style='display:flex;align-items:baseline;justify-content:space-between;margin-top:.18rem'>"
-            f"<span style='font-size:1.95rem;font-weight:800;color:#1a2744;line-height:1'>{employees_count}</span>"
-            f"<span style='font-size:.72rem;font-weight:700;color:{accent};text-transform:uppercase;letter-spacing:.05em'>&nbsp;employees</span>"
-            f"</div>"
-            f"</div>"
-            f"</a>",
-            unsafe_allow_html=True,
-        )
+        selected = (active_bucket == key) if key != "all" else (active_bucket not in bucket_defs)
+        button_label = f"{label} ({employees_count})"
+        if selected:
+            button_label = f"✓ {button_label}"
+
+        if col.button(button_label, key=f"dashboard_bucket_{key}", use_container_width=True):
+            if key == "all":
+                st.session_state.pop("dashboard_bucket", None)
+            else:
+                st.session_state["dashboard_bucket"] = key
+            st.rerun()
 
     col_left, col_right = st.columns([1.6, 1], gap="large")
 
