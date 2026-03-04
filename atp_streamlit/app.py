@@ -1386,16 +1386,26 @@ def dashboard_page(conn, building: str) -> None:
             return points
         return (incidents / denominator_count) * 100.0
 
-    chart_rows = []
+    table_rows = []
     metric_values = {}
     for dow in dow_order:
         stats = current_by_dow.get(dow, {"incidents": 0, "points": 0.0})
-        val = metric_value(stats, metric_choice)
-        metric_values[dow] = val
-        chart_rows.append({"Weekday": dow_labels[dow], "Value": val})
+        incidents = int(stats.get("incidents") or 0)
+        points = float(stats.get("points") or 0.0)
+        rate = (incidents / denominator_count) * 100.0
+        selected_val = metric_value(stats, metric_choice)
+        metric_values[dow] = selected_val
+        table_rows.append(
+            {
+                "Weekday": dow_labels[dow],
+                "Incidents": incidents,
+                "Total Points": round(points, 1),
+                "Rate (per 100 active)": round(rate, 2),
+                f"Selected ({metric_choice})": round(selected_val, 2) if metric_choice == "Rate" else round(selected_val, 1),
+            }
+        )
 
-    chart_df = pd.DataFrame(chart_rows).set_index("Weekday")
-    st.bar_chart(chart_df)
+    st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True)
 
     worst_dow = max(dow_order, key=lambda d: metric_values.get(d, 0.0))
     worst_label = dow_labels[worst_dow]
