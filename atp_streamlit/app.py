@@ -242,6 +242,14 @@ p, label { color: var(--muted) !important; }
     font-size: 1.08rem;
     font-weight: 800;
 }
+
+/* Ensure spotlight colors override sidebar-wide text color rule */
+section[data-testid="stSidebar"] .sidebar-employee-title {
+    color: #dc2626 !important;
+}
+section[data-testid="stSidebar"] .sidebar-employee-name {
+    color: #000000 !important;
+}
 </style>""",
         unsafe_allow_html=True,
     )
