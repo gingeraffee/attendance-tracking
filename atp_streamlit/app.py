@@ -674,8 +674,7 @@ def dashboard_page(conn, building: str) -> None:
                    COUNT(*) AS incidents
               FROM points_history ph
               JOIN employees e ON e.employee_id = ph.employee_id
-             WHERE ph.employee_id IN ({ph})
-               AND (ph.point_date::date) >= (%s::date)
+             WHERE (ph.point_date::date) >= (%s::date)
                AND EXTRACT(DOW FROM ph.point_date::date) NOT IN (0, 6)
                AND COALESCE(ph.points, 0.0) > 0.0
              GROUP BY EXTRACT(DOW FROM ph.point_date::date), COALESCE(e."Location", '')
@@ -802,8 +801,7 @@ def dashboard_page(conn, building: str) -> None:
                    COUNT(*) AS incidents
               FROM points_history ph
               JOIN employees e ON e.employee_id = ph.employee_id
-             WHERE ph.employee_id IN ({ph})
-               AND date(ph.point_date) >= date(?)
+             WHERE date(ph.point_date) >= date(?)
                AND strftime('%w', ph.point_date) NOT IN ('0', '6')
                AND COALESCE(ph.points, 0.0) > 0.0
              GROUP BY CAST(strftime('%w', ph.point_date) AS INTEGER), COALESCE(e."Location", '')
@@ -1095,7 +1093,7 @@ def dashboard_page(conn, building: str) -> None:
 
     st.markdown("#### Day-of-Week Hotspots (Last 6 Months, Weekdays Only)")
     since_6m = (today - timedelta(days=182)).isoformat()
-    dow_rows = [dict(r) for r in fetchall(conn, sql_hotspots_6m, (*emp_ids, since_6m))]
+    dow_rows = [dict(r) for r in fetchall(conn, sql_hotspots_6m, (since_6m,))]
     dow_map = {1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri"}
     if dow_rows:
         count_map = {}
