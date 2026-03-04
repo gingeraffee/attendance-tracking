@@ -913,7 +913,10 @@ def dashboard_page(conn, building: str) -> None:
             if selected_rows:
                 idx = int(selected_rows[0])
                 if 0 <= idx < len(df_emps):
-                    st.session_state["selected_employee_id"] = int(df_emps.iloc[idx]["employee_id"])
+                    new_selected_id = int(df_emps.iloc[idx]["employee_id"])
+                    if st.session_state.get("selected_employee_id") != new_selected_id:
+                        st.session_state["selected_employee_id"] = new_selected_id
+                        st.rerun()
         else:
             info_box("None 🎉")
 
@@ -1715,8 +1718,7 @@ def main() -> None:
             label_visibility="collapsed",
         )
 
-        # Placeholder so the spotlight renders AFTER page content updates session state
-        spotlight_placeholder = st.empty()
+        selected_employee_sidebar(conn, st.session_state.get("selected_employee_id"))
 
     if page == "Dashboard":
         dashboard_page(conn, building)
@@ -1730,11 +1732,6 @@ def main() -> None:
         exports_page(conn, building)
     else:
         system_updates_page(conn)
-
-    # Render spotlight after page runs so it always reflects the current selection
-    with spotlight_placeholder.container():
-        selected_employee_sidebar(conn, st.session_state.get("selected_employee_id"))
-
 
 if __name__ == "__main__":
     main()
