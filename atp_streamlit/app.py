@@ -993,42 +993,6 @@ def dashboard_page(conn, building: str) -> None:
         for key, fn in bucket_defs.items()
     }
 
-
-    st.markdown(
-        """<style>
-        .st-key-dashboard_bucket_all div[data-testid="stButton"],
-        .st-key-dashboard_bucket_0 div[data-testid="stButton"],
-        .st-key-dashboard_bucket_1-4 div[data-testid="stButton"],
-        .st-key-dashboard_bucket_5-6 div[data-testid="stButton"],
-        .st-key-dashboard_bucket_7 div[data-testid="stButton"] {
-            margin-top: -92px !important;
-            position: relative;
-            z-index: 30;
-        }
-        .st-key-dashboard_bucket_all div[data-testid="stButton"] > button,
-        .st-key-dashboard_bucket_0 div[data-testid="stButton"] > button,
-        .st-key-dashboard_bucket_1-4 div[data-testid="stButton"] > button,
-        .st-key-dashboard_bucket_5-6 div[data-testid="stButton"] > button,
-        .st-key-dashboard_bucket_7 div[data-testid="stButton"] > button {
-            background: transparent !important;
-            border: 0 !important;
-            box-shadow: none !important;
-            min-height: 92px !important;
-            width: 100% !important;
-            padding: 0 !important;
-        }
-        .st-key-dashboard_bucket_all div[data-testid="stButton"] > button p,
-        .st-key-dashboard_bucket_0 div[data-testid="stButton"] > button p,
-        .st-key-dashboard_bucket_1-4 div[data-testid="stButton"] > button p,
-        .st-key-dashboard_bucket_5-6 div[data-testid="stButton"] > button p,
-        .st-key-dashboard_bucket_7 div[data-testid="stButton"] > button p {
-            opacity: 0 !important;
-            margin: 0 !important;
-        }
-        </style>""",
-        unsafe_allow_html=True,
-    )
-
     tile_cols = st.columns(5)
     tile_specs = [
         ("all", "All Employees"),
@@ -1041,20 +1005,12 @@ def dashboard_page(conn, building: str) -> None:
 
     for col, (key, label) in zip(tile_cols, tile_specs):
         employees_count = len(emp_detail_rows) if key == "all" else bucket_counts[key]
+        selected = (active_bucket == key) if key != "all" else (active_bucket not in bucket_defs)
+        button_label = f"{label} ({employees_count})"
+        if selected:
+            button_label = f"✓ {button_label}"
 
-        col.markdown(
-            f"<div class='card-sm' style='margin-bottom:.45rem;padding:.72rem .9rem;"
-            f"background:#ffffff;border:1px solid {border};box-shadow:{shadow};cursor:pointer;pointer-events:none;'>"
-            f"<div style='height:4px;border-radius:999px;background:{accent};margin:-.2rem 0 .6rem 0'></div>"
-            f"<div style='font-size:.68rem;letter-spacing:.09em;text-transform:uppercase;color:#5c6f8c;font-weight:700'>{label}</div>"
-            f"<div style='display:flex;align-items:baseline;justify-content:space-between;margin-top:.18rem'>"
-            f"<span style='font-size:1.95rem;font-weight:800;color:#1a2744;line-height:1'>{employees_count}</span>"
-            f"<span style='font-size:.72rem;font-weight:700;color:{accent};text-transform:uppercase;letter-spacing:.05em'>&nbsp;employees</span>"
-            f"</div></div>",
-            unsafe_allow_html=True,
-        )
-
-        if col.button("filter", key=f"dashboard_bucket_{key}", use_container_width=True):
+        if col.button(button_label, key=f"dashboard_bucket_{key}", use_container_width=True):
             if key == "all":
                 st.session_state.pop("dashboard_bucket", None)
             else:
