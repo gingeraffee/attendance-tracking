@@ -1040,11 +1040,16 @@ def dashboard_page(conn, building: str) -> None:
     active_bucket = st.session_state.get("dashboard_bucket")
 
     for col, (key, label) in zip(tile_cols, tile_specs):
+        selected = (active_bucket == key) if key != "all" else (active_bucket not in bucket_defs)
+        accent = tile_palette[key]["accent"]
+        glow = tile_palette[key]["glow"]
+        card_border = "rgba(26,39,68,.16)" if not selected else accent
+        card_shadow = f"0 0 0 2px {glow}, 0 8px 18px rgba(15,32,68,.12)" if selected else "0 4px 14px rgba(15,32,68,.08)"
         employees_count = len(emp_detail_rows) if key == "all" else bucket_counts[key]
 
         col.markdown(
             f"<div class='card-sm' style='margin-bottom:.45rem;padding:.72rem .9rem;"
-            f"background:#ffffff;border:1px solid {border};box-shadow:{shadow};cursor:pointer;pointer-events:none;'>"
+            f"background:#ffffff;border:1px solid {card_border};box-shadow:{card_shadow};cursor:pointer;pointer-events:none;'>"
             f"<div style='height:4px;border-radius:999px;background:{accent};margin:-.2rem 0 .6rem 0'></div>"
             f"<div style='font-size:.68rem;letter-spacing:.09em;text-transform:uppercase;color:{accent};font-weight:700'>{label}</div>"
             f"<div style='display:flex;align-items:baseline;justify-content:space-between;margin-top:.18rem'>"
