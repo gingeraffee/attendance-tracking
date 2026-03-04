@@ -1038,13 +1038,6 @@ def dashboard_page(conn, building: str) -> None:
         ("7", "7+ Pts"),
     ]
     active_bucket = st.session_state.get("dashboard_bucket")
-    tile_palette = {
-        "all": {"accent": "#5c6f8c", "glow": "rgba(92,111,140,.22)"},
-        "0": {"accent": "#00a87a", "glow": "rgba(0,168,122,.25)"},
-        "1-4": {"accent": "#4f8ef7", "glow": "rgba(79,142,247,.25)"},
-        "5-6": {"accent": "#e6960a", "glow": "rgba(230,150,10,.28)"},
-        "7": {"accent": "#e0394a", "glow": "rgba(224,57,74,.32)"},
-    }
 
     for col, (key, label) in zip(tile_cols, tile_specs):
         selected = (active_bucket == key) if key != "all" else (active_bucket not in bucket_defs)
