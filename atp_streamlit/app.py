@@ -910,6 +910,9 @@ def _dashboard_css(reduce_motion: bool) -> None:
         .activity-card {{background:#fff;border:1px solid rgba(18,34,67,.09);border-radius:14px;padding:.85rem .95rem;box-shadow:0 4px 18px rgba(15,32,68,.08);}}
         .activity-row {{padding:.45rem .2rem;border-bottom:1px solid rgba(18,34,67,.07);animation:""" + ("none" if reduce_motion else "fadeSlide .45s ease") + """;}}
         .activity-row:last-child {{border-bottom:none;}}
+        .st-key-dashboard_manual_refresh div[data-testid='stButton'] > button {{background:linear-gradient(135deg,#0f1f45 0%, #12356b 55%, #0f5f8f 100%) !important;color:#eaf3ff !important;border:1px solid rgba(111,186,255,.45) !important;border-radius:10px !important;font-weight:700 !important;letter-spacing:.02em !important;box-shadow:0 6px 20px rgba(10,26,56,.35), inset 0 1px 0 rgba(255,255,255,.12) !important;transition:{motion} !important;}}
+        .st-key-dashboard_manual_refresh div[data-testid='stButton'] > button:hover {{transform:{'none' if reduce_motion else 'translateY(-1px)'} !important;box-shadow:0 9px 24px rgba(10,26,56,.42), 0 0 0 1px rgba(127,203,255,.35) inset !important;filter:brightness(1.03);}}
+        .st-key-dashboard_manual_refresh div[data-testid='stButton'] > button:active {{transform:translateY(0) !important;}}
         @media (max-width: 1250px) {{ .tile-grid {{grid-template-columns:repeat(3,minmax(0,1fr));}} }}
         @media (max-width: 760px) {{ .tile-grid {{grid-template-columns:repeat(1,minmax(0,1fr));}} .dash-top {{flex-direction:column;}} }}
         @keyframes dashPulse {{0%,100%{{opacity:.45;transform:scale(.95);}}50%{{opacity:1;transform:scale(1.05);}}}}
@@ -1034,7 +1037,7 @@ def dashboard_page(conn, building: str) -> None:
 
     ctrl1, ctrl2 = st.columns([1, 3])
     with ctrl1:
-        if st.button("Manual Refresh", use_container_width=True):
+        if st.button("Manual Refresh", use_container_width=True, key="dashboard_manual_refresh"):
             st.session_state["dashboard_last_refresh"] = datetime.now()
             st.session_state["dashboard_refresh_cycle"] += 1
             st.rerun()
@@ -1159,14 +1162,14 @@ def dashboard_page(conn, building: str) -> None:
         gt1 = fetchall(
             conn,
             f"""
-            SELECT e.employee_id, e.last_name, e.first_name, COALESCE(e.location,'—') AS building,
+            SELECT e.employee_id, e.last_name, e.first_name, COALESCE(e."Location",'—') AS building,
                    SUM(COALESCE(ph.points,0)) AS points_30d,
                    MAX({point_day}) AS last_point_date
               FROM employees e
               JOIN points_history ph ON ph.employee_id = e.employee_id
              WHERE e.employee_id IN ({ph})
                AND {point_day} >= {'%s::date' if is_pg(conn) else 'date(?)'}
-             GROUP BY e.employee_id, e.last_name, e.first_name, e.location
+             GROUP BY e.employee_id, e.last_name, e.first_name, e."Location"
             HAVING SUM(COALESCE(ph.points,0)) > 1.0
              ORDER BY points_30d DESC
             """,
