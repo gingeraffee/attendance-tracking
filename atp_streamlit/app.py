@@ -598,7 +598,7 @@ def render_hr_live_monitor(
     points_7d: int,
     rolloffs_due_7d: int,
     perfect_due_7d: int,
-    label: str = "Monitoring attendance activity",
+    label: str = "At a glance",
 ):
     """
     Data-driven 'live monitor' animation.
