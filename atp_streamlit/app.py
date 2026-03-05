@@ -2237,21 +2237,16 @@ def pto_page(conn, building: str) -> None:
     st.markdown(
         f"""<style>
         div[class*="st-key-pto_toggle_"] button {{
-            padding: 0.12rem 0.85rem !important;
-            font-size: 0.67rem !important;
+            padding: 0.12rem 0.5rem !important;
+            font-size: 0.6rem !important;
             border-radius: 999px !important;
             font-family: 'SF Mono','Fira Code',monospace !important;
-            letter-spacing: 0.08em !important;
+            letter-spacing: 0.04em !important;
             text-transform: uppercase !important;
             min-height: 26px !important;
-            line-height: 1 !important;
+            line-height: 1.15 !important;
             font-weight: 600 !important;
-            white-space: nowrap !important;
             transition: all 0.15s ease !important;
-        }}
-        div[class*="st-key-pto_toggle_"] button p {{
-            white-space: nowrap !important;
-            overflow: hidden !important;
         }}
         {(", ".join(active_sel) or ".pto-na") + " { background: rgba(0,212,255,.1) !important; border: 1px solid rgba(0,212,255,.7) !important; color: #00d4ff !important; box-shadow: 0 0 10px rgba(0,212,255,.2), inset 0 0 6px rgba(0,212,255,.05) !important; }"}
         {(", ".join(inactive_sel) or ".pto-na") + " { background: rgba(6,13,31,.6) !important; border: 1px solid #1a3050 !important; color: #2d4a6a !important; box-shadow: none !important; }"}
