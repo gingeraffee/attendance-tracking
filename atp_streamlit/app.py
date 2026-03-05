@@ -14,7 +14,14 @@ import sys
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
-import plotly.express as px
+try:
+    import plotly.express as px  # optional (enables clickable donut charts)
+    _HAS_PLOTLY = True
+except Exception:
+    px = None
+    _HAS_PLOTLY = False
+
+import matplotlib.pyplot as plt
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet
@@ -1539,60 +1546,35 @@ def dashboard_page(conn, building: str) -> None:
         df_counts = df_counts[df_counts["Building"].isin(BUILDINGS)].sort_values("Building")
 
         if not df_counts.empty:
-            fig = px.pie(df_counts, names="Building", values="Employees", hole=0.58)
-            fig.update_layout(
-                margin=dict(l=0, r=0, t=10, b=0),
-                showlegend=True,
-                paper_bgcolor="rgba(0,0,0,0)",   # outside of plot
-                plot_bgcolor="rgba(0,0,0,0)",    # inside of plot
-                legend=dict(bgcolor="rgba(0,0,0,0)"),
-        )
-            fig.update_traces(
-                textinfo="percent+label",
-                hovertemplate="<b>%{label}</b><br>%{value} employees<extra></extra>",
+            # Pie chart removed to reduce dashboard clutter.
+            # Keep a simple filter to drill into repeat offenders list by building.
+            options = ["All"] + BUILDINGS
+            idx = options.index(selected_building) if selected_building in BUILDINGS else 0
+            pick = st.selectbox(
+                "Filter repeat offenders list",
+                options,
+                index=idx,
+                key="repeat_offenders_building_filter",
             )
+            if pick == "All":
+                selected_building = None
+                st.session_state["repeat_offenders_building"] = None
+            else:
+                selected_building = pick
+                st.session_state["repeat_offenders_building"] = pick
 
-            c1, c2 = st.columns([1.05, 1])
-            with c1:
-                st.caption("**Repeat Offenders by Building** (employees with > 1.0 points in last 30 days)")
-                try:
-                    sel = st.plotly_chart(
-                        fig,
-                        use_container_width=True,
-                        on_select="rerun",
-                        selection_mode=["points"],
-                        key="repeat_offenders_donut",
-                    )
-
-                    # Streamlit returns a dict-like selection payload when on_select is enabled.
-                    pts = []
-                    if isinstance(sel, dict):
-                        if isinstance(sel.get("selection"), dict):
-                            pts = sel.get("selection", {}).get("points", []) or []
-                        else:
-                            pts = sel.get("points", []) or []
-
-                    if pts:
-                        label = pts[0].get("label")
-                        if label:
-                            selected_building = str(label)
-                            st.session_state["repeat_offenders_building"] = selected_building
-                except TypeError:
-                    # Older Streamlit: no selection support; fall back to a static chart.
-                    st.plotly_chart(fig, use_container_width=True, key="repeat_offenders_donut_static")
-
-            with c2:
-                options = ["All"] + BUILDINGS
-                idx = options.index(selected_building) if selected_building in BUILDINGS else 0
-                pick = st.selectbox("Filter repeat offenders list", options, index=idx, key="repeat_offenders_building_fallback")
-                if pick == "All":
-                    selected_building = None
-                    st.session_state["repeat_offenders_building"] = None
-                else:
-                    selected_building = pick
-                    st.session_state["repeat_offenders_building"] = pick
+            # Quick, low-noise summary (counts by building)
+            try:
+                summary = ", ".join(
+                    f"{b}: {int(n)}" for b, n in zip(df_counts["Building"].tolist(), df_counts["Employees"].tolist())
+                )
+                if summary:
+                    st.caption(f"Repeat offenders (>1.0 pts, last 30 days): {summary}")
+            except Exception:
+                pass
 
     if gt1_rows:
+
         df_gt1 = pd.DataFrame(
             [
                 {
