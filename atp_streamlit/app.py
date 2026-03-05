@@ -2122,6 +2122,12 @@ def pto_page(conn, building: str) -> None:
                     df["employee"] = df["last_name"].str.strip() + ", " + df["first_name"].str.strip()
                     df["days"] = (df["hours"] / 8).round(2)
 
+                    # Build name→id lookup from DB for reliable export
+                    _name_to_id: dict = {
+                        f"{e['last_name'].strip().lower()}, {e['first_name'].strip().lower()}": int(e["employee_id"])
+                        for e in active_db
+                    }
+
                     # Match against active DB employees
                     def _is_active(row):
                         if "employee_id" in df.columns:
@@ -2141,7 +2147,20 @@ def pto_page(conn, building: str) -> None:
                             f"{excluded} row(s) excluded — employee(s) not found in the active database: "
                             + ", ".join(removed_names)
                         )
-                    return df[mask]
+                    df = df[mask].copy()
+
+                    # Always resolve a canonical employee_id from the DB (covers CSVs without it)
+                    def _resolve_id(row):
+                        name_key = f"{str(row['last_name']).strip().lower()}, {str(row['first_name']).strip().lower()}"
+                        if name_key in _name_to_id:
+                            return _name_to_id[name_key]
+                        try:
+                            return int(row["employee_id"])
+                        except (KeyError, ValueError, TypeError):
+                            return None
+
+                    df["employee_id"] = df.apply(_resolve_id, axis=1)
+                    return df
 
                 # Detect format: range (start_date/end_date) or legacy (date)
                 if "start_date" in cols and "end_date" in cols:
@@ -2227,7 +2246,12 @@ def pto_page(conn, building: str) -> None:
             min-height: 26px !important;
             line-height: 1 !important;
             font-weight: 600 !important;
+            white-space: nowrap !important;
             transition: all 0.15s ease !important;
+        }}
+        div[class*="st-key-pto_toggle_"] button p {{
+            white-space: nowrap !important;
+            overflow: hidden !important;
         }}
         {(", ".join(active_sel) or ".pto-na") + " { background: rgba(0,212,255,.1) !important; border: 1px solid rgba(0,212,255,.7) !important; color: #00d4ff !important; box-shadow: 0 0 10px rgba(0,212,255,.2), inset 0 0 6px rgba(0,212,255,.05) !important; }"}
         {(", ".join(inactive_sel) or ".pto-na") + " { background: rgba(6,13,31,.6) !important; border: 1px solid #1a3050 !important; color: #2d4a6a !important; box-shadow: none !important; }"}
@@ -2462,7 +2486,8 @@ def pto_page(conn, building: str) -> None:
     # ── Export ──────────────────────────────────────────────────────────────
     divider()
     section_label("Export Filtered Data")
-    exp_df = df[["employee", "building", "pto_type", "start_date", "end_date", "hours", "days"]].copy()
+    exp_cols = ["employee_id", "employee", "building", "pto_type", "start_date", "end_date", "hours", "days"]
+    exp_df = df[[c for c in exp_cols if c in df.columns]].copy()
     exp_df["start_date"] = exp_df["start_date"].dt.strftime("%Y-%m-%d")
     exp_df["end_date"] = exp_df["end_date"].dt.strftime("%Y-%m-%d")
     st.download_button(
