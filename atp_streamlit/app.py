@@ -861,11 +861,11 @@ def dashboard_page(conn, building: str) -> None:
     ph = ",".join(["?" if not is_pg(conn) else "%s"] * len(emp_ids))   
     
     def _scalar_n(conn, sql: str, params: tuple) -> int:
-    rows = fetchall(conn, sql, params)
-    if not rows:
-        return 0
-    r0 = dict(rows[0])
-    return int(r0.get("n") or 0)
+        rows = fetchall(conn, sql, params)
+        if not rows:
+            return 0
+        r0 = dict(rows[0])
+        return int(r0.get("n") or 0)
     
     # ── HR Live Monitor (data-driven animation) ───────────────────────────────
     since_24h = (today - timedelta(days=1)).isoformat()
