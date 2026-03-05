@@ -2834,18 +2834,30 @@ def pto_page(conn, building: str) -> None:
                 drill_src = df[~df["pto_type"].isin(_top5_types)].copy()
             else:
                 drill_src = df[df["pto_type"] == sel_type].copy()
-            drill_src["start_date"] = drill_src["start_date"].dt.strftime("%Y-%m-%d")
-            drill_src["end_date"] = drill_src["end_date"].dt.strftime("%Y-%m-%d")
+
+            # Aggregate per employee + PTO type:
+            #   Hours Used   = sum of all hours for that employee+type
+            #   Days Impacted = count of individual PTO records (separate usage events)
             drill = (
-                drill_src[["employee", "building", "start_date", "end_date", "hours", "days"]]
-                .rename(columns={"employee": "Employee", "building": "Building",
-                                 "start_date": "Start", "end_date": "End",
-                                 "hours": "Hours", "days": "Days"})
-                .sort_values("Hours", ascending=False)
+                drill_src.groupby(["employee", "pto_type", "building"])
+                .agg(
+                    hours_used=("hours", "sum"),
+                    days_impacted=("hours", "count"),
+                )
+                .reset_index()
+                .sort_values("hours_used", ascending=False)
+                .rename(columns={
+                    "employee":      "Employee",
+                    "pto_type":      "PTO Type",
+                    "building":      "Building",
+                    "hours_used":    "Hours Used",
+                    "days_impacted": "Days Impacted",
+                })
             )
-            drill["Hours"] = drill["Hours"].round(1)
-            drill["Days"] = drill["Days"].round(1)
-            st.dataframe(drill, use_container_width=True, hide_index=True)
+            drill["Hours Used"] = drill["Hours Used"].round(1)
+
+            col_order = ["Employee", "PTO Type", "Hours Used", "Days Impacted", "Building"]
+            st.dataframe(drill[col_order], use_container_width=True, hide_index=True)
 
     # ── Building comparison ─────────────────────────────────────────────────
     divider()
