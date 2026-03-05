@@ -1763,7 +1763,7 @@ def dashboard_page(conn, building: str) -> None:
     st.dataframe(pd.DataFrame(snap_rows), use_container_width=True, hide_index=True)
 
     divider()
-    section_label("Deep Dive")
+    section_label("Forecasting")
 
     st.markdown("#### Employees > 1.0 Point (Last 30 Days)")
     gt1_rows = [dict(r) for r in fetchall(conn, sql_insights_gt1, (since_30, *emp_ids, since_30))]
