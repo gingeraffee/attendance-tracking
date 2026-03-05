@@ -2234,6 +2234,7 @@ def pto_page(conn, building: str) -> None:
     active_sel   = [f".st-key-{_tkey(t)} button" for t in all_types if     toggles.get(t, True)]
     inactive_sel = [f".st-key-{_tkey(t)} button" for t in all_types if not toggles.get(t, True)]
 
+    # Inject pill CSS globally (applies in sidebar too)
     st.markdown(
         f"""<style>
         div[class*="st-key-pto_toggle_"] button {{
@@ -2248,23 +2249,23 @@ def pto_page(conn, building: str) -> None:
             font-weight: 600 !important;
             transition: all 0.15s ease !important;
         }}
-        {(", ".join(active_sel) or ".pto-na") + " { background: rgba(0,212,255,.1) !important; border: 1px solid rgba(0,212,255,.7) !important; color: #00d4ff !important; box-shadow: 0 0 10px rgba(0,212,255,.2), inset 0 0 6px rgba(0,212,255,.05) !important; }"}
-        {(", ".join(inactive_sel) or ".pto-na") + " { background: rgba(6,13,31,.6) !important; border: 1px solid #1a3050 !important; color: #2d4a6a !important; box-shadow: none !important; }"}
+        {(', '.join(active_sel) or '.pto-na') + ' { background: rgba(0,212,255,.1) !important; border: 1px solid rgba(0,212,255,.7) !important; color: #00d4ff !important; box-shadow: 0 0 10px rgba(0,212,255,.2), inset 0 0 6px rgba(0,212,255,.05) !important; }'}
+        {(', '.join(inactive_sel) or '.pto-na') + ' { background: rgba(6,13,31,.6) !important; border: 1px solid #1a3050 !important; color: #2d4a6a !important; box-shadow: none !important; }'}
         </style>""",
         unsafe_allow_html=True,
     )
 
-    st.markdown(
-        "<div style='font-size:.65rem;color:#2d5070;text-transform:uppercase;"
-        "letter-spacing:.12em;margin:.8rem 0 .35rem;font-family:SF Mono,Fira Code,monospace'>"
-        "◈ &nbsp;Type Filter</div>",
-        unsafe_allow_html=True,
-    )
-    tcols = st.columns(len(all_types))
-    for i, t in enumerate(all_types):
-        if tcols[i].button(t, key=_tkey(t), use_container_width=True):
-            st.session_state["pto_type_toggles"][t] = not toggles.get(t, True)
-            st.rerun()
+    # Render type filter pills in the sidebar
+    with st.sidebar:
+        st.markdown("<span class='sidebar-nav-label'>PTO Type Filter</span>", unsafe_allow_html=True)
+        _pill_types = list(all_types)
+        for _pi in range(0, len(_pill_types), 2):
+            _row = _pill_types[_pi:_pi + 2]
+            _pcols = st.columns(len(_row))
+            for _pj, _pt in enumerate(_row):
+                if _pcols[_pj].button(_pt, key=_tkey(_pt), use_container_width=True):
+                    st.session_state["pto_type_toggles"][_pt] = not toggles.get(_pt, True)
+                    st.rerun()
 
     sel_types = [t for t in all_types if st.session_state["pto_type_toggles"].get(t, True)]
 
@@ -2549,23 +2550,20 @@ def pto_page(conn, building: str) -> None:
         .groupby(["month", "category"])["hours"].sum().reset_index()
     )
     pv_l, pv_r = st.columns([2, 1])
+    pu_event = None
+    _pu_trace_cats: list[str] = []
     with pv_l:
         if not mcat.empty:
             _CAT_CLR = {"Planned": "#00e5a0", "Unplanned": "#ff6b6b"}
             pu_fig = go.Figure()
-            _pu_trace_cats: list[str] = []
             for cat in ["Planned", "Unplanned"]:
                 sub = mcat[mcat["category"] == cat]
                 if not sub.empty:
                     _pu_trace_cats.append(cat)
-                    pu_fig.add_trace(go.Scatter(
+                    pu_fig.add_trace(go.Bar(
                         x=sub["month"], y=sub["hours"], name=cat,
-                        mode="lines+markers",
-                        line=dict(color=_CAT_CLR[cat], width=2.5),
-                        marker=dict(size=6),
-                        fill="tozeroy",
-                        fillcolor="rgba(0,229,160,0.07)" if cat == "Planned" else "rgba(255,107,107,0.07)",
-                        hovertemplate=f"<b>{cat}</b><br>%{{x|%b %Y}}: %{{y:.0f}} hrs — click to drill down<extra></extra>",
+                        marker=dict(color=_CAT_CLR[cat], line=dict(color="#060d1f", width=1)),
+                        hovertemplate=f"<b>{cat}</b><br>%{{x|%b %Y}}: %{{y:.0f}} hrs<extra></extra>",
                     ))
             pu_fig.update_layout(
                 paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
@@ -2574,25 +2572,13 @@ def pto_page(conn, building: str) -> None:
                 yaxis=dict(showgrid=True, gridcolor="#0d1b2e", color="#4a7fa5", title="Hours"),
                 legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(size=11)),
                 margin=dict(t=10, b=10, l=10, r=10),
-                hovermode="x unified",
+                barmode="group",
             )
             pu_event = st.plotly_chart(pu_fig, use_container_width=True, on_select="rerun", key="pto_pu_trend")
-            pu_pts = pu_event.selection.get("points", []) if pu_event.selection else []
-            if pu_pts:
-                cn = pu_pts[0].get("curve_number", 0)
-                sel_cat = _pu_trace_cats[cn] if cn < len(_pu_trace_cats) else None
-                sel_period = pd.to_datetime(pu_pts[0]["x"]).to_period("M")
-                if sel_cat:
-                    drill_pu = df_cls[
-                        (df_cls["category"] == sel_cat) &
-                        (df_cls["start_date"].dt.to_period("M") == sel_period)
-                    ]
-                    if not drill_pu.empty:
-                        _drill_table(drill_pu, f"{sel_cat} — {sel_period.strftime('%b %Y')}")
         else:
             info_box("Not enough monthly data for trend.")
     with pv_r:
-        section_label("Type → Category Map")
+        section_label("Type \u2192 Category Map")
         cls_tbl = (
             df_cls.groupby(["pto_type", "category"])["hours"].sum()
             .reset_index()
@@ -2602,9 +2588,29 @@ def pto_page(conn, building: str) -> None:
         cls_tbl["Hours"] = cls_tbl["Hours"].round(1)
         st.dataframe(cls_tbl, use_container_width=True, hide_index=True, height=300)
 
-    # ── Module 2: Concentration ──────────────────────────────────────────────
+    # Trend drilldown — rendered outside columns at full width
+    pu_pts = pu_event.selection.get("points", []) if (pu_event and pu_event.selection) else []
+    if pu_pts:
+        pt = pu_pts[0]
+        cn = pt.get("curve_number", 0)
+        sel_cat = _pu_trace_cats[cn] if cn < len(_pu_trace_cats) else None
+        x_raw = pt.get("x") or pt.get("label") or ""
+        if sel_cat and x_raw:
+            try:
+                sel_period = pd.to_datetime(x_raw).to_period("M")
+                drill_pu = df_cls[
+                    (df_cls["category"] == sel_cat) &
+                    (df_cls["start_date"].dt.to_period("M") == sel_period)
+                ]
+                if not drill_pu.empty:
+                    divider()
+                    _drill_table(drill_pu, f"{sel_cat} \u2014 {sel_period.strftime('%b %Y')}")
+            except Exception:
+                pass
+
+    # ── Module 2: Concentration ──────────────────────────────────────
     divider()
-    section_label("PTO Concentration — Who's Driving Usage?")
+    section_label("PTO Concentration \u2014 Who's Driving Usage?")
 
     emp_hrs = df.groupby("employee")["hours"].sum().sort_values(ascending=False).reset_index()
     n_total_emp = len(emp_hrs)
@@ -2621,10 +2627,22 @@ def pto_page(conn, building: str) -> None:
     with cn3:
         _pto_metric("Distribution", concentration_label, "of PTO across team")
 
+    # Pre-compute histogram bins before column block so they're accessible for drilldown
+    import numpy as _np
+    _max_h = max(float(emp_hrs["hours"].max()), 1.0)
+    _bin_edges = list(_np.linspace(0, _max_h, 11))
+    _bin_labels = [f"{int(_bin_edges[i])}\u2013{int(_bin_edges[i+1])}h" for i in range(10)]
+    _emp_hrs_b = emp_hrs.copy()
+    _emp_hrs_b["bin"] = pd.cut(_emp_hrs_b["hours"], bins=_bin_edges, labels=_bin_labels, include_lowest=True)
+    _bin_counts = _emp_hrs_b.groupby("bin", observed=False)["hours"].count().reindex(_bin_labels).fillna(0)
+
+    top10_hrs_sum = emp_hrs.head(10)["hours"].sum()
+    rest_hrs_sum = emp_hrs.iloc[10:]["hours"].sum() if n_total_emp > 10 else 0
+
+    conc_event = None
+    hist_event = None
     cc1, cc2 = st.columns(2)
     with cc1:
-        top10_hrs_sum = emp_hrs.head(10)["hours"].sum()
-        rest_hrs_sum = emp_hrs.iloc[10:]["hours"].sum() if n_total_emp > 10 else 0
         conc_fig = go.Figure(go.Bar(
             y=["Top 10 Users", "Rest of Team"],
             x=[top10_hrs_sum, rest_hrs_sum],
@@ -2633,7 +2651,7 @@ def pto_page(conn, building: str) -> None:
             text=[f"{top10_hrs_sum / 8:.0f}d", f"{rest_hrs_sum / 8:.0f}d"],
             textposition="inside",
             textfont=dict(color="#e8f4fd"),
-            hovertemplate="<b>%{y}</b>: %{x:.0f} hrs — click to see employees<extra></extra>",
+            hovertemplate="<b>%{y}</b>: %{x:.0f} hrs<extra></extra>",
         ))
         conc_fig.update_layout(
             paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
@@ -2644,26 +2662,12 @@ def pto_page(conn, building: str) -> None:
             height=180,
         )
         conc_event = st.plotly_chart(conc_fig, use_container_width=True, on_select="rerun", key="pto_conc_bar")
-        conc_pts = conc_event.selection.get("points", []) if conc_event.selection else []
-        if conc_pts:
-            bar_label = conc_pts[0].get("y", "")
-            if bar_label == "Top 10 Users":
-                _drill_table(df[df["employee"].isin(set(emp_hrs.head(10)["employee"]))], "Top 10 PTO Users")
-            elif bar_label == "Rest of Team":
-                _drill_table(df[df["employee"].isin(set(emp_hrs.iloc[10:]["employee"]))], "Rest of Team")
     with cc2:
-        import numpy as _np
-        _max_h = max(float(emp_hrs["hours"].max()), 1.0)
-        _bin_edges = list(_np.linspace(0, _max_h, 11))
-        _bin_labels = [f"{int(_bin_edges[i])}–{int(_bin_edges[i+1])}h" for i in range(10)]
-        _emp_hrs_b = emp_hrs.copy()
-        _emp_hrs_b["bin"] = pd.cut(_emp_hrs_b["hours"], bins=_bin_edges, labels=_bin_labels, include_lowest=True)
-        _bin_counts = _emp_hrs_b.groupby("bin", observed=False)["hours"].count().reindex(_bin_labels).fillna(0)
         hist_fig = go.Figure(go.Bar(
             x=_bin_labels,
             y=_bin_counts.values,
             marker=dict(color="#7b61ff", line=dict(color="#060d1f", width=1)),
-            hovertemplate="<b>%{x}</b>: %{y} employees — click to see<extra></extra>",
+            hovertemplate="<b>%{x}</b>: %{y} employees<extra></extra>",
         ))
         hist_fig.update_layout(
             paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
@@ -2675,15 +2679,28 @@ def pto_page(conn, building: str) -> None:
             bargap=0.05,
         )
         hist_event = st.plotly_chart(hist_fig, use_container_width=True, on_select="rerun", key="pto_dist_hist")
-        hist_pts = hist_event.selection.get("points", []) if hist_event.selection else []
-        if hist_pts:
-            bin_sel = hist_pts[0].get("x", "")
-            if bin_sel in _bin_labels:
-                bi = _bin_labels.index(bin_sel)
-                lo, hi = _bin_edges[bi], _bin_edges[bi + 1]
-                names_in_bin = set(_emp_hrs_b[(_emp_hrs_b["hours"] >= lo) & (_emp_hrs_b["hours"] <= hi)]["employee"])
-                if names_in_bin:
-                    _drill_table(df[df["employee"].isin(names_in_bin)], f"Employees Using {bin_sel}")
+
+    # Concentration drilldowns — rendered outside columns at full width
+    conc_pts = conc_event.selection.get("points", []) if (conc_event and conc_event.selection) else []
+    if conc_pts:
+        bar_label = conc_pts[0].get("y") or conc_pts[0].get("label") or ""
+        if bar_label == "Top 10 Users":
+            divider()
+            _drill_table(df[df["employee"].isin(set(emp_hrs.head(10)["employee"]))], "Top 10 PTO Users")
+        elif bar_label == "Rest of Team":
+            divider()
+            _drill_table(df[df["employee"].isin(set(emp_hrs.iloc[10:]["employee"]))], "Rest of Team")
+
+    hist_pts = hist_event.selection.get("points", []) if (hist_event and hist_event.selection) else []
+    if hist_pts:
+        bin_sel = hist_pts[0].get("x") or hist_pts[0].get("label") or ""
+        if bin_sel in _bin_labels:
+            bi = _bin_labels.index(bin_sel)
+            lo, hi = _bin_edges[bi], _bin_edges[bi + 1]
+            names_in_bin = set(_emp_hrs_b[(_emp_hrs_b["hours"] >= lo) & (_emp_hrs_b["hours"] <= hi)]["employee"])
+            if names_in_bin:
+                divider()
+                _drill_table(df[df["employee"].isin(names_in_bin)], f"Employees Using {bin_sel}")
 
     # ── Module 3: Burnout & Retention Risk ──────────────────────────────────
     divider()
@@ -2776,15 +2793,16 @@ def pto_page(conn, building: str) -> None:
         margin=dict(t=30, b=10, l=10, r=10),
     )
     season_event = st.plotly_chart(season_fig, use_container_width=True, on_select="rerun", key="pto_seasonality")
-    season_pts = season_event.selection.get("points", []) if season_event.selection else []
+    season_pts = season_event.selection.get("points", []) if (season_event and season_event.selection) else []
     if season_pts:
-        sel_mon_label = season_pts[0].get("x", "")
+        sel_mon_label = season_pts[0].get("x") or season_pts[0].get("label") or ""
         if sel_mon_label in _MONTH_LABELS:
             sel_mon_num = _MONTH_LABELS.index(sel_mon_label) + 1
             df_mon = df.copy()
             df_mon["cal_month"] = df_mon["start_date"].dt.month
             drill_mon = df_mon[df_mon["cal_month"] == sel_mon_num]
             if not drill_mon.empty:
+                divider()
                 _drill_table(drill_mon, f"PTO in {sel_mon_label}")
 
     # ── Export ──────────────────────────────────────────────────────────────
@@ -3429,9 +3447,10 @@ def main() -> None:
     else:
         system_updates_page(conn)
 
-    # Render spotlight after page runs so it always reflects the current selection
+    # Render spotlight only on Dashboard (after page runs so it reflects current selection)
     with spotlight_placeholder.container():
-        selected_employee_sidebar(conn, st.session_state.get("selected_employee_id"))
+        if page == "Dashboard":
+            selected_employee_sidebar(conn, st.session_state.get("selected_employee_id"))
 
 ensure_session_defaults()
 if not is_authenticated():
