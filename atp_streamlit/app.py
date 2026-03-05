@@ -1177,7 +1177,7 @@ def dashboard_page(conn, building: str) -> None:
         points_7d=points_7d,
         rolloffs_due_7d=rolloffs_due_7d,
         perfect_due_7d=perfect_due_7d,
-        label="Monitoring attendance activity",
+        label="At a glance",
     )
 
     if is_pg(conn):
