@@ -45,92 +45,155 @@ def apply_theme() -> None:
     st.markdown(
         """<style>
 :root {
-    --bg:       #f0f4fa;
-    --surface:  #ffffff;
-    --surface2: #f4f7fd;
-    --border:   rgba(0,0,0,.07);
-    --shadow:   0 2px 16px rgba(15,32,68,.07);
-    --text:     #1a2744;
-    --muted:    #5c6f8c;
-    --faint:    #8fa0b8;
-    --blue:     #4f8ef7;
-    --cyan:     #00b8e6;
-    --green:    #00a87a;
-    --amber:    #e6960a;
-    --red:      #e0394a;
+    --bg:      #060d1f;
+    --bg2:     #090f24;
+    --surface: rgba(10,20,52,0.70);
+    --surface2:rgba(13,26,64,0.55);
+    --border:  rgba(79,142,247,.18);
+    --shadow:  0 4px 28px rgba(0,0,0,.55);
+    --text:    #d4e1f7;
+    --muted:   #6a8ab8;
+    --faint:   #384d6e;
+    --blue:    #4f8ef7;
+    --cyan:    #00d4ff;
+    --green:   #00ff9d;
+    --amber:   #ffb020;
+    --red:     #ff3d56;
+    --purple:  #a855f7;
 }
 
 /* ── Base ── */
-.stApp { background: var(--bg); color: var(--text); }
+.stApp { background: #060d1f !important; color: var(--text); }
 .block-container { padding-top: 2rem; padding-bottom: 3rem; max-width: 1440px; }
 footer, #MainMenu { visibility: hidden; }
 
-/* ── Sidebar (stays dark) ── */
-section[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #0d1b3a 0%, #0f2044 100%) !important;
-    border-right: 1px solid rgba(255,255,255,.06);
-    width: 276px !important;
+/* ── Aurora background (injected div) ── */
+@keyframes aurora-drift {
+  0%   { background-position: 0%   0%;  }
+  33%  { background-position: 100% 30%; }
+  66%  { background-position: 55%  100%;}
+  100% { background-position: 0%   0%;  }
 }
-section[data-testid="stSidebar"] * { color: #bfcde6 !important; }
+.aurora-bg {
+    position: fixed; inset: 0;
+    background:
+        radial-gradient(ellipse 65% 55% at 18% 28%, rgba(79,142,247,.10) 0%, transparent 100%),
+        radial-gradient(ellipse 55% 65% at 82% 72%, rgba(0,212,255,.08) 0%, transparent 100%),
+        radial-gradient(ellipse 45% 55% at 52% 88%, rgba(168,85,247,.06) 0%, transparent 100%);
+    background-size: 200% 200%;
+    animation: aurora-drift 28s ease-in-out infinite;
+    pointer-events: none; z-index: 1;
+}
+
+/* ── Tech grid (injected div) ── */
+.tech-grid-overlay {
+    position: fixed; inset: 0;
+    background-image:
+        linear-gradient(rgba(79,142,247,.022) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(79,142,247,.022) 1px, transparent 1px);
+    background-size: 50px 50px;
+    pointer-events: none; z-index: 2;
+}
+
+/* ── Scanline sweep (injected div) ── */
+@keyframes scanline-sweep {
+    0%   { top: -4px; opacity: 0; }
+    4%   { opacity: 1; }
+    96%  { opacity: 1; }
+    100% { top: 100vh; opacity: 0; }
+}
+.scanline-overlay {
+    position: fixed; left: 0; right: 0; height: 4px;
+    background: linear-gradient(180deg, transparent, rgba(0,212,255,.07), transparent);
+    animation: scanline-sweep 14s linear infinite;
+    pointer-events: none; z-index: 9998;
+}
+
+/* ── Sidebar ── */
+section[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #030810 0%, #060d1f 100%) !important;
+    border-right: 1px solid rgba(79,142,247,.15) !important;
+    width: 276px !important;
+    box-shadow: 4px 0 28px rgba(0,0,0,.55), inset -1px 0 0 rgba(79,142,247,.06);
+}
+section[data-testid="stSidebar"] * { color: #7899c8 !important; }
 section[data-testid="stSidebar"] div[data-baseweb="select"] > div {
-    background: #ffffff !important;
-    color: #111827 !important;
+    background: #0a1428 !important; color: #c9d8f0 !important;
+    border: 1px solid rgba(79,142,247,.25) !important;
 }
 section[data-testid="stSidebar"] div[data-baseweb="select"] input,
 section[data-testid="stSidebar"] div[data-baseweb="select"] span,
 section[data-testid="stSidebar"] div[data-baseweb="select"] div {
-    color: #111827 !important;
-    -webkit-text-fill-color: #111827 !important;
+    color: #c9d8f0 !important; -webkit-text-fill-color: #c9d8f0 !important;
 }
 
 /* ── Metric tiles ── */
 div[data-testid="stMetric"] {
-    background: var(--surface);
-    border: 1px solid var(--border);
+    background: rgba(10,20,52,0.65) !important;
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(79,142,247,.20) !important;
+    border-top: 2px solid rgba(79,142,247,.70) !important;
     border-radius: 14px;
     padding: 1.1rem 1.25rem .85rem 1.25rem;
-    box-shadow: var(--shadow);
+    box-shadow: 0 4px 28px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.04);
+    position: relative; overflow: hidden;
+}
+div[data-testid="stMetric"]::before {
+    content: ''; position: absolute; inset: 0;
+    background: linear-gradient(135deg, rgba(79,142,247,.07) 0%, transparent 55%);
+    pointer-events: none;
 }
 div[data-testid="stMetric"] label {
-    color: var(--muted) !important;
-    font-size: .72rem !important;
-    font-weight: 700 !important;
-    letter-spacing: .08em !important;
+    color: var(--muted) !important; font-size: .72rem !important;
+    font-weight: 700 !important; letter-spacing: .10em !important;
     text-transform: uppercase !important;
 }
 div[data-testid="stMetric"] [data-testid="stMetricValue"] {
-    color: var(--text) !important;
-    font-size: 2rem !important;
-    font-weight: 800 !important;
-    letter-spacing: -.03em !important;
+    color: #e8f1ff !important; font-size: 2rem !important;
+    font-weight: 800 !important; letter-spacing: -.03em !important;
+    font-variant-numeric: tabular-nums;
+    text-shadow: 0 0 22px rgba(79,142,247,.38);
 }
 
 /* ── Buttons ── */
 .stButton > button {
-    border-radius: 8px !important;
-    font-weight: 600 !important;
-    border: 1px solid rgba(79,142,247,.35) !important;
-    background: linear-gradient(135deg, rgba(79,142,247,.09), rgba(79,142,247,.04)) !important;
-    color: var(--blue) !important;
-    transition: all .18s !important;
+    border-radius: 8px !important; font-weight: 600 !important;
+    border: 1px solid rgba(79,142,247,.40) !important;
+    background: linear-gradient(135deg, rgba(79,142,247,.13), rgba(79,142,247,.05)) !important;
+    color: #7eb3ff !important; transition: all .2s !important;
 }
 .stButton > button:hover {
     border-color: var(--blue) !important;
-    background: rgba(79,142,247,.14) !important;
-    box-shadow: 0 0 14px rgba(79,142,247,.18) !important;
+    background: rgba(79,142,247,.20) !important;
+    box-shadow: 0 0 22px rgba(79,142,247,.32), inset 0 0 14px rgba(79,142,247,.08) !important;
+    color: #a8d0ff !important;
 }
 
 /* ── DataFrames / Tabs / Inputs ── */
-.stDataFrame { border: 1px solid var(--border) !important; border-radius: 12px !important; overflow: hidden; }
-.stTabs [data-baseweb="tab-list"] { gap: 4px; border-bottom: 1px solid var(--border); background: transparent; }
+.stDataFrame {
+    border: 1px solid rgba(79,142,247,.18) !important;
+    border-radius: 12px !important; overflow: hidden;
+    box-shadow: 0 0 0 1px rgba(79,142,247,.06) !important;
+}
+.stTabs [data-baseweb="tab-list"] {
+    gap: 4px; border-bottom: 1px solid rgba(79,142,247,.15); background: transparent;
+}
 .stTabs [data-baseweb="tab"] { border-radius: 8px 8px 0 0; }
+.stTabs [data-baseweb="tab"][aria-selected="true"] {
+    background: rgba(79,142,247,.12) !important;
+    border-bottom: 2px solid var(--blue) !important;
+}
 .stTextInput  > div > div > input,
 .stNumberInput > div > div > input,
 .stDateInput  > div > div > input {
-    background: var(--surface2) !important;
-    border-color: var(--border) !important;
-    border-radius: 8px !important;
-    color: var(--text) !important;
+    background: rgba(10,20,52,.85) !important;
+    border: 1px solid rgba(79,142,247,.25) !important;
+    border-radius: 8px !important; color: var(--text) !important;
+}
+.stTextInput  > div > div > input:focus,
+.stNumberInput > div > div > input:focus {
+    border-color: var(--blue) !important;
+    box-shadow: 0 0 0 3px rgba(79,142,247,.16) !important;
 }
 h1,h2,h3,h4,h5,h6 { color: var(--text) !important; }
 p, label { color: var(--muted) !important; }
@@ -138,245 +201,244 @@ p, label { color: var(--muted) !important; }
 /* ── Page heading ── */
 .page-heading { margin-bottom: 1.4rem; }
 .page-heading h1 {
-    font-size: 1.6rem; font-weight: 800; color: var(--text);
+    font-size: 1.6rem; font-weight: 800; color: #e8f1ff;
     margin: 0 0 .15rem 0; letter-spacing: -.025em;
+    text-shadow: 0 0 32px rgba(79,142,247,.32);
 }
 .page-heading p { color: var(--muted); font-size: .87rem; margin: 0; }
-.accent-bar {
-    width: 44px; height: 3px; border-radius: 99px;
-    background: linear-gradient(90deg, var(--blue), var(--cyan));
-    margin: .25rem 0 .4rem 0;
-    box-shadow: 0 0 10px rgba(79,142,247,.30);
-}
+.accent-bar { width: 44px; height: 3px; border-radius: 99px; margin: .25rem 0 .4rem 0; }
 
 /* ── Cards ── */
-.card    { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 1.2rem 1.4rem; box-shadow: var(--shadow); margin-bottom: .9rem; }
-.card-sm { background: var(--surface); border: 1px solid var(--border); border-radius: 10px;  padding: .8rem 1rem;   box-shadow: var(--shadow); }
+.card {
+    background: rgba(10,20,52,0.62); backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(79,142,247,.16); border-radius: 14px;
+    padding: 1.2rem 1.4rem;
+    box-shadow: 0 4px 24px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.04);
+    margin-bottom: .9rem;
+}
+.card-sm {
+    background: rgba(10,20,52,0.55); backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(79,142,247,.13); border-radius: 10px;
+    padding: .8rem 1rem; box-shadow: 0 2px 16px rgba(0,0,0,.32);
+}
+/* Fix hardcoded dark text inside cards for the dark theme */
+.card h2 { color: #d4e1f7 !important; }
 
 /* ── Section label ── */
 .section-label {
-    font-size: .71rem; font-weight: 700; letter-spacing: .10em;
-    text-transform: uppercase; color: var(--muted); margin: 0 0 .55rem 0;
+    font-size: .71rem; font-weight: 700; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--blue); margin: 0 0 .55rem 0;
+    text-shadow: 0 0 12px rgba(79,142,247,.45);
 }
 
 /* ── Divider ── */
-.divider { height: 1px; background: var(--border); margin: 1.25rem 0; }
+.divider {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(79,142,247,.30), transparent);
+    margin: 1.25rem 0; box-shadow: 0 0 8px rgba(79,142,247,.08);
+}
 
 /* ── Info / warn / danger boxes ── */
-.info-box   { background: rgba(79,142,247,.06);  border:1px solid rgba(79,142,247,.18);  border-left:3px solid var(--blue);  border-radius:8px; padding:.75rem 1rem; color:var(--text); font-size:.88rem; }
-.warn-box   { background: rgba(230,150,10,.06);  border:1px solid rgba(230,150,10,.18);  border-left:3px solid var(--amber); border-radius:8px; padding:.75rem 1rem; color:var(--text); font-size:.88rem; }
-.danger-box { background: rgba(224,57,74,.06);   border:1px solid rgba(224,57,74,.18);   border-left:3px solid var(--red);   border-radius:8px; padding:.75rem 1rem; color:var(--text); font-size:.88rem; }
+.info-box {
+    background: rgba(79,142,247,.07); border: 1px solid rgba(79,142,247,.26);
+    border-left: 3px solid var(--blue); border-radius: 8px; padding: .75rem 1rem;
+    color: var(--text); font-size: .88rem;
+    box-shadow: inset 0 0 20px rgba(79,142,247,.04), 0 0 12px rgba(79,142,247,.05);
+}
+.warn-box {
+    background: rgba(255,176,32,.07); border: 1px solid rgba(255,176,32,.26);
+    border-left: 3px solid var(--amber); border-radius: 8px; padding: .75rem 1rem;
+    color: var(--text); font-size: .88rem;
+    box-shadow: inset 0 0 20px rgba(255,176,32,.04);
+}
+.danger-box {
+    background: rgba(255,61,86,.07); border: 1px solid rgba(255,61,86,.26);
+    border-left: 3px solid var(--red); border-radius: 8px; padding: .75rem 1rem;
+    color: var(--text); font-size: .88rem;
+    box-shadow: inset 0 0 20px rgba(255,61,86,.04);
+}
 
 /* ── Upcoming list rows ── */
 .list-row {
-    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
-    padding: .65rem 1rem; margin-bottom: .38rem;
+    background: rgba(10,20,52,0.55); border: 1px solid rgba(79,142,247,.12);
+    border-radius: 10px; padding: .65rem 1rem; margin-bottom: .38rem;
 }
 
 /* ── Sidebar brand ── */
-.sidebar-brand { padding: .75rem 0 1rem 0; border-bottom: 1px solid rgba(255,255,255,.07); margin-bottom: 1rem; }
-.sidebar-brand .name { font-size: 1.05rem; font-weight: 800; color: #e2e8f4 !important; letter-spacing: -.01em; }
-.sidebar-brand .sub  { font-size: .72rem; color: #4a5f80 !important; margin-top: .1rem; }
+.sidebar-brand {
+    padding: .75rem 0 1rem 0; border-bottom: 1px solid rgba(79,142,247,.12); margin-bottom: 1rem;
+}
+.sidebar-brand .name {
+    font-size: 1.05rem; font-weight: 800; color: #c9d8f0 !important;
+    letter-spacing: -.01em; text-shadow: 0 0 14px rgba(79,142,247,.28);
+}
+.sidebar-brand .sub  { font-size: .72rem; color: #2d4060 !important; margin-top: .1rem; }
 .sidebar-nav-label   {
     font-size: .65rem !important; font-weight: 700 !important; letter-spacing: .12em !important;
-    text-transform: uppercase !important; color: #3d5270 !important;
+    text-transform: uppercase !important; color: #2a3e58 !important;
     margin: 1rem 0 .3rem 0 !important; display: block;
 }
 
 section[data-testid="stSidebar"] .sidebar-employee-card {
-    margin-top: 1.1rem;
-    padding: 1rem .9rem .85rem;
-    border-radius: 16px;
-    border: 1px solid rgba(26,39,68,.14);
-    background: #ffffff;
-    box-shadow: 0 8px 24px rgba(15,32,68,.12);
-    position: relative;
-    overflow: hidden;
+    margin-top: 1.1rem; padding: 1rem .9rem .85rem; border-radius: 16px;
+    border: 1px solid rgba(79,142,247,.15);
+    background: rgba(8,16,42,0.88); backdrop-filter: blur(10px);
+    box-shadow: 0 8px 28px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.04);
+    position: relative; overflow: hidden;
 }
 section[data-testid="stSidebar"] .sidebar-employee-card::before {
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 2px;
-    background: linear-gradient(90deg, #e0394a, #cc2229, #e0394a);
-    opacity: .85;
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    background: linear-gradient(90deg, #ff3d56, #cc1c2e, #ff3d56);
+    animation: card-top-border-glow 3s ease-in-out infinite;
+}
+@keyframes card-top-border-glow {
+    0%,100% { opacity: .85; box-shadow: none; }
+    50% { opacity: 1; box-shadow: 0 0 12px rgba(255,61,86,.5); }
 }
 section[data-testid="stSidebar"] .sidebar-employee-title {
-    font-size: .72rem;
-    letter-spacing: .16em;
-    text-transform: uppercase;
-    font-weight: 700;
-    color: #e0394a !important;
-    -webkit-text-fill-color: #e0394a !important;
-    margin-bottom: .45rem;
+    font-size: .72rem; letter-spacing: .16em; text-transform: uppercase; font-weight: 700;
+    color: #ff3d56 !important; -webkit-text-fill-color: #ff3d56 !important;
+    text-shadow: 0 0 10px rgba(255,61,86,.4); margin-bottom: .45rem;
 }
 section[data-testid="stSidebar"] .sidebar-employee-name {
-    font-size: 1.32rem;
-    font-weight: 800;
-    color: #111827 !important;
-    -webkit-text-fill-color: #111827 !important;
-    letter-spacing: -.015em;
-    line-height: 1.2;
-    margin-bottom: .7rem;
-    padding-bottom: .6rem;
-    border-bottom: 1px solid rgba(17,24,39,.10);
+    font-size: 1.32rem; font-weight: 800;
+    color: #d4e1f7 !important; -webkit-text-fill-color: #d4e1f7 !important;
+    letter-spacing: -.015em; line-height: 1.2; margin-bottom: .7rem;
+    padding-bottom: .6rem; border-bottom: 1px solid rgba(79,142,247,.15);
 }
 section[data-testid="stSidebar"] .sidebar-employee-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: .35rem;
+    display: grid; grid-template-columns: 1fr 1fr; gap: .35rem;
 }
 section[data-testid="stSidebar"] .sidebar-employee-item {
-    background: #f8fafc;
-    border: 1px solid #e5e7eb;
-    border-radius: 8px;
-    padding: .38rem .45rem;
+    background: rgba(5,10,28,0.75); border: 1px solid rgba(79,142,247,.14);
+    border-radius: 8px; padding: .38rem .45rem;
 }
-section[data-testid="stSidebar"] .sidebar-employee-item.full-width {
-    grid-column: 1 / -1;
-}
+section[data-testid="stSidebar"] .sidebar-employee-item.full-width { grid-column: 1 / -1; }
 section[data-testid="stSidebar"] .sidebar-employee-item .label {
-    display: block;
-    font-size: .62rem;
-    letter-spacing: .10em;
-    text-transform: uppercase;
-    color: #6b7280 !important;
-    font-weight: 700;
-    margin-bottom: .12rem;
+    display: block; font-size: .62rem; letter-spacing: .10em; text-transform: uppercase;
+    color: #2d4465 !important; font-weight: 700; margin-bottom: .12rem;
 }
 section[data-testid="stSidebar"] .sidebar-employee-item .value {
-    display: block;
-    font-size: .9rem;
-    font-weight: 600;
-    color: #1f2937 !important;
-    letter-spacing: -.01em;
+    display: block; font-size: .9rem; font-weight: 600;
+    color: #8aaad4 !important; letter-spacing: -.01em;
 }
 section[data-testid="stSidebar"] .sidebar-employee-item .value.highlight {
-    color: #e0394a !important;
-    -webkit-text-fill-color: #e0394a !important;
-    font-size: .9rem;
-    font-weight: 800;
+    color: #ff3d56 !important; -webkit-text-fill-color: #ff3d56 !important;
+    font-size: .9rem; font-weight: 800; text-shadow: 0 0 8px rgba(255,61,86,.35);
 }
 
-/* ── Breathing / live animations ── */
+/* ─────────────────────── ANIMATIONS ─────────────────────── */
 
-/* Metric tiles — slow inhale/exhale glow */
-@keyframes tile-breathe {
+/* Metric tiles — neon top-border cycles */
+@keyframes tile-neon {
   0%, 100% {
-    box-shadow: 0 2px 16px rgba(15,32,68,.07);
-    transform: translateY(0px);
+    border-top-color: rgba(79,142,247,.70) !important;
+    box-shadow: 0 4px 28px rgba(0,0,0,.45), 0 0 0 1px rgba(79,142,247,.04);
+    transform: translateY(0);
   }
   50% {
-    box-shadow: 0 6px 28px rgba(79,142,247,.16), 0 0 0 1px rgba(79,142,247,.08);
+    border-top-color: rgba(0,212,255,.95) !important;
+    box-shadow: 0 6px 34px rgba(0,0,0,.50), 0 0 24px rgba(0,212,255,.22), 0 0 0 1px rgba(0,212,255,.10);
     transform: translateY(-2px);
   }
 }
-div[data-testid="stMetric"] {
-    animation: tile-breathe 5s ease-in-out infinite;
-}
-/* Stagger each tile so they don't all pulse together */
-div[data-testid="stMetric"]:nth-child(1) { animation-delay: 0s; }
-div[data-testid="stMetric"]:nth-child(2) { animation-delay: 1s; }
-div[data-testid="stMetric"]:nth-child(3) { animation-delay: 2s; }
-div[data-testid="stMetric"]:nth-child(4) { animation-delay: 3s; }
-div[data-testid="stMetric"]:nth-child(5) { animation-delay: 1.5s; }
+div[data-testid="stMetric"]          { animation: tile-neon 5s ease-in-out infinite; }
+div[data-testid="stMetric"]:nth-child(1) { animation-delay: 0s;   }
+div[data-testid="stMetric"]:nth-child(2) { animation-delay: 1.1s; }
+div[data-testid="stMetric"]:nth-child(3) { animation-delay: 2.2s; }
+div[data-testid="stMetric"]:nth-child(4) { animation-delay: 3.3s; }
+div[data-testid="stMetric"]:nth-child(5) { animation-delay: 1.6s; }
 
-/* Accent bar — gradient breathes side-to-side */
-@keyframes accent-shift {
-  0%   { background-position: 0% 50%;   box-shadow: 0 0 8px rgba(79,142,247,.25); }
-  50%  { background-position: 100% 50%; box-shadow: 0 0 18px rgba(0,184,230,.45); }
-  100% { background-position: 0% 50%;   box-shadow: 0 0 8px rgba(79,142,247,.25); }
+/* Accent bar — neon gradient sweep */
+@keyframes accent-neon {
+  0%   { background-position: 0%   50%; box-shadow: 0 0 12px rgba(79,142,247,.60), 0 0 28px rgba(79,142,247,.20); }
+  50%  { background-position: 100% 50%; box-shadow: 0 0 20px rgba(0,212,255,.80), 0 0 40px rgba(0,212,255,.28); }
+  100% { background-position: 0%   50%; box-shadow: 0 0 12px rgba(79,142,247,.60), 0 0 28px rgba(79,142,247,.20); }
 }
 .accent-bar {
-    background: linear-gradient(90deg, var(--blue), var(--cyan), #a78bfa, var(--blue));
+    background: linear-gradient(90deg, var(--blue), var(--cyan), var(--purple), var(--blue));
     background-size: 300% 300%;
-    animation: accent-shift 4s ease-in-out infinite !important;
+    animation: accent-neon 4s ease-in-out infinite !important;
 }
 
-/* Cards — very subtle shadow pulse */
-@keyframes card-glow {
-  0%, 100% { box-shadow: 0 2px 16px rgba(15,32,68,.07); }
-  50%       { box-shadow: 0 4px 24px rgba(79,142,247,.11); }
+/* Cards — border breathes */
+@keyframes card-border-breathe {
+  0%, 100% { border-color: rgba(79,142,247,.16); box-shadow: 0 4px 24px rgba(0,0,0,.42); }
+  50%       { border-color: rgba(79,142,247,.34); box-shadow: 0 6px 32px rgba(0,0,0,.48), 0 0 16px rgba(79,142,247,.09); }
 }
-.card, .card-sm {
-    animation: card-glow 6s ease-in-out infinite;
-}
+.card, .card-sm { animation: card-border-breathe 7s ease-in-out infinite; }
 
 /* Pulsing LIVE dot */
 @keyframes live-pulse {
-  0%, 100% {
-    box-shadow: 0 0 0 0 rgba(0,168,122,.55);
-    background: #00a87a;
-  }
-  50% {
-    box-shadow: 0 0 0 7px rgba(0,168,122,0);
-    background: #00c994;
-  }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(0,255,157,.6), 0 0 8px rgba(0,255,157,.45); background: #00ff9d; }
+  50%       { box-shadow: 0 0 0 9px rgba(0,255,157,0), 0 0 18px rgba(0,255,157,.75); background: #00ffb8; }
 }
 .live-dot {
-    display: inline-block;
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    background: #00a87a;
-    margin-right: 7px;
-    vertical-align: middle;
-    animation: live-pulse 2s ease-in-out infinite;
+    display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+    background: #00ff9d; margin-right: 8px; vertical-align: middle;
+    animation: live-pulse 1.8s ease-in-out infinite;
 }
 
-/* Section labels — faint shimmer */
-@keyframes label-shimmer {
-  0%, 100% { opacity: 0.65; }
-  50%       { opacity: 1; }
+/* Section labels — neon shimmer */
+@keyframes label-neon {
+  0%, 100% { text-shadow: 0 0 8px rgba(79,142,247,.32); opacity: .85; }
+  50%       { text-shadow: 0 0 18px rgba(79,142,247,.70); opacity: 1; }
 }
-.section-label {
-    animation: label-shimmer 4s ease-in-out infinite;
-}
+.section-label { animation: label-neon 4s ease-in-out infinite; }
 
-/* Sidebar brand bar — slow color breathe */
-@keyframes sidebar-brand-breathe {
-  0%, 100% { border-bottom-color: rgba(255,255,255,.07); }
-  50%       { border-bottom-color: rgba(79,142,247,.22); }
+/* Sidebar brand border */
+@keyframes sidebar-brand-glow {
+  0%, 100% { border-bottom-color: rgba(79,142,247,.12); }
+  50%       { border-bottom-color: rgba(79,142,247,.40); box-shadow: 0 1px 0 rgba(79,142,247,.08); }
 }
-.sidebar-brand {
-    animation: sidebar-brand-breathe 5s ease-in-out infinite;
-}
+.sidebar-brand { animation: sidebar-brand-glow 5s ease-in-out infinite; }
 
-/* Info / warn / danger boxes — entrance fade */
+/* Entrance — boxes */
 @keyframes box-fade-in {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.info-box, .warn-box, .danger-box {
-    animation: box-fade-in .45s ease-out both;
-}
+.info-box, .warn-box, .danger-box { animation: box-fade-in .45s ease-out both; }
 
-/* Page heading entrance */
+/* Entrance — page heading */
 @keyframes heading-in {
   from { opacity: 0; transform: translateX(-10px); }
   to   { opacity: 1; transform: translateX(0); }
 }
-.page-heading {
-    animation: heading-in .5s ease-out both;
-}
+.page-heading { animation: heading-in .5s ease-out both; }
 
-/* Chart containers — subtle glow ring */
-@keyframes chart-frame-pulse {
-  0%, 100% { box-shadow: 0 0 0 1px rgba(79,142,247,.05); }
-  50%       { box-shadow: 0 0 0 2px rgba(79,142,247,.18); }
+/* DataFrames — neon frame pulse */
+@keyframes dataframe-glow {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(79,142,247,.08); }
+  50%       { box-shadow: 0 0 0 1px rgba(79,142,247,.28), 0 0 20px rgba(79,142,247,.08); }
 }
 .stDataFrame, [data-testid="stArrowVegaLiteChart"] {
-    animation: chart-frame-pulse 5s ease-in-out infinite;
-    border-radius: 12px !important;
+    animation: dataframe-glow 5s ease-in-out infinite; border-radius: 12px !important;
 }
+
+/* Divider breathe */
+@keyframes divider-breathe {
+  0%, 100% { opacity: .55; }
+  50%       { opacity: 1; box-shadow: 0 0 12px rgba(79,142,247,.20); }
+}
+.divider { animation: divider-breathe 5s ease-in-out infinite; }
 
 /* Respect prefers-reduced-motion */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
+    animation-duration: 0.01ms !important; animation-iteration-count: 1 !important;
   }
 }
 </style>""",
+        unsafe_allow_html=True,
+    )
+    # Inject fixed-position atmospheric overlays (aurora glow, tech grid, scanline)
+    st.markdown(
+        '<div class="aurora-bg"></div>'
+        '<div class="tech-grid-overlay"></div>'
+        '<div class="scanline-overlay"></div>',
         unsafe_allow_html=True,
     )
 
@@ -475,7 +537,7 @@ def days_badge(days) -> str:
         return f"<span style='{s}color:#e0394a;background:rgba(224,57,74,.09);border:1px solid rgba(224,57,74,.20)'>today</span>"
     if days <= 14:
         return f"<span style='{s}color:#e6960a;background:rgba(230,150,10,.09);border:1px solid rgba(230,150,10,.20)'>{days}d</span>"
-    return f"<span style='{s}color:#5c6f8c;background:rgba(92,111,140,.07);border:1px solid rgba(92,111,140,.17)'>{days}d</span>"
+    return f"<span style='{s}color:#7899c8;background:rgba(79,142,247,.08);border:1px solid rgba(79,142,247,.18)'>{days}d</span>"
 
 
 def info_box(msg: str) -> None:
@@ -672,7 +734,80 @@ def render_hr_live_monitor(
 """,
         unsafe_allow_html=True,
     )
-    
+
+
+def render_tech_hud(building: str) -> None:
+    """Live HUD status bar — ticking clock, building, session uptime."""
+    components.html(
+        f"""<!DOCTYPE html>
+<html><head><style>
+  * {{ margin:0; padding:0; box-sizing:border-box; }}
+  body {{ background:#060d1f; font-family:'SF Mono','Fira Code',ui-monospace,'Cascadia Code','Courier New',monospace; overflow:hidden; }}
+  #hud {{
+    display:flex; justify-content:space-between; align-items:center;
+    padding:8px 16px;
+    background:rgba(6,13,31,0.92);
+    border:1px solid rgba(79,142,247,.24);
+    border-radius:10px;
+    font-size:11px; letter-spacing:.07em; color:#3d5a80;
+  }}
+  .left {{ display:flex; align-items:center; gap:0; }}
+  .right {{ display:flex; align-items:center; gap:0; }}
+  .seg {{ white-space:nowrap; }}
+  .dot {{
+    display:inline-block; width:6px; height:6px; border-radius:50%;
+    background:#00ff9d; margin-right:5px; vertical-align:middle;
+    box-shadow:0 0 5px rgba(0,255,157,.6);
+    animation:blink 1.8s ease-in-out infinite;
+  }}
+  @keyframes blink {{
+    0%,100% {{ opacity:1; box-shadow:0 0 4px rgba(0,255,157,.6); }}
+    50%      {{ opacity:.4; box-shadow:0 0 10px rgba(0,255,157,.9); }}
+  }}
+  .val {{ color:#5a8fd4; }}
+  .sep {{ color:rgba(79,142,247,.28); padding:0 9px; }}
+  #hud-time {{ color:#00d4ff; font-weight:700; letter-spacing:.12em; min-width:68px; text-align:right; }}
+</style></head><body>
+<div id="hud">
+  <div class="left">
+    <span class="seg"><span class="dot"></span>SYS&nbsp;<span style="color:#00ff9d">ONLINE</span></span>
+    <span class="sep">|</span>
+    <span class="seg">BUILDING&nbsp;<span class="val">{building.upper()}</span></span>
+    <span class="sep">|</span>
+    <span class="seg">SESSION&nbsp;<span class="val" id="uptime">00:00:00</span></span>
+  </div>
+  <div class="right">
+    <span class="seg" id="datestamp"></span>
+    <span class="sep">|</span>
+    <span id="hud-time">--:--:--</span>
+  </div>
+</div>
+<script>
+(function(){{
+  var s=Date.now();
+  var D=['SUN','MON','TUE','WED','THU','FRI','SAT'];
+  var M=['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+  function p(n){{return n<10?'0'+n:''+n;}}
+  function tick(){{
+    var d=new Date();
+    var t=document.getElementById('hud-time');
+    var ds=document.getElementById('datestamp');
+    var up=document.getElementById('uptime');
+    if(!t)return;
+    t.textContent=p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());
+    ds.textContent=D[d.getDay()]+' '+p(d.getDate())+' '+M[d.getMonth()]+' '+d.getFullYear();
+    var e=Math.floor((Date.now()-s)/1000);
+    up.textContent=p(Math.floor(e/3600))+':'+p(Math.floor(e%3600/60))+':'+p(e%60);
+  }}
+  tick(); setInterval(tick,1000);
+}})();
+</script>
+</body></html>""",
+        height=50,
+        scrolling=False,
+    )
+
+
 # ── Login ──────────────────────────────────────────────────────────────────────
 def login_page() -> None:
     """Render a centered access-code login screen matching the reference design."""
@@ -968,6 +1103,7 @@ def dashboard_page(conn, building: str) -> None:
         '<span class="live-dot"></span>Dashboard',
         "Real-time overview of attendance activity, thresholds, and upcoming actions.",
     )
+    render_tech_hud(building)
 
     today = date.today()
     in_30_days = today + timedelta(days=30)
@@ -1464,11 +1600,11 @@ def dashboard_page(conn, building: str) -> None:
 
         col.markdown(
             f"<div class='card-sm' style='margin-bottom:.45rem;padding:.72rem .9rem;"
-            f"background:#ffffff;border:1px solid {card_border};box-shadow:{card_shadow};cursor:pointer;pointer-events:none;'>"
+            f"background:rgba(10,20,52,0.65);border:1px solid {card_border};box-shadow:{card_shadow};cursor:pointer;pointer-events:none;backdrop-filter:blur(12px);'>"
             f"<div style='height:4px;border-radius:999px;background:{accent};margin:-.2rem 0 .6rem 0'></div>"
             f"<div style='font-size:.68rem;letter-spacing:.09em;text-transform:uppercase;color:{accent};font-weight:700'>{label}</div>"
             f"<div style='display:flex;align-items:baseline;justify-content:space-between;margin-top:.18rem'>"
-            f"<span style='font-size:1.95rem;font-weight:800;color:#1a2744;line-height:1'>{employees_count}</span>"
+            f"<span style='font-size:1.95rem;font-weight:800;color:#e8f1ff;line-height:1;text-shadow:0 0 18px rgba(79,142,247,.3)'>{employees_count}</span>"
             f"<span style='font-size:.72rem;font-weight:700;color:{accent};text-transform:uppercase;letter-spacing:.05em'>&nbsp;employees</span>"
             f"</div></div>",
             unsafe_allow_html=True,
@@ -1881,14 +2017,14 @@ def employees_page(conn, building: str) -> None:
         "color:#00a87a;background:rgba(0,168,122,.10);border:1px solid rgba(0,168,122,.25)'>Active</span>"
         if active_flag else
         "<span style='display:inline-block;padding:2px 9px;border-radius:99px;font-size:.78rem;font-weight:700;"
-        "color:#8fa0b8;background:rgba(143,160,184,.10);border:1px solid rgba(143,160,184,.25)'>Inactive</span>"
+        "color:#6a8ab8;background:rgba(79,142,247,.08);border:1px solid rgba(79,142,247,.22)'>Inactive</span>"
     )
     st.markdown(
         f"<div class='card'>"
         f"<div style='display:flex;justify-content:space-between;align-items:flex-start'>"
-        f"<div><h2 style='margin:0;font-size:1.3rem;font-weight:800;color:#1a2744'>"
+        f"<div><h2 style='margin:0;font-size:1.3rem;font-weight:800;color:#d4e1f7'>"
         f"{emp.get('last_name')}, {emp.get('first_name')}</h2>"
-        f"<div style='color:#5c6f8c;font-size:.85rem;margin-top:.2rem'>"
+        f"<div style='color:#6a8ab8;font-size:.85rem;margin-top:.2rem'>"
         f"Employee #{emp_id} &nbsp;·&nbsp; {loc}</div></div>"
         f"<div style='display:flex;gap:.4rem;align-items:center'>{pt_badge(pts)} {active_badge}</div>"
         f"</div></div>",
@@ -1984,19 +2120,19 @@ def points_ledger_page(conn, building: str) -> None:
         f"<div style='display:grid;grid-template-columns:repeat(4,1fr);gap:.7rem;margin:.55rem 0 1.2rem 0'>"
         f"<div class='card-sm'>"
         f"<div style='font-size:.67rem;font-weight:700;letter-spacing:.09em;text-transform:uppercase;"
-        f"color:#5c6f8c;margin-bottom:.3rem'>Points</div>{pt_badge(pts)}</div>"
+        f"color:#6a8ab8;margin-bottom:.3rem'>Points</div>{pt_badge(pts)}</div>"
         f"<div class='card-sm'>"
         f"<div style='font-size:.67rem;font-weight:700;letter-spacing:.09em;text-transform:uppercase;"
-        f"color:#5c6f8c;margin-bottom:.3rem'>Next Roll-off</div>"
-        f"<div style='font-size:.9rem;font-weight:700;color:#1a2744'>{fmt_date(emp.get('rolloff_date'))}</div></div>"
+        f"color:#6a8ab8;margin-bottom:.3rem'>Next Roll-off</div>"
+        f"<div style='font-size:.9rem;font-weight:700;color:#d4e1f7'>{fmt_date(emp.get('rolloff_date'))}</div></div>"
         f"<div class='card-sm'>"
         f"<div style='font-size:.67rem;font-weight:700;letter-spacing:.09em;text-transform:uppercase;"
-        f"color:#5c6f8c;margin-bottom:.3rem'>Perfect Att.</div>"
-        f"<div style='font-size:.9rem;font-weight:700;color:#1a2744'>{fmt_date(emp.get('perfect_attendance'))}</div></div>"
+        f"color:#6a8ab8;margin-bottom:.3rem'>Perfect Att.</div>"
+        f"<div style='font-size:.9rem;font-weight:700;color:#d4e1f7'>{fmt_date(emp.get('perfect_attendance'))}</div></div>"
         f"<div class='card-sm'>"
         f"<div style='font-size:.67rem;font-weight:700;letter-spacing:.09em;text-transform:uppercase;"
-        f"color:#5c6f8c;margin-bottom:.3rem'>Last Entry</div>"
-        f"<div style='font-size:.9rem;font-weight:700;color:#1a2744'>{fmt_date(emp.get('last_point_date'))}</div></div>"
+        f"color:#6a8ab8;margin-bottom:.3rem'>Last Entry</div>"
+        f"<div style='font-size:.9rem;font-weight:700;color:#d4e1f7'>{fmt_date(emp.get('last_point_date'))}</div></div>"
         f"</div>",
         unsafe_allow_html=True,
     )
@@ -2331,12 +2467,12 @@ def system_updates_page(conn) -> None:
         btn_ytd  = st.button("Apply YTD Roll-offs",        use_container_width=True, disabled=not ok)
 
         st.markdown(
-            "<div style='margin-top:.9rem;font-size:.79rem;color:#8fa0b8'>"
-            "<b style='color:#5c6f8c'>2-Month Roll-offs</b> — removes 1 pt per overdue period, "
+            "<div style='margin-top:.9rem;font-size:.79rem;color:#6a8ab8'>"
+            "<b style='color:#7eb3ff'>2-Month Roll-offs</b> — removes 1 pt per overdue period, "
             "advances the roll-off date.<br><br>"
-            "<b style='color:#5c6f8c'>Perfect Attendance</b> — advances eligible milestone dates "
+            "<b style='color:#7eb3ff'>Perfect Attendance</b> — advances eligible milestone dates "
             "by one month per overdue period. No points are removed.<br><br>"
-            "<b style='color:#5c6f8c'>YTD Roll-offs</b> — applies a rolling 12-month net point "
+            "<b style='color:#7eb3ff'>YTD Roll-offs</b> — applies a rolling 12-month net point "
             "reduction. Does not move roll-off or perfect attendance anchors.</div>",
             unsafe_allow_html=True,
         )
