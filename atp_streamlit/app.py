@@ -1075,6 +1075,35 @@ def selected_employee_sidebar(conn, employee_id: int | None) -> None:
         "</div>",
         unsafe_allow_html=True,
     )
+    st.markdown(
+        """<style>
+        .st-key-spotlight_add_point button {
+            background: transparent !important;
+            border: 1px solid rgba(255,61,86,.35) !important;
+            color: rgba(255,61,86,.85) !important;
+            font-size: .6rem !important;
+            padding: .18rem .5rem !important;
+            border-radius: 6px !important;
+            font-family: 'SF Mono','Fira Code',monospace !important;
+            letter-spacing: .1em !important;
+            text-transform: uppercase !important;
+            font-weight: 600 !important;
+            margin-top: .4rem !important;
+            transition: all .15s ease !important;
+        }
+        .st-key-spotlight_add_point button:hover {
+            background: rgba(255,61,86,.08) !important;
+            border-color: rgba(255,61,86,.8) !important;
+            color: #ff3d56 !important;
+            box-shadow: 0 0 10px rgba(255,61,86,.25) !important;
+        }
+        </style>""",
+        unsafe_allow_html=True,
+    )
+    if st.button("⊕  Add Point to Record", key="spotlight_add_point", use_container_width=True):
+        st.session_state["ledger_emp_id"] = int(emp["employee_id"])
+        st.session_state["page"] = "Points Ledger"
+        st.rerun()
 
 
 def load_employees(conn, q: str = "", building: str = "All") -> list[dict]:
