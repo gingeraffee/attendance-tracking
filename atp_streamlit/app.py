@@ -2155,6 +2155,7 @@ def pto_page(conn, building: str) -> None:
                         raw = raw.dropna(subset=["start_date", "end_date"])
                         raw = _normalize_and_filter(raw)
                         st.session_state["pto_df"] = raw
+                        st.session_state.pop("pto_type_toggles", None)
                         st.success(f"Loaded {len(raw):,} PTO records for active employees.")
                 elif "date" in cols:
                     # Legacy single-day format — convert to range format
@@ -2168,6 +2169,7 @@ def pto_page(conn, building: str) -> None:
                         raw = raw.dropna(subset=["start_date"])
                         raw = _normalize_and_filter(raw)
                         st.session_state["pto_df"] = raw
+                        st.session_state.pop("pto_type_toggles", None)
                         st.success(f"Loaded {len(raw):,} PTO records for active employees (legacy format).")
                 else:
                     st.error("CSV must contain either `start_date`/`end_date` columns or a `date` column.")
@@ -2181,9 +2183,10 @@ def pto_page(conn, building: str) -> None:
     df_all: pd.DataFrame = st.session_state["pto_df"].copy()
 
     # ── Filters ─────────────────────────────────────────────────────────────
+    import re as _re
     divider()
     section_label("Filters")
-    fc1, fc2, fc3, fc4 = st.columns(4)
+    fc1, fc2, fc3 = st.columns(3)
 
     date_min = df_all["start_date"].min().date()
     date_max = df_all["end_date"].max().date()
@@ -2199,8 +2202,52 @@ def pto_page(conn, building: str) -> None:
         sel_building = st.selectbox("Building", bldg_opts, index=bldg_opts.index(default_bldg), key="pto_bldg")
 
     all_types = sorted(df_all["pto_type"].dropna().unique())
-    with fc4:
-        sel_types = st.multiselect("PTO Types", all_types, default=all_types, key="pto_types")
+
+    # ── PTO type toggle chips ────────────────────────────────────────────────
+    def _tkey(t: str) -> str:
+        return "pto_toggle_" + _re.sub(r"[^a-z0-9]", "_", t.lower())
+
+    # Reset toggle state if the type list has changed (new CSV loaded)
+    if set(st.session_state.get("pto_type_toggles", {}).keys()) != set(all_types):
+        st.session_state["pto_type_toggles"] = {t: True for t in all_types}
+    toggles: dict = st.session_state["pto_type_toggles"]
+
+    active_sel   = [f".st-key-{_tkey(t)} button" for t in all_types if     toggles.get(t, True)]
+    inactive_sel = [f".st-key-{_tkey(t)} button" for t in all_types if not toggles.get(t, True)]
+
+    st.markdown(
+        f"""<style>
+        div[class*="st-key-pto_toggle_"] button {{
+            padding: 0.12rem 0.85rem !important;
+            font-size: 0.67rem !important;
+            border-radius: 999px !important;
+            font-family: 'SF Mono','Fira Code',monospace !important;
+            letter-spacing: 0.08em !important;
+            text-transform: uppercase !important;
+            min-height: 26px !important;
+            line-height: 1 !important;
+            font-weight: 600 !important;
+            transition: all 0.15s ease !important;
+        }}
+        {(", ".join(active_sel) or ".pto-na") + " { background: rgba(0,212,255,.1) !important; border: 1px solid rgba(0,212,255,.7) !important; color: #00d4ff !important; box-shadow: 0 0 10px rgba(0,212,255,.2), inset 0 0 6px rgba(0,212,255,.05) !important; }"}
+        {(", ".join(inactive_sel) or ".pto-na") + " { background: rgba(6,13,31,.6) !important; border: 1px solid #1a3050 !important; color: #2d4a6a !important; box-shadow: none !important; }"}
+        </style>""",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        "<div style='font-size:.65rem;color:#2d5070;text-transform:uppercase;"
+        "letter-spacing:.12em;margin:.8rem 0 .35rem;font-family:SF Mono,Fira Code,monospace'>"
+        "◈ &nbsp;Type Filter</div>",
+        unsafe_allow_html=True,
+    )
+    tcols = st.columns(len(all_types))
+    for i, t in enumerate(all_types):
+        if tcols[i].button(t, key=_tkey(t), use_container_width=True):
+            st.session_state["pto_type_toggles"][t] = not toggles.get(t, True)
+            st.rerun()
+
+    sel_types = [t for t in all_types if st.session_state["pto_type_toggles"].get(t, True)]
 
     # Apply filters — include any PTO event that overlaps the selected date range
     df = df_all[
