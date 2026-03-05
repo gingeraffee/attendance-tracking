@@ -2492,6 +2492,18 @@ def pto_page(conn, building: str) -> None:
         mime="text/csv",
     )
 
+    # ── Clear data ──────────────────────────────────────────────────────────
+    divider()
+    st.markdown(
+        "<p style='color:#6a8ab8;font-size:.8rem;margin-bottom:.4rem'>"
+        "Clear the loaded CSV data to start over with a new file.</p>",
+        unsafe_allow_html=True,
+    )
+    if st.button("Clear PTO Data", type="secondary", use_container_width=False):
+        st.session_state.pop("pto_df", None)
+        st.session_state.pop("pto_type_toggles", None)
+        st.rerun()
+
 
 # ── Employees ─────────────────────────────────────────────────────────────────
 def employees_page(conn, building: str) -> None:
