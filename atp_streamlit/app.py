@@ -20,8 +20,6 @@ try:
 except Exception:
     px = None
     _HAS_PLOTLY = False
-
-import matplotlib.pyplot as plt
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet
