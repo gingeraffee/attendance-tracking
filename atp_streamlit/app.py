@@ -2497,16 +2497,31 @@ def pto_page(conn, building: str) -> None:
     divider()
     section_label("Planned vs Unplanned PTO")
 
-    _PLANNED_KW   = {"vacation", "holiday", "reward", "personal", "floating"}
-    _UNPLANNED_KW = {"sick", "absence", "absent", "call"}
-    _PROTECTED_KW = {"jury", "bereavement", "fmla", "leave", "long term"}
+    _PLANNED_TYPES   = {"vacation", "personal", "floating holiday", "reward pto"}
+    _UNPLANNED_TYPES = {"absence", "absence (sick)", "absence (covid)", "long term sick leave"}
+    _PROTECTED_TYPES = {"jury duty", "bereavement", "fmla"}
 
     def _classify_pto(t: str) -> str:
-        tl = t.lower()
-        if any(k in tl for k in _PLANNED_KW):   return "Planned"
-        if any(k in tl for k in _UNPLANNED_KW): return "Unplanned"
-        if any(k in tl for k in _PROTECTED_KW): return "Protected / Neutral"
+        tl = t.strip().lower()
+        if tl in _PLANNED_TYPES:   return "Planned"
+        if tl in _UNPLANNED_TYPES: return "Unplanned"
+        if tl in _PROTECTED_TYPES: return "Protected / Neutral"
         return "Other"
+
+    def _drill_table(source_df: pd.DataFrame, label: str) -> None:
+        section_label(f"Employees — {label}")
+        d = source_df.copy()
+        d["start_date"] = d["start_date"].dt.strftime("%Y-%m-%d")
+        d["end_date"]   = d["end_date"].dt.strftime("%Y-%m-%d")
+        d["Hours"] = d["hours"].round(1)
+        d["Days"]  = (d["hours"] / 8).round(1)
+        d = (
+            d.rename(columns={"employee": "Employee", "building": "Building",
+                               "pto_type": "PTO Type", "start_date": "Start", "end_date": "End"})
+            [["Employee", "Building", "PTO Type", "Start", "End", "Hours", "Days"]]
+            .sort_values(["Employee", "Start"])
+        )
+        st.dataframe(d, use_container_width=True, hide_index=True)
 
     df_cls = df.copy()
     df_cls["category"] = df_cls["pto_type"].apply(_classify_pto)
@@ -2538,9 +2553,11 @@ def pto_page(conn, building: str) -> None:
         if not mcat.empty:
             _CAT_CLR = {"Planned": "#00e5a0", "Unplanned": "#ff6b6b"}
             pu_fig = go.Figure()
+            _pu_trace_cats: list[str] = []
             for cat in ["Planned", "Unplanned"]:
                 sub = mcat[mcat["category"] == cat]
                 if not sub.empty:
+                    _pu_trace_cats.append(cat)
                     pu_fig.add_trace(go.Scatter(
                         x=sub["month"], y=sub["hours"], name=cat,
                         mode="lines+markers",
@@ -2548,7 +2565,7 @@ def pto_page(conn, building: str) -> None:
                         marker=dict(size=6),
                         fill="tozeroy",
                         fillcolor="rgba(0,229,160,0.07)" if cat == "Planned" else "rgba(255,107,107,0.07)",
-                        hovertemplate=f"<b>{cat}</b><br>%{{x|%b %Y}}: %{{y:.0f}} hrs<extra></extra>",
+                        hovertemplate=f"<b>{cat}</b><br>%{{x|%b %Y}}: %{{y:.0f}} hrs — click to drill down<extra></extra>",
                     ))
             pu_fig.update_layout(
                 paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
@@ -2559,7 +2576,19 @@ def pto_page(conn, building: str) -> None:
                 margin=dict(t=10, b=10, l=10, r=10),
                 hovermode="x unified",
             )
-            st.plotly_chart(pu_fig, use_container_width=True, key="pto_pu_trend")
+            pu_event = st.plotly_chart(pu_fig, use_container_width=True, on_select="rerun", key="pto_pu_trend")
+            pu_pts = pu_event.selection.get("points", []) if pu_event.selection else []
+            if pu_pts:
+                cn = pu_pts[0].get("curve_number", 0)
+                sel_cat = _pu_trace_cats[cn] if cn < len(_pu_trace_cats) else None
+                sel_period = pd.to_datetime(pu_pts[0]["x"]).to_period("M")
+                if sel_cat:
+                    drill_pu = df_cls[
+                        (df_cls["category"] == sel_cat) &
+                        (df_cls["start_date"].dt.to_period("M") == sel_period)
+                    ]
+                    if not drill_pu.empty:
+                        _drill_table(drill_pu, f"{sel_cat} — {sel_period.strftime('%b %Y')}")
         else:
             info_box("Not enough monthly data for trend.")
     with pv_r:
@@ -2604,7 +2633,7 @@ def pto_page(conn, building: str) -> None:
             text=[f"{top10_hrs_sum / 8:.0f}d", f"{rest_hrs_sum / 8:.0f}d"],
             textposition="inside",
             textfont=dict(color="#e8f4fd"),
-            hovertemplate="<b>%{y}</b>: %{x:.0f} hrs<extra></extra>",
+            hovertemplate="<b>%{y}</b>: %{x:.0f} hrs — click to see employees<extra></extra>",
         ))
         conc_fig.update_layout(
             paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
@@ -2614,24 +2643,47 @@ def pto_page(conn, building: str) -> None:
             margin=dict(t=10, b=10, l=10, r=10),
             height=180,
         )
-        st.plotly_chart(conc_fig, use_container_width=True, key="pto_conc_bar")
+        conc_event = st.plotly_chart(conc_fig, use_container_width=True, on_select="rerun", key="pto_conc_bar")
+        conc_pts = conc_event.selection.get("points", []) if conc_event.selection else []
+        if conc_pts:
+            bar_label = conc_pts[0].get("y", "")
+            if bar_label == "Top 10 Users":
+                _drill_table(df[df["employee"].isin(set(emp_hrs.head(10)["employee"]))], "Top 10 PTO Users")
+            elif bar_label == "Rest of Team":
+                _drill_table(df[df["employee"].isin(set(emp_hrs.iloc[10:]["employee"]))], "Rest of Team")
     with cc2:
-        hist_fig = go.Figure(go.Histogram(
-            x=emp_hrs["hours"],
-            nbinsx=14,
+        import numpy as _np
+        _max_h = max(float(emp_hrs["hours"].max()), 1.0)
+        _bin_edges = list(_np.linspace(0, _max_h, 11))
+        _bin_labels = [f"{int(_bin_edges[i])}–{int(_bin_edges[i+1])}h" for i in range(10)]
+        _emp_hrs_b = emp_hrs.copy()
+        _emp_hrs_b["bin"] = pd.cut(_emp_hrs_b["hours"], bins=_bin_edges, labels=_bin_labels, include_lowest=True)
+        _bin_counts = _emp_hrs_b.groupby("bin", observed=False)["hours"].count().reindex(_bin_labels).fillna(0)
+        hist_fig = go.Figure(go.Bar(
+            x=_bin_labels,
+            y=_bin_counts.values,
             marker=dict(color="#7b61ff", line=dict(color="#060d1f", width=1)),
-            hovertemplate="~%{x} hrs: %{y} employees<extra></extra>",
+            hovertemplate="<b>%{x}</b>: %{y} employees — click to see<extra></extra>",
         ))
         hist_fig.update_layout(
             paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
             font=dict(color="#c8dff0", family="SF Mono, Fira Code, monospace"),
-            xaxis=dict(showgrid=False, color="#4a7fa5", title="Total Hours Used"),
+            xaxis=dict(showgrid=False, color="#4a7fa5", title="Total Hours Used", tickangle=-30),
             yaxis=dict(showgrid=True, gridcolor="#0d1b2e", color="#4a7fa5", title="# Employees"),
             margin=dict(t=10, b=10, l=10, r=10),
             height=180,
             bargap=0.05,
         )
-        st.plotly_chart(hist_fig, use_container_width=True, key="pto_dist_hist")
+        hist_event = st.plotly_chart(hist_fig, use_container_width=True, on_select="rerun", key="pto_dist_hist")
+        hist_pts = hist_event.selection.get("points", []) if hist_event.selection else []
+        if hist_pts:
+            bin_sel = hist_pts[0].get("x", "")
+            if bin_sel in _bin_labels:
+                bi = _bin_labels.index(bin_sel)
+                lo, hi = _bin_edges[bi], _bin_edges[bi + 1]
+                names_in_bin = set(_emp_hrs_b[(_emp_hrs_b["hours"] >= lo) & (_emp_hrs_b["hours"] <= hi)]["employee"])
+                if names_in_bin:
+                    _drill_table(df[df["employee"].isin(names_in_bin)], f"Employees Using {bin_sel}")
 
     # ── Module 3: Burnout & Retention Risk ──────────────────────────────────
     divider()
@@ -2723,7 +2775,17 @@ def pto_page(conn, building: str) -> None:
         yaxis=dict(showgrid=True, gridcolor="#0d1b2e", color="#4a7fa5", title="Total Hours"),
         margin=dict(t=30, b=10, l=10, r=10),
     )
-    st.plotly_chart(season_fig, use_container_width=True, key="pto_seasonality")
+    season_event = st.plotly_chart(season_fig, use_container_width=True, on_select="rerun", key="pto_seasonality")
+    season_pts = season_event.selection.get("points", []) if season_event.selection else []
+    if season_pts:
+        sel_mon_label = season_pts[0].get("x", "")
+        if sel_mon_label in _MONTH_LABELS:
+            sel_mon_num = _MONTH_LABELS.index(sel_mon_label) + 1
+            df_mon = df.copy()
+            df_mon["cal_month"] = df_mon["start_date"].dt.month
+            drill_mon = df_mon[df_mon["cal_month"] == sel_mon_num]
+            if not drill_mon.empty:
+                _drill_table(drill_mon, f"PTO in {sel_mon_label}")
 
     # ── Export ──────────────────────────────────────────────────────────────
     divider()
