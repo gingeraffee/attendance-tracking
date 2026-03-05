@@ -1102,7 +1102,7 @@ def selected_employee_sidebar(conn, employee_id: int | None) -> None:
     )
     if st.button("⊕  Add Point to Record", key="spotlight_add_point", use_container_width=True):
         st.session_state["ledger_emp_id"] = int(emp["employee_id"])
-        st.session_state["page"] = "Points Ledger"
+        st.session_state["_nav_to"] = "Points Ledger"
         st.rerun()
 
 
@@ -3443,6 +3443,12 @@ def main() -> None:
     apply_theme()
     ensure_session_defaults()
     conn = get_conn()
+
+    # Resolve any deferred navigation request (e.g. from spotlight button)
+    # Must happen before the radio widget renders so the new value is respected.
+    _nav_to = st.session_state.pop("_nav_to", None)
+    if _nav_to:
+        st.session_state["page"] = _nav_to
 
     logo_path = REPO_ROOT / "assets" / "logo.png"
 
