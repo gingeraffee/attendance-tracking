@@ -2396,18 +2396,21 @@ def pto_page(conn, building: str) -> None:
     with tu2:
         section_label("Zero PTO — No Usage Recorded")
         emps_with_pto = set(df["employee"].unique())
-        all_scope = df_all[
-            (df_all["start_date"].dt.date <= date_end) & (df_all["end_date"].dt.date >= date_start)
+        # Use the DB roster as the reference — not the CSV
+        scoped_active = [
+            e for e in active_db
+            if sel_building == "All" or (e.get("location") or "") == sel_building
         ]
-        if sel_building != "All":
-            all_scope = all_scope[all_scope["building"] == sel_building]
-        emps_all_scope = set(all_scope["employee"].unique())
-        no_pto = sorted(emps_all_scope - emps_with_pto)
+        all_active_names = {
+            f"{e['last_name'].strip()}, {e['first_name'].strip()}"
+            for e in scoped_active
+        }
+        no_pto = sorted(all_active_names - emps_with_pto)
         if no_pto:
             no_pto_df = pd.DataFrame({"Employee": no_pto})
             st.dataframe(no_pto_df, use_container_width=True, hide_index=True)
         else:
-            info_box("All employees in scope have PTO recorded in this period.")
+            info_box("All active employees have PTO recorded in this period.")
 
     # ── Export ──────────────────────────────────────────────────────────────
     divider()
