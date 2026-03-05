@@ -1,14 +1,16 @@
 [theme]
-base="light"
+base="dark"
 
-# Electric blue — primary interactive element color
-primaryColor="#4f8ef7"
+# Cyan accent — primary interactive element color
+primaryColor="#00c8f0"
 
-# Soft light gray main background
-backgroundColor="#f0f4fa"
-secondaryBackgroundColor="#ffffff"
+# Near-black main canvas
+backgroundColor="#02060e"
 
-# Dark navy text
-textColor="#1a2744"
+# Deep navy surface
+secondaryBackgroundColor="#040c1a"
+
+# Light blue-white text
+textColor="#b8d0ee"
 
 font="sans serif"
