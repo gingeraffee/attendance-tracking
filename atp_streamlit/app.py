@@ -868,900 +868,413 @@ def load_employees(conn, q: str = "", building: str = "All") -> list[dict]:
 
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
-def dashboard_page(conn, building: str) -> None:
-    page_heading(
-        "Dashboard",
-        "Real-time overview of attendance activity, thresholds, and upcoming actions.",
-    )
-
-    today = date.today()
-    in_30_days = today + timedelta(days=30)
-    employees = load_employees(conn, building=building)
-    emp_ids = [int(e["employee_id"]) for e in employees]
-
-    if not emp_ids:
-        info_box("No employees found for this building filter.")
-        return
-    ph = ",".join(["?" if not is_pg(conn) else "%s"] * len(emp_ids))   
-    
-    def _scalar_n(conn, sql: str, params: tuple) -> int:
-        rows = fetchall(conn, sql, params)
-        if not rows:
-            return 0
-        r0 = dict(rows[0])
-        return int(r0.get("n") or 0)
-    
-    # ── HR Live Monitor (data-driven animation) ───────────────────────────────
-    since_24h = (today - timedelta(days=1)).isoformat()
-    since_7d = (today - timedelta(days=7)).isoformat()
-    due_7d = (today + timedelta(days=7)).isoformat()
+def _table_columns(conn, table_name: str) -> set[str]:
     if is_pg(conn):
-        sql_points_since = f"""
-            SELECT COUNT(*) AS n
-              FROM points_history ph
-             WHERE ph.employee_id IN ({ph})
-               AND (ph.point_date::date) >= (%s::date)
-               AND COALESCE(ph.points, 0.0) > 0.0
-        """
-        sql_roll_due_7d = f"""
-            SELECT COUNT(*) AS n
-              FROM employees
-             WHERE employee_id IN ({ph})
-               AND rolloff_date IS NOT NULL
-               AND (rolloff_date::date) >= (%s::date)
-               AND (rolloff_date::date) <= (%s::date)
-        """
-        sql_perf_due_7d = f"""
-            SELECT COUNT(*) AS n
-              FROM employees
-             WHERE employee_id IN ({ph})
-               AND perfect_attendance IS NOT NULL
-               AND (perfect_attendance::date) >= (%s::date)
-               AND (perfect_attendance::date) <= (%s::date)
-        """
-
-        points_24h = _scalar_n(conn, sql_points_since, (*emp_ids, since_24h))
-        points_7d = _scalar_n(conn, sql_points_since, (*emp_ids, since_7d))
-        rolloffs_due_7d = _scalar_n(conn, sql_roll_due_7d, (*emp_ids, today.isoformat(), due_7d))
-        perfect_due_7d = _scalar_n(conn, sql_perf_due_7d, (*emp_ids, today.isoformat(), due_7d))
-
-    else:
-        sql_points_since = f"""
-            SELECT COUNT(*) AS n
-              FROM points_history ph
-             WHERE ph.employee_id IN ({ph})
-               AND date(ph.point_date) >= date(?)
-               AND COALESCE(ph.points, 0.0) > 0.0
-        """
-        sql_roll_due_7d = f"""
-            SELECT COUNT(*) AS n
-              FROM employees
-             WHERE employee_id IN ({ph})
-               AND rolloff_date IS NOT NULL
-               AND date(rolloff_date) >= date(?)
-               AND date(rolloff_date) <= date(?)
-        """
-        sql_perf_due_7d = f"""
-            SELECT COUNT(*) AS n
-              FROM employees
-             WHERE employee_id IN ({ph})
-               AND perfect_attendance IS NOT NULL
-               AND date(perfect_attendance) >= date(?)
-               AND date(perfect_attendance) <= date(?)
-        """
-
-        points_24h = _scalar_n(conn, sql_points_since, (*emp_ids, since_24h))
-        points_7d = _scalar_n(conn, sql_points_since, (*emp_ids, since_7d))
-        rolloffs_due_7d = _scalar_n(conn, sql_roll_due_7d, (*emp_ids, today.isoformat(), due_7d))
-        perfect_due_7d = _scalar_n(conn, sql_perf_due_7d, (*emp_ids, today.isoformat(), due_7d))
-
-    render_hr_live_monitor(
-        points_24h=points_24h,
-        points_7d=points_7d,
-        rolloffs_due_7d=rolloffs_due_7d,
-        perfect_due_7d=perfect_due_7d,
-        label="Monitoring attendance activity",
-    )
-
-    if is_pg(conn):
-        sql_emp_detail = f'''
-            SELECT e.employee_id, e.last_name, e.first_name,
-                   COALESCE(e."Location",'') AS building,
-                   GREATEST(0.0, ROUND(COALESCE(SUM(ph.points), 0.0)::numeric, 1)::float8) AS point_total,
-                   e.last_point_date, e.rolloff_date, e.perfect_attendance
-              FROM employees e
-              LEFT JOIN points_history ph ON ph.employee_id = e.employee_id
-             WHERE e.employee_id IN ({ph})
-             GROUP BY e.employee_id, e.last_name, e.first_name, e."Location",
-                      e.last_point_date, e.rolloff_date, e.perfect_attendance
-        '''
-        sql_roll_due = f'''
-            SELECT employee_id, last_name, first_name, COALESCE("Location",'') AS building,
-                   rolloff_date, COALESCE(point_total,0) AS point_total
-              FROM employees
-             WHERE employee_id IN ({ph})
-               AND rolloff_date IS NOT NULL
-               AND (rolloff_date::date) >= (%s::date)
-               AND (rolloff_date::date) <= (%s::date)
-             ORDER BY (rolloff_date::date), lower(last_name), lower(first_name)
-        '''
-        sql_perf_due = f'''
-            SELECT employee_id, last_name, first_name, COALESCE("Location",'') AS building,
-                   perfect_attendance, COALESCE(point_total,0) AS point_total
-              FROM employees
-             WHERE employee_id IN ({ph})
-               AND perfect_attendance IS NOT NULL
-               AND (perfect_attendance::date) >= (%s::date)
-               AND (perfect_attendance::date) <= (%s::date)
-             ORDER BY (perfect_attendance::date), lower(last_name), lower(first_name)
-        '''
-        sql_build_reasons = '''
-            SELECT ph.reason, COUNT(*) AS n
-              FROM points_history ph
-              JOIN employees e ON e.employee_id = ph.employee_id
-             WHERE (ph.point_date::date) >= (%s::date)
-               AND COALESCE(ph.points, 0.0) > 0.0
-               AND COALESCE(e."Location", '') = %s
-               AND COALESCE(e.is_active, 1) = 1
-               AND COALESCE(ph.reason, '') <> ''
-             GROUP BY ph.reason
-             ORDER BY n DESC, ph.reason
-             LIMIT 1
-        '''
-        sql_active_emp_points = '''
-            SELECT e.employee_id,
-                   COALESCE(e."Location", '') AS building,
-                   GREATEST(0.0, ROUND(COALESCE(SUM(ph.points), 0.0)::numeric, 1)::float8) AS point_total
-              FROM employees e
-              LEFT JOIN points_history ph ON ph.employee_id = e.employee_id
-             WHERE COALESCE(e.is_active, 1) = 1
-             GROUP BY e.employee_id, e."Location"
-        '''
-        sql_build_points_window = f'''
-            SELECT COALESCE(e."Location", '') AS building,
-                   ROUND(COALESCE(SUM(ph.points), 0.0)::numeric, 1)::float8 AS pts
-              FROM points_history ph
-              JOIN employees e ON e.employee_id = ph.employee_id
-             WHERE ph.employee_id IN ({ph})
-               AND (ph.point_date::date) >= (%s::date)
-               AND (ph.point_date::date) < (%s::date)
-               AND COALESCE(ph.points, 0.0) > 0.0
-             GROUP BY COALESCE(e."Location", '')
-        '''
-        sql_insights_gt1 = f'''
-            SELECT e.employee_id,
-                   e.last_name,
-                   e.first_name,
-                   COALESCE(e."Location", '') AS building,
-                   ROUND(COALESCE(SUM(ph.points), 0.0)::numeric, 1)::float8 AS points_30d,
-                   MAX(ph.point_date::date)::text AS last_point_date,
-                   COALESCE((
-                       SELECT ph2.reason
-                         FROM points_history ph2
-                        WHERE ph2.employee_id = e.employee_id
-                          AND (ph2.point_date::date) >= (%s::date)
-                          AND EXTRACT(DOW FROM ph2.point_date::date) NOT IN (0, 6)
-                          AND COALESCE(ph2.points, 0.0) > 0.0
-                          AND COALESCE(ph2.reason, '') <> ''
-                        GROUP BY ph2.reason
-                        ORDER BY COUNT(*) DESC, MAX(ph2.point_date::date) DESC, ph2.reason
-                        LIMIT 1
-                   ), '—') AS top_reason
-              FROM employees e
-              JOIN points_history ph ON ph.employee_id = e.employee_id
-             WHERE e.employee_id IN ({ph})
-               AND (ph.point_date::date) >= (%s::date)
-               AND EXTRACT(DOW FROM ph.point_date::date) NOT IN (0, 6)
-               AND COALESCE(ph.points, 0.0) > 0.0
-             GROUP BY e.employee_id, e.last_name, e.first_name, e."Location"
-            HAVING COALESCE(SUM(ph.points), 0.0) > 1.0
-             ORDER BY points_30d DESC, MAX(ph.point_date::date) DESC, lower(e.last_name), lower(e.first_name)
-        '''
-        sql_points_60d = f'''
-            SELECT ph.employee_id,
-                   ROUND(COALESCE(SUM(ph.points), 0.0)::numeric, 1)::float8 AS points_60d
-              FROM points_history ph
-             WHERE ph.employee_id IN ({ph})
-               AND (ph.point_date::date) >= (%s::date)
-               AND EXTRACT(DOW FROM ph.point_date::date) NOT IN (0, 6)
-               AND COALESCE(ph.points, 0.0) > 0.0
-             GROUP BY ph.employee_id
-        '''
-        sql_trend_90d = f'''
-            SELECT (ph.point_date::date)::text AS point_day,
-                   ROUND(COALESCE(SUM(ph.points), 0.0)::numeric, 1)::float8 AS pts
-              FROM points_history ph
-             WHERE ph.employee_id IN ({ph})
-               AND (ph.point_date::date) >= (%s::date)
-               AND EXTRACT(DOW FROM ph.point_date::date) NOT IN (0, 6)
-               AND COALESCE(ph.points, 0.0) > 0.0
-             GROUP BY (ph.point_date::date)
-             ORDER BY (ph.point_date::date)
-        '''
-        sql_weekday_window = f'''
-            WITH totals AS (
-                SELECT EXTRACT(DOW FROM ph.point_date::date)::int AS dow,
-                       ROUND(COALESCE(SUM(ph.points), 0.0)::numeric, 1)::float8 AS total_points,
-                       COUNT(*) AS incidents
-                  FROM points_history ph
-                 WHERE ph.employee_id IN ({ph})
-                   AND (ph.point_date::date) >= (%s::date)
-                   AND (ph.point_date::date) < (%s::date)
-                   AND COALESCE(ph.points, 0.0) > 0.0
-                 GROUP BY EXTRACT(DOW FROM ph.point_date::date)
-            ),
-            emp_counts AS (
-                SELECT d.dow,
-                       COUNT(*) AS employees_pointed
-                  FROM (
-                        SELECT EXTRACT(DOW FROM ph.point_date::date)::int AS dow,
-                               ph.employee_id,
-                               SUM(COALESCE(ph.points, 0.0)) AS employee_points
-                          FROM points_history ph
-                         WHERE ph.employee_id IN ({ph})
-                           AND (ph.point_date::date) >= (%s::date)
-                           AND (ph.point_date::date) < (%s::date)
-                           AND COALESCE(ph.points, 0.0) > 0.0
-                         GROUP BY EXTRACT(DOW FROM ph.point_date::date), ph.employee_id
-                        HAVING SUM(COALESCE(ph.points, 0.0)) >= 1.0
-                  ) d
-                 GROUP BY d.dow
-            )
-            SELECT t.dow,
-                   t.total_points,
-                   t.incidents,
-                   COALESCE(e.employees_pointed, 0) AS employees_pointed
-              FROM totals t
-              LEFT JOIN emp_counts e ON e.dow = t.dow
-        '''
-        sql_weekday_reason = f'''
-            SELECT ph.reason, COUNT(*) AS n
-              FROM points_history ph
-             WHERE ph.employee_id IN ({ph})
-               AND (ph.point_date::date) >= (%s::date)
-               AND (ph.point_date::date) < (%s::date)
-               AND EXTRACT(DOW FROM ph.point_date::date)::int = (%s)
-               AND COALESCE(ph.points, 0.0) > 0.0
-               AND COALESCE(ph.reason, '') <> ''
-             GROUP BY ph.reason
-             ORDER BY n DESC, ph.reason
-             LIMIT 1
-        '''
-    else:
-        sql_emp_detail = f'''
-            SELECT e.employee_id, e.last_name, e.first_name,
-                   COALESCE(e."Location",'') AS building,
-                   MAX(0.0, ROUND(COALESCE((
-                       SELECT SUM(ph.points) FROM points_history ph WHERE ph.employee_id = e.employee_id
-                   ), 0.0), 1)) AS point_total,
-                   e.last_point_date, e.rolloff_date, e.perfect_attendance
-              FROM employees e
-             WHERE e.employee_id IN ({ph})
-        '''
-        sql_roll_due = f'''
-            SELECT employee_id, last_name, first_name, COALESCE("Location",'') AS building,
-                   rolloff_date, COALESCE(point_total,0) AS point_total
-              FROM employees
-             WHERE employee_id IN ({ph})
-               AND rolloff_date IS NOT NULL
-               AND date(rolloff_date) >= date(?)
-               AND date(rolloff_date) <= date(?)
-             ORDER BY date(rolloff_date), lower(last_name), lower(first_name)
-        '''
-        sql_perf_due = f'''
-            SELECT employee_id, last_name, first_name, COALESCE("Location",'') AS building,
-                   perfect_attendance, COALESCE(point_total,0) AS point_total
-              FROM employees
-             WHERE employee_id IN ({ph})
-               AND perfect_attendance IS NOT NULL
-               AND date(perfect_attendance) >= date(?)
-               AND date(perfect_attendance) <= date(?)
-             ORDER BY date(perfect_attendance), lower(last_name), lower(first_name)
-        '''
-        sql_build_reasons = '''
-            SELECT ph.reason, COUNT(*) AS n
-              FROM points_history ph
-              JOIN employees e ON e.employee_id = ph.employee_id
-             WHERE date(ph.point_date) >= date(?)
-               AND COALESCE(ph.points, 0.0) > 0.0
-               AND COALESCE(e."Location", '') = ?
-               AND COALESCE(e.is_active, 1) = 1
-               AND COALESCE(ph.reason, '') <> ''
-             GROUP BY ph.reason
-             ORDER BY n DESC, ph.reason
-             LIMIT 1
-        '''
-        sql_active_emp_points = '''
-            SELECT e.employee_id,
-                   COALESCE(e."Location", '') AS building,
-                   MAX(0.0, ROUND(COALESCE((
-                       SELECT SUM(ph.points) FROM points_history ph WHERE ph.employee_id = e.employee_id
-                   ), 0.0), 1)) AS point_total
-              FROM employees e
-             WHERE COALESCE(e.is_active, 1) = 1
-             GROUP BY e.employee_id, e."Location"
-        '''
-        sql_build_points_window = f'''
-            SELECT COALESCE(e."Location", '') AS building,
-                   ROUND(COALESCE(SUM(ph.points), 0.0), 1) AS pts
-              FROM points_history ph
-              JOIN employees e ON e.employee_id = ph.employee_id
-             WHERE ph.employee_id IN ({ph})
-               AND date(ph.point_date) >= date(?)
-               AND date(ph.point_date) < date(?)
-               AND COALESCE(ph.points, 0.0) > 0.0
-             GROUP BY COALESCE(e."Location", '')
-        '''
-        sql_insights_gt1 = f'''
-            SELECT e.employee_id,
-                   e.last_name,
-                   e.first_name,
-                   COALESCE(e."Location", '') AS building,
-                   ROUND(COALESCE(SUM(ph.points), 0.0), 1) AS points_30d,
-                   MAX(date(ph.point_date)) AS last_point_date,
-                   COALESCE((
-                       SELECT ph2.reason
-                         FROM points_history ph2
-                        WHERE ph2.employee_id = e.employee_id
-                          AND date(ph2.point_date) >= date(?)
-                          AND strftime('%w', ph2.point_date) NOT IN ('0', '6')
-                          AND COALESCE(ph2.points, 0.0) > 0.0
-                          AND COALESCE(ph2.reason, '') <> ''
-                        GROUP BY ph2.reason
-                        ORDER BY COUNT(*) DESC, MAX(date(ph2.point_date)) DESC, ph2.reason
-                        LIMIT 1
-                   ), '—') AS top_reason
-              FROM employees e
-              JOIN points_history ph ON ph.employee_id = e.employee_id
-             WHERE e.employee_id IN ({ph})
-               AND date(ph.point_date) >= date(?)
-               AND strftime('%w', ph.point_date) NOT IN ('0', '6')
-               AND COALESCE(ph.points, 0.0) > 0.0
-             GROUP BY e.employee_id, e.last_name, e.first_name, e."Location"
-            HAVING COALESCE(SUM(ph.points), 0.0) > 1.0
-             ORDER BY points_30d DESC, MAX(date(ph.point_date)) DESC, lower(e.last_name), lower(e.first_name)
-        '''
-        sql_points_60d = f'''
-            SELECT ph.employee_id,
-                   ROUND(COALESCE(SUM(ph.points), 0.0), 1) AS points_60d
-              FROM points_history ph
-             WHERE ph.employee_id IN ({ph})
-               AND date(ph.point_date) >= date(?)
-               AND strftime('%w', ph.point_date) NOT IN ('0', '6')
-               AND COALESCE(ph.points, 0.0) > 0.0
-             GROUP BY ph.employee_id
-        '''
-        sql_trend_90d = f'''
-            SELECT date(ph.point_date) AS point_day,
-                   ROUND(COALESCE(SUM(ph.points), 0.0), 1) AS pts
-              FROM points_history ph
-             WHERE ph.employee_id IN ({ph})
-               AND date(ph.point_date) >= date(?)
-               AND strftime('%w', ph.point_date) NOT IN ('0', '6')
-               AND COALESCE(ph.points, 0.0) > 0.0
-             GROUP BY date(ph.point_date)
-             ORDER BY date(ph.point_date)
-        '''
-        sql_weekday_window = f'''
-            WITH totals AS (
-                SELECT CAST(strftime('%w', ph.point_date) AS INTEGER) AS dow,
-                       ROUND(COALESCE(SUM(ph.points), 0.0), 1) AS total_points,
-                       COUNT(*) AS incidents
-                  FROM points_history ph
-                 WHERE ph.employee_id IN ({ph})
-                   AND date(ph.point_date) >= date(?)
-                   AND date(ph.point_date) < date(?)
-                   AND COALESCE(ph.points, 0.0) > 0.0
-                 GROUP BY CAST(strftime('%w', ph.point_date) AS INTEGER)
-            ),
-            emp_counts AS (
-                SELECT d.dow,
-                       COUNT(*) AS employees_pointed
-                  FROM (
-                        SELECT CAST(strftime('%w', ph.point_date) AS INTEGER) AS dow,
-                               ph.employee_id,
-                               SUM(COALESCE(ph.points, 0.0)) AS employee_points
-                          FROM points_history ph
-                         WHERE ph.employee_id IN ({ph})
-                           AND date(ph.point_date) >= date(?)
-                           AND date(ph.point_date) < date(?)
-                           AND COALESCE(ph.points, 0.0) > 0.0
-                         GROUP BY CAST(strftime('%w', ph.point_date) AS INTEGER), ph.employee_id
-                        HAVING SUM(COALESCE(ph.points, 0.0)) >= 1.0
-                  ) d
-                 GROUP BY d.dow
-            )
-            SELECT t.dow,
-                   t.total_points,
-                   t.incidents,
-                   COALESCE(e.employees_pointed, 0) AS employees_pointed
-              FROM totals t
-              LEFT JOIN emp_counts e ON e.dow = t.dow
-        '''
-        sql_weekday_reason = f'''
-            SELECT ph.reason, COUNT(*) AS n
-              FROM points_history ph
-             WHERE ph.employee_id IN ({ph})
-               AND date(ph.point_date) >= date(?)
-               AND date(ph.point_date) < date(?)
-               AND CAST(strftime('%w', ph.point_date) AS INTEGER) = ?
-               AND COALESCE(ph.points, 0.0) > 0.0
-               AND COALESCE(ph.reason, '') <> ''
-             GROUP BY ph.reason
-             ORDER BY n DESC, ph.reason
-             LIMIT 1
-        '''
-
-    emp_detail_rows = [dict(r) for r in fetchall(conn, sql_emp_detail, tuple(emp_ids))]
-    roll_due_rows = [dict(r) for r in fetchall(conn, sql_roll_due, (*emp_ids, today.isoformat(), in_30_days.isoformat()))]
-    perf_due_rows = [dict(r) for r in fetchall(conn, sql_perf_due, (*emp_ids, today.isoformat(), in_30_days.isoformat()))]
-
-    bucket_defs = {
-        "0": lambda pts: pts == 0,
-        "1-4": lambda pts: 1 <= pts <= 4.5,
-        "5-6": lambda pts: 5 <= pts <= 6.5,
-        "7": lambda pts: pts >= 7,
-    }
-    bucket_counts = {
-        key: sum(1 for r in emp_detail_rows if fn(float(r.get("point_total") or 0)))
-        for key, fn in bucket_defs.items()
-    }
+        rows = fetchall(
+            conn,
+            """
+            SELECT column_name
+              FROM information_schema.columns
+             WHERE table_schema = 'public' AND table_name = %s
+            """,
+            (table_name,),
+        )
+        return {str(r["column_name"]).lower() for r in rows}
+    rows = fetchall(conn, f"PRAGMA table_info({table_name})")
+    return {str(r["name"]).lower() for r in rows}
 
 
+def _dashboard_css(reduce_motion: bool) -> None:
+    motion = "none" if reduce_motion else "all .22s ease"
+    dot_anim = "none" if reduce_motion else "dashPulse 2.1s ease-in-out infinite"
+    tile_sheen = "none" if reduce_motion else "translateX(-140%)"
     st.markdown(
-        """<style>
-        .st-key-dashboard_bucket_all div[data-testid="stButton"],
-        .st-key-dashboard_bucket_0 div[data-testid="stButton"],
-        .st-key-dashboard_bucket_1-4 div[data-testid="stButton"],
-        .st-key-dashboard_bucket_5-6 div[data-testid="stButton"],
-        .st-key-dashboard_bucket_7 div[data-testid="stButton"] {
-            margin-top: -92px !important;
-            position: relative;
-            z-index: 30;
-        }
-        .st-key-dashboard_bucket_all div[data-testid="stButton"] > button,
-        .st-key-dashboard_bucket_0 div[data-testid="stButton"] > button,
-        .st-key-dashboard_bucket_1-4 div[data-testid="stButton"] > button,
-        .st-key-dashboard_bucket_5-6 div[data-testid="stButton"] > button,
-        .st-key-dashboard_bucket_7 div[data-testid="stButton"] > button {
-            background: transparent !important;
-            border: 0 !important;
-            box-shadow: none !important;
-            min-height: 92px !important;
-            width: 100% !important;
-            padding: 0 !important;
-        }
-        .st-key-dashboard_bucket_all div[data-testid="stButton"] > button p,
-        .st-key-dashboard_bucket_0 div[data-testid="stButton"] > button p,
-        .st-key-dashboard_bucket_1-4 div[data-testid="stButton"] > button p,
-        .st-key-dashboard_bucket_5-6 div[data-testid="stButton"] > button p,
-        .st-key-dashboard_bucket_7 div[data-testid="stButton"] > button p {
-            opacity: 0 !important;
-            margin: 0 !important;
-        }
-        </style>""",
+        f"""
+        <style>
+        .dash-top {{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;margin-bottom:1rem;}}
+        .dash-title h2 {{margin:0;font-size:1.45rem;font-weight:800;letter-spacing:-.01em;color:#14213d;}}
+        .dash-title p {{margin:.25rem 0 0 0;color:#52627a;font-size:.9rem;}}
+        .dash-live {{display:flex;align-items:center;gap:.5rem;padding:.45rem .7rem;border:1px solid rgba(79,142,247,.28);border-radius:10px;background:#fff;}}
+        .dash-dot {{width:10px;height:10px;border-radius:999px;background:#00a87a;animation:{dot_anim};}}
+        .dash-refresh {{font-size:.78rem;color:#60708a;}}
+        .tile-grid {{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:.8rem;margin:.45rem 0 1rem 0;}}
+        .cc-tile {{position:relative;overflow:hidden;background:#fff;border:1px solid rgba(18,34,67,.09);border-radius:14px;padding:.85rem .95rem;box-shadow:0 4px 18px rgba(15,32,68,.08);transition:{motion};}}
+        .cc-tile:hover {{transform:translateY(-2px);box-shadow:0 10px 22px rgba(15,32,68,.11);}}
+        .cc-tile::after {{content:'';position:absolute;inset:0;background:linear-gradient(110deg,transparent 40%,rgba(255,255,255,.55) 50%,transparent 60%);transform:{tile_sheen};transition:transform .8s ease;pointer-events:none;}}
+        .cc-tile:hover::after {{transform:translateX(140%);}}
+        .cc-k {{font-size:.68rem;text-transform:uppercase;letter-spacing:.12em;color:#60708a;font-weight:700;}}
+        .cc-v {{font-size:1.8rem;font-weight:800;color:#122243;line-height:1.15;margin:.25rem 0;}}
+        .cc-sub {{font-size:.78rem;color:#60708a;}}
+        .cc-trend-up {{color:#008a64;font-weight:700;}}
+        .cc-trend-down {{color:#cc3c4a;font-weight:700;}}
+        .activity-card {{background:#fff;border:1px solid rgba(18,34,67,.09);border-radius:14px;padding:.85rem .95rem;box-shadow:0 4px 18px rgba(15,32,68,.08);}}
+        .activity-row {{padding:.45rem .2rem;border-bottom:1px solid rgba(18,34,67,.07);animation:""" + ("none" if reduce_motion else "fadeSlide .45s ease") + """;}}
+        .activity-row:last-child {{border-bottom:none;}}
+        @media (max-width: 1250px) {{ .tile-grid {{grid-template-columns:repeat(3,minmax(0,1fr));}} }}
+        @media (max-width: 760px) {{ .tile-grid {{grid-template-columns:repeat(1,minmax(0,1fr));}} .dash-top {{flex-direction:column;}} }}
+        @keyframes dashPulse {{0%,100%{{opacity:.45;transform:scale(.95);}}50%{{opacity:1;transform:scale(1.05);}}}}
+        @keyframes fadeSlide {{from{{opacity:0;transform:translateY(6px);}}to{{opacity:1;transform:translateY(0);}}}}
+        </style>
+        """,
         unsafe_allow_html=True,
     )
 
-    tile_cols = st.columns(5)
-    tile_specs = [
-        ("all", "All Employees"),
-        ("0", "0 Points"),
-        ("1-4", "1–4.5 Pts"),
-        ("5-6", "5–6.5 Pts"),
-        ("7", "7+ Pts"),
-    ]
-    active_bucket = st.session_state.get("dashboard_bucket")
 
-    for col, (key, label) in zip(tile_cols, tile_specs):
-        selected = (active_bucket == key) if key != "all" else (active_bucket not in bucket_defs)
-        accent, glow = {
-            "all": ("#5c6f8c", "rgba(92,111,140,.22)"),
-            "0": ("#00a87a", "rgba(0,168,122,.25)"),
-            "1-4": ("#4f8ef7", "rgba(79,142,247,.25)"),
-            "5-6": ("#e6960a", "rgba(230,150,10,.28)"),
-            "7": ("#e0394a", "rgba(224,57,74,.32)"),
-        }.get(key, ("#5c6f8c", "rgba(92,111,140,.22)"))
-        # Keep style vars local and explicit to avoid NameError in f-string interpolation.
-        card_border = "rgba(26,39,68,.16)" if not selected else accent
-        card_shadow = f"0 0 0 2px {glow}, 0 8px 18px rgba(15,32,68,.12)" if selected else "0 4px 14px rgba(15,32,68,.08)"
-        employees_count = len(emp_detail_rows) if key == "all" else bucket_counts[key]
+def _trend_text(current: float, previous: float, unit: str = "") -> str:
+    if previous <= 0:
+        return "No prior period"
+    delta = ((current - previous) / previous) * 100.0
+    cls = "cc-trend-up" if delta >= 0 else "cc-trend-down"
+    arrow = "▲" if delta >= 0 else "▼"
+    return f"<span class='{cls}'>{arrow} {abs(delta):.1f}%</span> vs prior {unit}".strip()
 
-        col.markdown(
-            f"<div class='card-sm' style='margin-bottom:.45rem;padding:.72rem .9rem;"
-            f"background:#ffffff;border:1px solid {card_border};box-shadow:{card_shadow};cursor:pointer;pointer-events:none;'>"
-            f"<div style='height:4px;border-radius:999px;background:{accent};margin:-.2rem 0 .6rem 0'></div>"
-            f"<div style='font-size:.68rem;letter-spacing:.09em;text-transform:uppercase;color:{accent};font-weight:700'>{label}</div>"
-            f"<div style='display:flex;align-items:baseline;justify-content:space-between;margin-top:.18rem'>"
-            f"<span style='font-size:1.95rem;font-weight:800;color:#1a2744;line-height:1'>{employees_count}</span>"
-            f"<span style='font-size:.72rem;font-weight:700;color:{accent};text-transform:uppercase;letter-spacing:.05em'>&nbsp;employees</span>"
-            f"</div></div>",
+
+def _render_command_tile(label: str, value: float, trend_html: str, reduce_motion: bool) -> None:
+    shown = int(round(value)) if float(value).is_integer() else value
+    if reduce_motion:
+        display_val = f"{shown}"
+    else:
+        display_val = f"<span class='countup' data-target='{float(value):.2f}'>0</span>"
+    st.markdown(
+        f"""
+        <div class='cc-tile'>
+            <div class='cc-k'>{label}</div>
+            <div class='cc-v'>{display_val}</div>
+            <div class='cc-sub'>{trend_html}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    if not reduce_motion:
+        components.html(
+            """
+            <script>
+            const nodes = window.parent.document.querySelectorAll('.countup');
+            nodes.forEach((el) => {
+              if (el.dataset.done === '1') return;
+              el.dataset.done = '1';
+              const target = parseFloat(el.dataset.target || '0');
+              let s = 0;
+              const t0 = performance.now();
+              const dur = 650;
+              const tick = (tn) => {
+                const p = Math.min((tn - t0) / dur, 1);
+                const eased = 1 - Math.pow(1 - p, 3);
+                const val = s + (target - s) * eased;
+                el.textContent = Number.isInteger(target) ? Math.round(val).toLocaleString() : val.toFixed(1);
+                if (p < 1) requestAnimationFrame(tick);
+              };
+              requestAnimationFrame(tick);
+            });
+            </script>
+            """,
+            height=0,
+        )
+
+
+def dashboard_page(conn, building: str) -> None:
+    today = date.today()
+    now = datetime.now()
+
+    for key, default in {
+        "ui_reduce_motion": False,
+        "ui_dense_tables": True,
+        "ui_auto_refresh": False,
+        "dashboard_last_refresh": now,
+        "dashboard_refresh_cycle": 0,
+    }.items():
+        if key not in st.session_state:
+            st.session_state[key] = default
+
+    with st.sidebar:
+        st.toggle("Reduce motion", key="ui_reduce_motion")
+        st.toggle("Dense tables", key="ui_dense_tables")
+        st.toggle("Auto-refresh", key="ui_auto_refresh")
+
+    reduce_motion = bool(st.session_state.get("ui_reduce_motion"))
+    dense_tables = bool(st.session_state.get("ui_dense_tables"))
+    auto_refresh = bool(st.session_state.get("ui_auto_refresh"))
+
+    if auto_refresh:
+        try:
+            from streamlit_autorefresh import st_autorefresh
+            st_autorefresh(interval=30000, key="dashboard_auto_refresh")
+            st.session_state["dashboard_last_refresh"] = now
+            st.session_state["dashboard_refresh_cycle"] += 1
+        except Exception:
+            pass
+
+    _dashboard_css(reduce_motion)
+
+    hdr_left, hdr_right = st.columns([2.6, 1.2])
+    with hdr_left:
+        st.markdown(
+            """
+            <div class='dash-title'>
+              <h2>Dashboard · Attendance Command Center</h2>
+              <p>Live operational visibility into attendance points, upcoming roll-offs, and repeat patterns.</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with hdr_right:
+        last_refresh = st.session_state.get("dashboard_last_refresh", now)
+        st.markdown(
+            f"""
+            <div class='dash-live'>
+              <span class='dash-dot'></span>
+              <div>
+                <div style='font-weight:700;color:#122243;'>Live · {'Monitoring: On' if auto_refresh else 'Monitoring: Manual'}</div>
+                <div class='dash-refresh'>Last refresh {last_refresh.strftime('%I:%M:%S %p')}</div>
+              </div>
+            </div>
+            """,
             unsafe_allow_html=True,
         )
 
-        if col.button("filter", key=f"dashboard_bucket_{key}", use_container_width=True):
-            if key == "all":
-                st.session_state.pop("dashboard_bucket", None)
-            else:
-                st.session_state["dashboard_bucket"] = key
+    ctrl1, ctrl2 = st.columns([1, 3])
+    with ctrl1:
+        if st.button("Manual Refresh", use_container_width=True):
+            st.session_state["dashboard_last_refresh"] = datetime.now()
+            st.session_state["dashboard_refresh_cycle"] += 1
             st.rerun()
+    with ctrl2:
+        if auto_refresh and "streamlit_autorefresh" not in sys.modules:
+            st.caption("Monitoring is ON, but timed refresh dependency is unavailable. Dashboard updates on interaction.")
 
-    # ── Dashboard views ───────────────────────────────────────────────────────
-    view_overview, view_insights = st.tabs(["Overview", "Insights"])
+    employees = load_employees(conn, building=building)
+    emp_ids = [int(e["employee_id"]) for e in employees]
+    if not emp_ids:
+        info_box("No employees found for this building filter.")
+        return
 
-    with view_overview:
-        col_left, col_right = st.columns([1.6, 1], gap="large")
+    ph = ",".join(["%s" if is_pg(conn) else "?"] * len(emp_ids))
 
-        with col_left:
-            section_label("Employee Point Overview")
-            bucket_key = st.session_state.get("dashboard_bucket")
-            source_rows = list(emp_detail_rows)
-            if bucket_key in bucket_defs:
-                source_rows = [r for r in emp_detail_rows if bucket_defs[bucket_key](float(r.get("point_total") or 0))]
-                bucket_label_map = dict(tile_specs)
-                st.caption(f"Filtered by threshold tile: {bucket_label_map.get(bucket_key, bucket_key)}")
+    def scalar(sql: str, params: tuple) -> float:
+        rows = fetchall(conn, sql, params)
+        if not rows:
+            return 0.0
+        r = dict(rows[0])
+        return float(r.get("n") or 0.0)
 
-            source_rows = sorted(
-                source_rows,
-                key=lambda r: (
-                    -float(r.get("point_total") or 0),
-                    str(r.get("last_point_date") or ""),
-                ),
-            )
+    if is_pg(conn):
+        point_day = "ph.point_date::date"
+        dow_expr = "EXTRACT(ISODOW FROM ph.point_date::date)"
+        today_s = today.isoformat()
+    else:
+        point_day = "date(ph.point_date)"
+        dow_expr = "CAST(strftime('%w', date(ph.point_date)) AS INTEGER)"
+        today_s = today.isoformat()
 
-            if source_rows:
-                df_emps = pd.DataFrame(
-                    [
-                        {
-                            "employee_id": int(r["employee_id"]),
-                            "Employee #": str(r["employee_id"]),
-                            "Name": f"{r['last_name']}, {r['first_name']}",
-                            "Building": r.get("building") or "—",
-                            "Point Total": f"{float(r.get('point_total') or 0):.1f}",
-                            "Last Point Date": fmt_date(r.get("last_point_date")),
-                        }
-                        for r in source_rows
-                    ]
-                )
-                event = st.dataframe(
-                    df_emps[["Employee #", "Name", "Building", "Point Total", "Last Point Date"]],
-                    use_container_width=True,
-                    hide_index=True,
-                    height=575,
-                    key="dash_emp_above5_table",
-                    on_select="rerun",
-                    selection_mode="single-row",
-                )
-                selected_rows = (event.selection.get("rows") if event else []) or []
-                if selected_rows:
-                    idx = int(selected_rows[0])
-                    if 0 <= idx < len(df_emps):
-                        st.session_state["selected_employee_id"] = int(df_emps.iloc[idx]["employee_id"])
+    if is_pg(conn):
+        last24 = scalar(
+            f"SELECT COUNT(*) AS n FROM points_history ph WHERE ph.employee_id IN ({ph}) AND COALESCE(ph.points,0)>0 AND {point_day} >= (%s::date - INTERVAL '1 day')",
+            (*emp_ids, today_s),
+        )
+        prev24 = scalar(
+            f"SELECT COUNT(*) AS n FROM points_history ph WHERE ph.employee_id IN ({ph}) AND COALESCE(ph.points,0)>0 AND {point_day} >= (%s::date - INTERVAL '2 day') AND {point_day} < (%s::date - INTERVAL '1 day')",
+            (*emp_ids, today_s, today_s),
+        )
+        roll_30 = scalar(
+            f"SELECT COUNT(*) AS n FROM employees WHERE employee_id IN ({ph}) AND rolloff_date IS NOT NULL AND rolloff_date::date >= %s::date AND rolloff_date::date <= %s::date",
+            (*emp_ids, today_s, (today + timedelta(days=30)).isoformat()),
+        )
+        roll_prev30 = scalar(
+            f"SELECT COUNT(*) AS n FROM employees WHERE employee_id IN ({ph}) AND rolloff_date IS NOT NULL AND rolloff_date::date >= %s::date AND rolloff_date::date < %s::date",
+            (*emp_ids, (today - timedelta(days=30)).isoformat(), today_s),
+        )
+        perf_30 = scalar(
+            f"SELECT COUNT(*) AS n FROM employees WHERE employee_id IN ({ph}) AND perfect_attendance IS NOT NULL AND perfect_attendance::date >= %s::date AND perfect_attendance::date <= %s::date",
+            (*emp_ids, today_s, (today + timedelta(days=30)).isoformat()),
+        )
+        perf_prev30 = scalar(
+            f"SELECT COUNT(*) AS n FROM employees WHERE employee_id IN ({ph}) AND perfect_attendance IS NOT NULL AND perfect_attendance::date >= %s::date AND perfect_attendance::date < %s::date",
+            (*emp_ids, (today - timedelta(days=30)).isoformat(), today_s),
+        )
+        hot_rows = fetchall(
+            conn,
+            f"""
+            SELECT {dow_expr} AS dow, COUNT(*) AS n
+              FROM points_history ph
+             WHERE ph.employee_id IN ({ph})
+               AND COALESCE(ph.points,0) > 0
+               AND {point_day} >= %s::date
+             GROUP BY {dow_expr}
+             ORDER BY n DESC
+             LIMIT 1
+            """,
+            (*emp_ids, (today - timedelta(days=90)).isoformat()),
+        )
+    else:
+        last24 = scalar(f"SELECT COUNT(*) AS n FROM points_history ph WHERE ph.employee_id IN ({ph}) AND COALESCE(ph.points,0)>0 AND {point_day} >= date(?, '-1 day')", (*emp_ids, today_s))
+        prev24 = scalar(f"SELECT COUNT(*) AS n FROM points_history ph WHERE ph.employee_id IN ({ph}) AND COALESCE(ph.points,0)>0 AND {point_day} >= date(?, '-2 day') AND {point_day} < date(?, '-1 day')", (*emp_ids, today_s, today_s))
+        roll_30 = scalar(f"SELECT COUNT(*) AS n FROM employees WHERE employee_id IN ({ph}) AND rolloff_date IS NOT NULL AND date(rolloff_date) >= date(?) AND date(rolloff_date) <= date(?)", (*emp_ids, today_s, (today + timedelta(days=30)).isoformat()))
+        roll_prev30 = scalar(f"SELECT COUNT(*) AS n FROM employees WHERE employee_id IN ({ph}) AND rolloff_date IS NOT NULL AND date(rolloff_date) >= date(?) AND date(rolloff_date) < date(?)", (*emp_ids, (today - timedelta(days=30)).isoformat(), today_s))
+        perf_30 = scalar(f"SELECT COUNT(*) AS n FROM employees WHERE employee_id IN ({ph}) AND perfect_attendance IS NOT NULL AND date(perfect_attendance) >= date(?) AND date(perfect_attendance) <= date(?)", (*emp_ids, today_s, (today + timedelta(days=30)).isoformat()))
+        perf_prev30 = scalar(f"SELECT COUNT(*) AS n FROM employees WHERE employee_id IN ({ph}) AND perfect_attendance IS NOT NULL AND date(perfect_attendance) >= date(?) AND date(perfect_attendance) < date(?)", (*emp_ids, (today - timedelta(days=30)).isoformat(), today_s))
+        hot_rows = fetchall(
+            conn,
+            f"""
+            SELECT {dow_expr} AS dow, COUNT(*) AS n
+              FROM points_history ph
+             WHERE ph.employee_id IN ({ph})
+               AND COALESCE(ph.points,0) > 0
+               AND {point_day} >= {'%s::date' if is_pg(conn) else 'date(?)'}
+             GROUP BY {dow_expr}
+             ORDER BY n DESC
+             LIMIT 1
+            """,
+            (*emp_ids, (today - timedelta(days=90)).isoformat()),
+        )
+    if hot_rows:
+        raw_dow = int(dict(hot_rows[0]).get("dow") or 0)
+        if not is_pg(conn):
+            raw_dow = 7 if raw_dow == 0 else raw_dow
+        hotspot_name = {1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri", 6: "Sat", 7: "Sun"}.get(raw_dow, "—")
+        hotspot_val = float(dict(hot_rows[0]).get("n") or 0.0)
+    else:
+        hotspot_name = "—"
+        hotspot_val = 0.0
 
-            else:
-                info_box("None 🎉")
+    st.markdown("<div class='tile-grid'>", unsafe_allow_html=True)
+    c1, c2, c3, c4, c5 = st.columns(5)
+    with c1:
+        _render_command_tile("Total Employees", float(len(emp_ids)), _trend_text(len(emp_ids), len(emp_ids), "headcount"), reduce_motion)
+    with c2:
+        _render_command_tile("Points Issued (24h)", last24, _trend_text(last24, prev24), reduce_motion)
+    with c3:
+        _render_command_tile("Roll-offs due ≤ 30d", roll_30, _trend_text(roll_30, roll_prev30), reduce_motion)
+    with c4:
+        _render_command_tile("Perfect Attendance due ≤ 30d", perf_30, _trend_text(perf_30, perf_prev30), reduce_motion)
+    with c5:
+        _render_command_tile("Hotspot Day (90d)", hotspot_val, f"Highest activity: <b>{hotspot_name}</b>", reduce_motion)
+    st.markdown("</div>", unsafe_allow_html=True)
 
+    left, right = st.columns([1.7, 1], gap="large")
+    table_height = 285 if dense_tables else 420
 
-        with col_right:
-            section_label("Roll Offs Due (Next 30 Days)")
-            if roll_due_rows:
-                df_roll = pd.DataFrame(
-                    [
-                        {
-                            "Employee #": str(r["employee_id"]),
-                            "Name": f"{r['last_name']}, {r['first_name']}",
-                            "Building": r.get("building") or "—",
-                            "Rolloff Date": fmt_date(r.get("rolloff_date")),
-                            "Current Points": f"{float(r.get('point_total') or 0):.1f}",
-                        }
-                        for r in roll_due_rows
-                    ]
-                )
-                st.dataframe(df_roll, use_container_width=True, hide_index=True, height=235)
-            else:
-                info_box("No roll-offs due in the next 30 days.")
-
-            divider()
-            section_label("Perfect Attendance Due (Next 30 Days)")
-            if perf_due_rows:
-                df_perf = pd.DataFrame(
-                    [
-                        {
-                            "Employee #": str(r["employee_id"]),
-                            "Name": f"{r['last_name']}, {r['first_name']}",
-                            "Building": r.get("building") or "—",
-                            "Perfect Date": fmt_date(r.get("perfect_attendance")),
-                            "Current Points": f"{float(r.get('point_total') or 0):.1f}",
-                        }
-                        for r in perf_due_rows
-                    ]
-                )
-                st.dataframe(df_perf, use_container_width=True, hide_index=True, height=235)
-            else:
-                info_box("No perfect attendance dates due in the next 30 days.")
-
-        divider()
-        section_label("Building Snapshot (Average Points per Employee)")
-
-        active_rows = [
-            dict(r)
-            for r in fetchall(
-                conn,
-                """SELECT COALESCE("Location", '') AS building, COUNT(*) AS n
-                   FROM employees
-                  WHERE COALESCE(is_active,1)=1
-                  GROUP BY COALESCE("Location", '')""",
-            )
-        ]
-        avg_total_rows = [
-            dict(r)
-            for r in fetchall(
-                conn,
-                """SELECT COALESCE("Location", '') AS building,
-                          AVG(COALESCE(point_total, 0.0)) AS avg_point_total
-                   FROM employees
-                  WHERE COALESCE(is_active,1)=1
-                  GROUP BY COALESCE("Location", '')""",
-            )
-        ]
-        active_by_build = {b: 0 for b in BUILDINGS}
-        avg_total_by_build = {b: 0.0 for b in BUILDINGS}
-        for r in active_rows:
-            if r["building"] in active_by_build:
-                active_by_build[r["building"]] = int(r["n"] or 0)
-        for r in avg_total_rows:
-            if r["building"] in avg_total_by_build:
-                avg_total_by_build[r["building"]] = float(r.get("avg_point_total") or 0.0)
-
+    with left:
+        st.subheader("Insights")
         since_30 = (today - timedelta(days=30)).isoformat()
-        since_60 = (today - timedelta(days=60)).isoformat()
-        tomorrow = (today + timedelta(days=1)).isoformat()
-
-        current_rows = [dict(r) for r in fetchall(conn, sql_build_points_window, (*emp_ids, since_30, tomorrow))]
-        prior_rows = [dict(r) for r in fetchall(conn, sql_build_points_window, (*emp_ids, since_60, since_30))]
-        current_points = {r.get("building") or "": float(r.get("pts") or 0.0) for r in current_rows}
-        prior_points = {r.get("building") or "": float(r.get("pts") or 0.0) for r in prior_rows}
-
-        snap_rows = []
-        for b in BUILDINGS:
-            headcount = int(active_by_build.get(b) or 0)
-            avg_point_total = float(avg_total_by_build.get(b) or 0.0)
-            cur_total = float(current_points.get(b) or 0.0)
-            prev_total = float(prior_points.get(b) or 0.0)
-            cur_avg_30d = (cur_total / headcount) if headcount else 0.0
-            prev_avg_30d = (prev_total / headcount) if headcount else 0.0
-            if prev_avg_30d > 0:
-                pct_change = ((cur_avg_30d - prev_avg_30d) / prev_avg_30d) * 100.0
-                pct_txt = f"{pct_change:+.1f}%"
-            else:
-                pct_txt = "—"
-            reason_rows = [dict(r) for r in fetchall(conn, sql_build_reasons, (since_30, b))]
-            most_common_reason = (reason_rows[0].get("reason") if reason_rows else None) or "—"
-            snap_rows.append(
-                {
-                    "Building": b,
-                    "Active Employees": headcount,
-                    "Avg Point Total / Employee": f"{avg_point_total:.2f}",
-                    "% Change in Avg Points (30d)": pct_txt,
-                    "Most Common Reason (30d)": most_common_reason,
-                }
-            )
-
-        st.dataframe(pd.DataFrame(snap_rows), use_container_width=True, hide_index=True)
-
-
-
-    with view_insights:
-        divider()
-        section_label("Insights")
-
-        st.markdown("#### Employees > 1.0 Point (Last 30 Days)")
-        gt1_rows = [dict(r) for r in fetchall(conn, sql_insights_gt1, (since_30, *emp_ids, since_30))]
-        if gt1_rows:
-            df_gt1 = pd.DataFrame(
-                [
-                    {
-                        "Employee #": str(r["employee_id"]),
-                        "Name": f"{r['last_name']}, {r['first_name']}",
-                        "Building": r.get("building") or "—",
-                        "Points (30d)": f"{float(r.get('points_30d') or 0.0):.1f}",
-                        "Last Point Date": fmt_date(r.get("last_point_date")),
-                        "Top Reason": (r.get("top_reason") or "—"),
-                    }
-                    for r in gt1_rows
-                ]
-            )
-            st.dataframe(df_gt1.head(25), use_container_width=True, hide_index=True)
-            if len(df_gt1) > 25:
-                with st.expander(f"Show all ({len(df_gt1)})"):
-                    st.dataframe(df_gt1, use_container_width=True, hide_index=True)
+        gt1 = fetchall(
+            conn,
+            f"""
+            SELECT e.employee_id, e.last_name, e.first_name, COALESCE(e.location,'—') AS building,
+                   SUM(COALESCE(ph.points,0)) AS points_30d,
+                   MAX({point_day}) AS last_point_date
+              FROM employees e
+              JOIN points_history ph ON ph.employee_id = e.employee_id
+             WHERE e.employee_id IN ({ph})
+               AND {point_day} >= {'%s::date' if is_pg(conn) else 'date(?)'}
+             GROUP BY e.employee_id, e.last_name, e.first_name, e.location
+            HAVING SUM(COALESCE(ph.points,0)) > 1.0
+             ORDER BY points_30d DESC
+            """,
+            (*emp_ids, since_30),
+        )
+        if gt1:
+            df_gt1 = pd.DataFrame([{
+                "Employee #": int(r["employee_id"]),
+                "Name": f"{r['last_name']}, {r['first_name']}",
+                "Building": r.get("building") or "—",
+                "Points (30d)": float(r.get("points_30d") or 0.0),
+                "Last Point": fmt_date(r.get("last_point_date")),
+            } for r in gt1])
+            event = st.dataframe(df_gt1, use_container_width=True, hide_index=True, height=table_height, on_select="rerun", selection_mode="single-row", key="dash_gt1")
+            sel = (event.selection.get("rows") if event else []) or []
+            if sel:
+                idx = int(sel[0])
+                if 0 <= idx < len(df_gt1):
+                    st.session_state["selected_employee_id"] = int(df_gt1.iloc[idx]["Employee #"])
         else:
-            info_box("No employees over 1.0 points in the last 30 days.")
+            info_box("No employees over 1 point in the past 30 days.")
 
-        st.markdown("#### Trending Risks  — On track to exceed 8 points")
-        pts60_rows = [dict(r) for r in fetchall(conn, sql_points_60d, (*emp_ids, since_60))]
-        points60_by_emp = {int(r.get("employee_id")): float(r.get("points_60d") or 0.0) for r in pts60_rows}
-        weekdays_60 = max(len(pd.bdate_range(start=today - timedelta(days=60), end=today)), 1)
-        weekdays_30 = len(pd.bdate_range(start=today + timedelta(days=1), end=today + timedelta(days=30)))
-        risk_rows = []
-        for r in emp_detail_rows:
-            emp_id = int(r["employee_id"])
-            current_points = float(r.get("point_total") or 0.0)
-            points_60d = float(points60_by_emp.get(emp_id) or 0.0)
-            projected_30d = (points_60d / weekdays_60) * weekdays_30
-            projected_total = current_points + projected_30d
-            if projected_total >= 8.0:
-                risk_rows.append(
-                    {
-                        "Employee #": str(emp_id),
-                        "Name": f"{r['last_name']}, {r['first_name']}",
-                        "Building": r.get("building") or "—",
-                        "Current Points": f"{current_points:.1f}",
-                        "Points (60d)": f"{points_60d:.1f}",
-                        "Projected +30d": f"{projected_30d:.1f}",
-                        "Projected Total": f"{projected_total:.1f}",
-                        "Confidence Note": "Low data" if points_60d < 2.0 else "Based on last 60 days",
-                        "_projected_total": projected_total,
-                    }
+        reason_rows = fetchall(
+            conn,
+            f"""
+            SELECT COALESCE(reason,'Unspecified') AS reason, COUNT(*) AS incidents
+              FROM points_history ph
+             WHERE ph.employee_id IN ({ph})
+               AND {point_day} >= {'%s::date' if is_pg(conn) else 'date(?)'}
+             GROUP BY COALESCE(reason,'Unspecified')
+            HAVING COUNT(*) >= 2
+             ORDER BY incidents DESC
+             LIMIT 10
+            """,
+            (*emp_ids, since_30),
+        )
+        st.markdown("##### Repeat reason flags")
+        if reason_rows:
+            st.dataframe(pd.DataFrame([{"Reason": r["reason"], "Incidents": int(r["incidents"])} for r in reason_rows]), use_container_width=True, hide_index=True, height=220 if dense_tables else 300)
+        else:
+            info_box("No repeat reason patterns in this period.")
+
+        dow_rows = fetchall(
+            conn,
+            f"""
+            SELECT {dow_expr} AS dow, COUNT(*) AS incidents
+              FROM points_history ph
+             WHERE ph.employee_id IN ({ph})
+               AND COALESCE(ph.points,0) > 0
+               AND {point_day} >= {'%s::date' if is_pg(conn) else 'date(?)'}
+             GROUP BY {dow_expr}
+             ORDER BY dow
+            """,
+            (*emp_ids, (today - timedelta(days=90)).isoformat()),
+        )
+        st.markdown("##### Day-of-week hotspot analysis (90d)")
+        if dow_rows:
+            mapped = []
+            for r in dow_rows:
+                dow = int(r["dow"] or 0)
+                if not is_pg(conn):
+                    dow = 7 if dow == 0 else dow
+                mapped.append({"Day": {1:"Mon",2:"Tue",3:"Wed",4:"Thu",5:"Fri",6:"Sat",7:"Sun"}.get(dow, "—"), "Incidents": int(r["incidents"] or 0)})
+            order = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]
+            df_dow = pd.DataFrame(mapped)
+            df_dow["Day"] = pd.Categorical(df_dow["Day"], categories=order, ordered=True)
+            df_dow = df_dow.sort_values("Day").set_index("Day")
+            st.bar_chart(df_dow)
+        else:
+            info_box("No day-of-week data available.")
+
+    with right:
+        st.subheader("Live Activity")
+        cols = _table_columns(conn, "points_history")
+        sort_col = "created_at" if "created_at" in cols else "point_date"
+        event_rows = fetchall(
+            conn,
+            f"""
+            SELECT ph.employee_id, COALESCE(ph.points,0) AS points, COALESCE(ph.reason,'') AS reason,
+                   COALESCE(ph.note,'') AS note, ph.point_date, e.last_name, e.first_name
+              FROM points_history ph
+              LEFT JOIN employees e ON e.employee_id = ph.employee_id
+             WHERE ph.employee_id IN ({ph})
+             ORDER BY {sort_col} DESC
+             LIMIT 10
+            """,
+            tuple(emp_ids),
+        )
+        if event_rows:
+            st.markdown("<div class='activity-card'>", unsafe_allow_html=True)
+            for r in event_rows:
+                pts = float(r.get("points") or 0.0)
+                if pts > 0:
+                    label = f"Point added ({pts:.1f})"
+                elif pts < 0:
+                    label = f"Point removed ({abs(pts):.1f})"
+                else:
+                    label = "Attendance event"
+                name = f"{r.get('last_name') or 'Unknown'}, {r.get('first_name') or ''}".strip().strip(',')
+                reason = r.get("reason") or "No reason"
+                stamp = fmt_date(r.get("point_date"))
+                st.markdown(
+                    f"<div class='activity-row'><div style='font-weight:700;color:#122243'>{label}</div><div style='font-size:.84rem;color:#5a6c87'>{name} · {reason} · {stamp}</div></div>",
+                    unsafe_allow_html=True,
                 )
-        if risk_rows:
-            df_risk = pd.DataFrame(risk_rows).sort_values(by="_projected_total", ascending=False).drop(columns=["_projected_total"])
-            st.dataframe(df_risk, use_container_width=True, hide_index=True)
+            st.markdown("</div>", unsafe_allow_html=True)
         else:
-            info_box("No active employees currently trend to 8.0+ points in the next 30 days.")
-
-        st.markdown("#### Absenteeism Trend (90 Days)")
-        trend_rows = [dict(r) for r in fetchall(conn, sql_trend_90d, (*emp_ids, (today - timedelta(days=90)).isoformat()))]
-        all_days = pd.bdate_range(start=today - timedelta(days=90), end=today)
-        trend_df = pd.DataFrame({"point_day": all_days, "Total Points": 0.0})
-        if trend_rows:
-            trend_points = pd.DataFrame(
-                {
-                    "point_day": pd.to_datetime([r.get("point_day") for r in trend_rows]),
-                    "Total Points": [float(r.get("pts") or 0.0) for r in trend_rows],
-                }
-            )
-            trend_df = trend_df.merge(trend_points, on="point_day", how="left", suffixes=("", "_q"))
-            trend_df["Total Points"] = trend_df["Total Points_q"].fillna(trend_df["Total Points"]) 
-            trend_df = trend_df.drop(columns=["Total Points_q"])
-        trend_df = trend_df.rename(columns={"point_day": "Date"}).set_index("Date")
-        st.line_chart(trend_df)
-
-        st.markdown("#### Day-of-Week Trend")
-        ctrl_col1, ctrl_col2 = st.columns([1.2, 1])
-        with ctrl_col1:
-            window_label = st.selectbox(
-                "Window",
-                ["Last 30 days", "Last 90 days", "Last 12 months"],
-                index=1,
-                key="dow_window",
-            )
-        with ctrl_col2:
-            metric_choice = st.radio("Metric", ["Count", "Points", "Rate"], index=0, horizontal=True, key="dow_metric")
-
-        window_days = {"Last 30 days": 30, "Last 90 days": 90, "Last 12 months": 365}[window_label]
-        window_start = today - timedelta(days=window_days - 1)
-        window_end = today + timedelta(days=1)
-        prior_start = window_start - timedelta(days=window_days)
-        prior_end = window_start
-
-        current_rows = [
-            dict(r)
-            for r in fetchall(conn, sql_weekday_window, (*emp_ids, window_start.isoformat(), window_end.isoformat(), *emp_ids, window_start.isoformat(), window_end.isoformat()))
-        ]
-        prior_rows = [
-            dict(r)
-            for r in fetchall(conn, sql_weekday_window, (*emp_ids, prior_start.isoformat(), prior_end.isoformat(), *emp_ids, prior_start.isoformat(), prior_end.isoformat()))
-        ]
-
-        current_by_dow = {
-            int(r.get("dow") or 0): {
-                "incidents": int(r.get("incidents") or 0),
-                "employees_pointed": int(r.get("employees_pointed") or 0),
-                "points": float(r.get("total_points") or 0.0),
-            }
-            for r in current_rows
-        }
-        prior_by_dow = {
-            int(r.get("dow") or 0): {
-                "incidents": int(r.get("incidents") or 0),
-                "employees_pointed": int(r.get("employees_pointed") or 0),
-                "points": float(r.get("total_points") or 0.0),
-            }
-            for r in prior_rows
-        }
-
-        dow_order = [1, 2, 3, 4, 5]
-        dow_labels = {1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri"}
-
-        denominator_count = max(len(emp_ids), 1)
-        if metric_choice == "Rate":
-            st.caption("Rate uses approximate active-headcount denominator: incidents ÷ active employees × 100.")
-
-        def metric_value(stats: dict, metric: str) -> float:
-            incidents = float(stats.get("incidents") or 0)
-            employees_pointed = float(stats.get("employees_pointed") or 0)
-            points = float(stats.get("points") or 0)
-            if metric == "Count":
-                return employees_pointed
-            if metric == "Points":
-                return points
-            return (incidents / denominator_count) * 100.0
-
-        table_rows = []
-        metric_values = {}
-        for dow in dow_order:
-            stats = current_by_dow.get(dow, {"incidents": 0, "employees_pointed": 0, "points": 0.0})
-            incidents = int(stats.get("incidents") or 0)
-            employees_pointed = int(stats.get("employees_pointed") or 0)
-            points = float(stats.get("points") or 0.0)
-            selected_val = metric_value(stats, metric_choice)
-            metric_values[dow] = selected_val
-
-            weekday_reason_rows = [
-                dict(r)
-                for r in fetchall(
-                    conn,
-                    sql_weekday_reason,
-                    (*emp_ids, window_start.isoformat(), window_end.isoformat(), dow),
-                )
-            ]
-            top_reason_day = (weekday_reason_rows[0].get("reason") if weekday_reason_rows else None) or "—"
-
-            table_rows.append(
-                {
-                    "Weekday": dow_labels[dow],
-                    "# of Employees Pointed": employees_pointed,
-                    "Total Points Issued": round(points, 1),
-                    "Top Reason": top_reason_day,
-                }
-            )
-
-        st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True)
-
-        worst_dow = max(dow_order, key=lambda d: metric_values.get(d, 0.0))
-        worst_label = dow_labels[worst_dow]
-        worst_value = metric_values.get(worst_dow, 0.0)
-        if metric_choice == "Count":
-            worst_value_txt = f"{int(round(worst_value))} employees pointed"
-        elif metric_choice == "Points":
-            worst_value_txt = f"{worst_value:.1f} points"
-        else:
-            worst_value_txt = f"{worst_value:.2f} incidents per 100 active"
-        st.markdown(f"• Worst weekday ({metric_choice.lower()}): **{worst_label}** — **{worst_value_txt}**")
-
-        delta_rows = []
-        for dow in dow_order:
-            cur_val = metric_value(current_by_dow.get(dow, {"incidents": 0, "employees_pointed": 0, "points": 0.0}), metric_choice)
-            prev_val = metric_value(prior_by_dow.get(dow, {"incidents": 0, "employees_pointed": 0, "points": 0.0}), metric_choice)
-            if prev_val > 0:
-                pct = ((cur_val - prev_val) / prev_val) * 100.0
-                pct_txt = f"{pct:+.1f}%"
-            elif cur_val > 0:
-                pct_txt = "new activity"
-            else:
-                pct_txt = "0.0%"
-            delta_rows.append((dow, abs(cur_val - prev_val), pct_txt))
-
-        if delta_rows:
-            ch_dow, _, pct_txt = max(delta_rows, key=lambda x: x[1])
-            st.markdown(f"• Biggest change vs prior matching window: **{dow_labels[ch_dow]}** — **{pct_txt}**")
-
-        reason_rows = [
-            dict(r)
-            for r in fetchall(
-                conn,
-                sql_weekday_reason,
-                (*emp_ids, window_start.isoformat(), window_end.isoformat(), worst_dow),
-            )
-        ]
-        top_reason = (reason_rows[0].get("reason") if reason_rows else None) or "—"
-        if top_reason != "—":
-            st.markdown(f"• Most common reason on {worst_label}: **{top_reason}**")
-
-
-
-    # ── Employees ─────────────────────────────────────────────────────────────────
+            info_box("No recent attendance events found.")
 
 def employees_page(conn, building: str) -> None:
     page_heading("Employees", "Look up employees and review current attendance status.")
