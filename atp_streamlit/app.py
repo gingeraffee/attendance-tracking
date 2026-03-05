@@ -2072,8 +2072,21 @@ def _pto_metric(label: str, value: str, sub: str = "") -> None:
     )
 
 
-def pto_page(building: str) -> None:
+def pto_page(conn, building: str) -> None:
     page_heading("PTO Usage Analysis", "Upload a CSV export to analyze PTO patterns by type, building, and employee.")
+
+    # ── Active employee roster from DB (active_only=True by default) ────────
+    active_db = load_employees(conn, building="All")
+    active_ids: set[int] = {int(e["employee_id"]) for e in active_db}
+    active_names: set[str] = {
+        f"{e['last_name'].strip().lower()}, {e['first_name'].strip().lower()}"
+        for e in active_db
+    }
+    # For utilization denominator: active headcount scoped to the building filter
+    if building != "All":
+        active_count_in_scope = sum(1 for e in active_db if (e.get("location") or "") == building)
+    else:
+        active_count_in_scope = len(active_db)
 
     # ── CSV upload ──────────────────────────────────────────────────────────
     with st.expander("Upload PTO Data", expanded="pto_df" not in st.session_state):
@@ -2101,6 +2114,35 @@ def pto_page(building: str) -> None:
                 raw.columns = [c.strip().lower().replace(" ", "_") for c in raw.columns]
                 cols = set(raw.columns)
 
+                def _normalize_and_filter(df: pd.DataFrame) -> pd.DataFrame:
+                    """Shared cleanup + DB active-employee filter applied after parsing."""
+                    df["hours"] = pd.to_numeric(df["hours"], errors="coerce").fillna(0)
+                    df["building"] = df["building"].astype(str).str.strip()
+                    df["pto_type"] = df["pto_type"].astype(str).str.strip()
+                    df["employee"] = df["last_name"].str.strip() + ", " + df["first_name"].str.strip()
+                    df["days"] = (df["hours"] / 8).round(2)
+
+                    # Match against active DB employees
+                    def _is_active(row):
+                        if "employee_id" in df.columns:
+                            try:
+                                if int(row["employee_id"]) in active_ids:
+                                    return True
+                            except (ValueError, TypeError):
+                                pass
+                        name_key = f"{str(row['last_name']).strip().lower()}, {str(row['first_name']).strip().lower()}"
+                        return name_key in active_names
+
+                    mask = df.apply(_is_active, axis=1)
+                    excluded = (~mask).sum()
+                    if excluded:
+                        removed_names = sorted(df.loc[~mask, "employee"].unique())
+                        st.warning(
+                            f"{excluded} row(s) excluded — employee(s) not found in the active database: "
+                            + ", ".join(removed_names)
+                        )
+                    return df[mask]
+
                 # Detect format: range (start_date/end_date) or legacy (date)
                 if "start_date" in cols and "end_date" in cols:
                     required = {"last_name", "first_name", "building", "pto_type", "start_date", "end_date", "hours"}
@@ -2110,14 +2152,10 @@ def pto_page(building: str) -> None:
                     else:
                         raw["start_date"] = pd.to_datetime(raw["start_date"], errors="coerce")
                         raw["end_date"] = pd.to_datetime(raw["end_date"], errors="coerce")
-                        raw["hours"] = pd.to_numeric(raw["hours"], errors="coerce").fillna(0)
-                        raw["building"] = raw["building"].astype(str).str.strip()
-                        raw["pto_type"] = raw["pto_type"].astype(str).str.strip()
-                        raw["employee"] = raw["last_name"].str.strip() + ", " + raw["first_name"].str.strip()
-                        raw["days"] = (raw["hours"] / 8).round(2)
                         raw = raw.dropna(subset=["start_date", "end_date"])
+                        raw = _normalize_and_filter(raw)
                         st.session_state["pto_df"] = raw
-                        st.success(f"Loaded {len(raw):,} PTO records.")
+                        st.success(f"Loaded {len(raw):,} PTO records for active employees.")
                 elif "date" in cols:
                     # Legacy single-day format — convert to range format
                     required = {"last_name", "first_name", "building", "pto_type", "date", "hours"}
@@ -2127,14 +2165,10 @@ def pto_page(building: str) -> None:
                     else:
                         raw["start_date"] = pd.to_datetime(raw["date"], errors="coerce")
                         raw["end_date"] = raw["start_date"]
-                        raw["hours"] = pd.to_numeric(raw["hours"], errors="coerce").fillna(0)
-                        raw["building"] = raw["building"].astype(str).str.strip()
-                        raw["pto_type"] = raw["pto_type"].astype(str).str.strip()
-                        raw["employee"] = raw["last_name"].str.strip() + ", " + raw["first_name"].str.strip()
-                        raw["days"] = (raw["hours"] / 8).round(2)
                         raw = raw.dropna(subset=["start_date"])
+                        raw = _normalize_and_filter(raw)
                         st.session_state["pto_df"] = raw
-                        st.success(f"Loaded {len(raw):,} PTO records (legacy single-day format).")
+                        st.success(f"Loaded {len(raw):,} PTO records for active employees (legacy format).")
                 else:
                     st.error("CSV must contain either `start_date`/`end_date` columns or a `date` column.")
             except Exception as exc:
@@ -2189,13 +2223,12 @@ def pto_page(building: str) -> None:
     total_hours = df["hours"].sum()
     total_days = total_hours / 8
     unique_emps = df["employee"].nunique()
-    all_emps_in_filter = df_all[
-        (df_all["start_date"].dt.date <= date_end) & (df_all["end_date"].dt.date >= date_start)
-    ]
-    if sel_building != "All":
-        all_emps_in_filter = all_emps_in_filter[all_emps_in_filter["building"] == sel_building]
-    total_emps_in_scope = all_emps_in_filter["employee"].nunique()
-    utilization_pct = (unique_emps / total_emps_in_scope * 100) if total_emps_in_scope else 0
+    # Denominator is active DB headcount for the selected building — not the CSV
+    denom = active_count_in_scope if sel_building == building else (
+        sum(1 for e in active_db if (e.get("location") or "") == sel_building)
+        if sel_building != "All" else len(active_db)
+    )
+    utilization_pct = (unique_emps / denom * 100) if denom else 0
     top_type = df.groupby("pto_type")["hours"].sum().idxmax() if not df.empty else "—"
     avg_hours = total_hours / unique_emps if unique_emps else 0
 
@@ -2993,7 +3026,7 @@ def main() -> None:
     if page == "Dashboard":
         dashboard_page(conn, building)
     elif page == "PTO Usage Analysis":
-        pto_page(building)
+        pto_page(conn, building)
     elif page == "Employees":
         employees_page(conn, building)
     elif page == "Points Ledger":
