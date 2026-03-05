@@ -1540,7 +1540,13 @@ def dashboard_page(conn, building: str) -> None:
 
         if not df_counts.empty:
             fig = px.pie(df_counts, names="Building", values="Employees", hole=0.58)
-            fig.update_layout(margin=dict(l=0, r=0, t=10, b=0), showlegend=True)
+            fig.update_layout(
+                margin=dict(l=0, r=0, t=10, b=0),
+                showlegend=True,
+                paper_bgcolor="rgba(0,0,0,0)",   # outside of plot
+                plot_bgcolor="rgba(0,0,0,0)",    # inside of plot
+                legend=dict(bgcolor="rgba(0,0,0,0)"),
+        )
             fig.update_traces(
                 textinfo="percent+label",
                 hovertemplate="<b>%{label}</b><br>%{value} employees<extra></extra>",
