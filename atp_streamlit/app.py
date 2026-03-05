@@ -11,7 +11,6 @@ import os
 from pathlib import Path
 import secrets
 import sys
-
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
@@ -423,7 +422,138 @@ def is_authenticated() -> bool:
 
     return False
 
+def _clamp(x: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, x))
 
+def render_hr_live_monitor(
+    *,
+    points_24h: int,
+    points_7d: int,
+    rolloffs_due_7d: int,
+    perfect_due_7d: int,
+    label: str = "Monitoring attendance activity",
+):
+    """
+    Data-driven 'live monitor' animation.
+    - Speed increases with points activity
+    - Glow increases with upcoming deadlines (rolloffs/perfect due soon)
+    """
+
+    # --- Activity score (0..1): how "busy" things are ---
+    # Weighted: last 24h matters most, then 7d.
+    activity_raw = (points_24h * 2.5) + (points_7d * 0.6)
+    # Log scale so it doesn't go ridiculous on big weeks:
+    activity_norm = 1.0 - math.exp(-activity_raw / 12.0)  # ~0..1
+    activity_norm = _clamp(activity_norm, 0.0, 1.0)
+
+    # --- Urgency score (0..1): deadlines coming due ---
+    urgency_raw = (rolloffs_due_7d * 1.2) + (perfect_due_7d * 1.4)
+    urgency_norm = 1.0 - math.exp(-urgency_raw / 10.0)
+    urgency_norm = _clamp(urgency_norm, 0.0, 1.0)
+
+    # --- Map scores -> animation + glow ---
+    # Sweep duration: 2.6s (calm) down to 0.9s (hot)
+    sweep_s = 2.6 - (1.7 * activity_norm)
+    sweep_s = _clamp(sweep_s, 0.9, 2.6)
+
+    # Glow opacity: subtle -> bright
+    glow = 0.18 + (0.55 * urgency_norm)  # 0.18..0.73
+    glow = _clamp(glow, 0.18, 0.75)
+
+    # Base line opacity: slightly responds to activity
+    baseline = 0.20 + (0.25 * activity_norm)  # 0.20..0.45
+    baseline = _clamp(baseline, 0.18, 0.50)
+
+    # Status text
+    if activity_norm < 0.18 and urgency_norm < 0.18:
+        status = "Calm"
+    elif activity_norm < 0.45 and urgency_norm < 0.35:
+        status = "Active"
+    elif activity_norm < 0.75 or urgency_norm < 0.65:
+        status = "Busy"
+    else:
+        status = "Hot"
+
+    # Render
+    st.markdown(
+        f"""
+<style>
+.hr-monitor-wrap {{
+  margin: 6px 0 10px 0;
+}}
+
+.hr-monitor-top {{
+  display:flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 6px;
+}}
+
+.hr-monitor-label {{
+  font-size: 0.92rem;
+  opacity: 0.92;
+}}
+
+.hr-monitor-status {{
+  font-size: 0.86rem;
+  opacity: 0.75;
+  white-space: nowrap;
+}}
+
+.hr-live-monitor {{
+  position: relative;
+  width: 100%;
+  height: 14px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.10);
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.12);
+}}
+
+.hr-live-monitor::before {{
+  content:"";
+  position:absolute;
+  left:0; top:50%;
+  transform: translateY(-50%);
+  width:100%;
+  height:2px;
+  background: rgba(120,200,255,{baseline});
+}}
+
+.hr-live-monitor::after {{
+  content:"";
+  position:absolute;
+  top:0; left:-30%;
+  width:30%;
+  height:100%;
+  background: linear-gradient(90deg,
+    rgba(0,0,0,0),
+    rgba(120,200,255,{glow}),
+    rgba(120,200,255,{_clamp(glow+0.12, 0.20, 0.90)}),
+    rgba(120,200,255,{glow}),
+    rgba(0,0,0,0)
+  );
+  animation: hr_sweep {sweep_s:.2f}s linear infinite;
+}}
+
+@keyframes hr_sweep {{
+  0%   {{ left: -30%; }}
+  100% {{ left: 100%; }}
+}}
+</style>
+
+<div class="hr-monitor-wrap">
+  <div class="hr-monitor-top">
+    <div class="hr-monitor-label">{label}</div>
+    <div class="hr-monitor-status">{status} · 24h:{points_24h} · 7d:{points_7d} · due7d:{rolloffs_due_7d + perfect_due_7d}</div>
+  </div>
+  <div class="hr-live-monitor"></div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+    
 # ── Login ──────────────────────────────────────────────────────────────────────
 def login_page() -> None:
     """Render a centered access-code login screen matching the reference design."""
@@ -728,8 +858,79 @@ def dashboard_page(conn, building: str) -> None:
     if not emp_ids:
         info_box("No employees found for this building filter.")
         return
+    ph = ",".join(["?" if not is_pg(conn) else "%s"] * len(emp_ids))    
+    
+    # ── HR Live Monitor (data-driven animation) ───────────────────────────────
+    since_24h = (today - timedelta(days=1)).isoformat()
+    since_7d = (today - timedelta(days=7)).isoformat()
+    due_7d = (today + timedelta(days=7)).isoformat()
+    if is_pg(conn):
+        sql_points_since = f"""
+            SELECT COUNT(*) AS n
+              FROM points_history ph
+             WHERE ph.employee_id IN ({ph})
+               AND (ph.point_date::date) >= (%s::date)
+               AND COALESCE(ph.points, 0.0) > 0.0
+        """
+        sql_roll_due_7d = f"""
+            SELECT COUNT(*) AS n
+              FROM employees
+             WHERE employee_id IN ({ph})
+               AND rolloff_date IS NOT NULL
+               AND (rolloff_date::date) >= (%s::date)
+               AND (rolloff_date::date) <= (%s::date)
+        """
+        sql_perf_due_7d = f"""
+            SELECT COUNT(*) AS n
+              FROM employees
+             WHERE employee_id IN ({ph})
+               AND perfect_attendance IS NOT NULL
+               AND (perfect_attendance::date) >= (%s::date)
+               AND (perfect_attendance::date) <= (%s::date)
+        """
 
-    ph = ",".join(["?" if not is_pg(conn) else "%s"] * len(emp_ids))
+        points_24h = int(dict(fetchone(conn, sql_points_since, (*emp_ids, since_24h))).get("n") or 0)
+        points_7d = int(dict(fetchone(conn, sql_points_since, (*emp_ids, since_7d))).get("n") or 0)
+        rolloffs_due_7d = int(dict(fetchone(conn, sql_roll_due_7d, (*emp_ids, today.isoformat(), due_7d))).get("n") or 0)
+        perfect_due_7d = int(dict(fetchone(conn, sql_perf_due_7d, (*emp_ids, today.isoformat(), due_7d))).get("n") or 0)
+
+    else:
+        sql_points_since = f"""
+            SELECT COUNT(*) AS n
+              FROM points_history ph
+             WHERE ph.employee_id IN ({ph})
+               AND date(ph.point_date) >= date(?)
+               AND COALESCE(ph.points, 0.0) > 0.0
+        """
+        sql_roll_due_7d = f"""
+            SELECT COUNT(*) AS n
+              FROM employees
+             WHERE employee_id IN ({ph})
+               AND rolloff_date IS NOT NULL
+               AND date(rolloff_date) >= date(?)
+               AND date(rolloff_date) <= date(?)
+        """
+        sql_perf_due_7d = f"""
+            SELECT COUNT(*) AS n
+              FROM employees
+             WHERE employee_id IN ({ph})
+               AND perfect_attendance IS NOT NULL
+               AND date(perfect_attendance) >= date(?)
+               AND date(perfect_attendance) <= date(?)
+        """
+
+        points_24h = int(dict(fetchone(conn, sql_points_since, (*emp_ids, since_24h))).get("n") or 0)
+        points_7d = int(dict(fetchone(conn, sql_points_since, (*emp_ids, since_7d))).get("n") or 0)
+        rolloffs_due_7d = int(dict(fetchone(conn, sql_roll_due_7d, (*emp_ids, today.isoformat(), due_7d))).get("n") or 0)
+        perfect_due_7d = int(dict(fetchone(conn, sql_perf_due_7d, (*emp_ids, today.isoformat(), due_7d))).get("n") or 0)
+
+    render_hr_live_monitor(
+        points_24h=points_24h,
+        points_7d=points_7d,
+        rolloffs_due_7d=rolloffs_due_7d,
+        perfect_due_7d=perfect_due_7d,
+        label="Monitoring attendance activity",
+    )
 
     if is_pg(conn):
         sql_emp_detail = f'''
