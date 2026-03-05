@@ -2247,7 +2247,6 @@ def pto_page(conn, building: str) -> None:
             min-height: 26px !important;
             line-height: 1.15 !important;
             font-weight: 600 !important;
-            white-space: nowrap !important;
             transition: all 0.15s ease !important;
         }}
         {(', '.join(active_sel) or '.pto-na') + ' { background: rgba(0,212,255,.1) !important; border: 1px solid rgba(0,212,255,.7) !important; color: #00d4ff !important; box-shadow: 0 0 10px rgba(0,212,255,.2), inset 0 0 6px rgba(0,212,255,.05) !important; }'}
@@ -2259,14 +2258,10 @@ def pto_page(conn, building: str) -> None:
     # Render type filter pills in the sidebar
     with st.sidebar:
         st.markdown("<span class='sidebar-nav-label'>PTO Type Filter</span>", unsafe_allow_html=True)
-        _pill_types = list(all_types)
-        for _pi in range(0, len(_pill_types), 2):
-            _row = _pill_types[_pi:_pi + 2]
-            _pcols = st.columns(len(_row))
-            for _pj, _pt in enumerate(_row):
-                if _pcols[_pj].button(_pt, key=_tkey(_pt), use_container_width=True):
-                    st.session_state["pto_type_toggles"][_pt] = not toggles.get(_pt, True)
-                    st.rerun()
+        for _pt in all_types:
+            if st.button(_pt, key=_tkey(_pt), use_container_width=True):
+                st.session_state["pto_type_toggles"][_pt] = not toggles.get(_pt, True)
+                st.rerun()
 
     sel_types = [t for t in all_types if st.session_state["pto_type_toggles"].get(t, True)]
 
