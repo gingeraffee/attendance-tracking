@@ -2050,13 +2050,13 @@ _PTO_PALETTE = [
 ]
 
 _PTO_SAMPLE_CSV = (
-    "employee_id,last_name,first_name,building,pto_type,date,hours\n"
-    "101,Smith,Jane,APIM,Vacation,2025-01-06,8\n"
-    "102,Jones,Bob,APIS,Sick,2025-01-07,4\n"
-    "103,Davis,Carol,AAP,Personal,2025-01-08,8\n"
-    "101,Smith,Jane,APIM,Vacation,2025-01-09,8\n"
-    "104,Wilson,Tom,APIM,FMLA,2025-01-10,8\n"
-    "105,Brown,Alice,APIS,Bereavement,2025-01-13,8\n"
+    "employee_id,last_name,first_name,building,pto_type,start_date,end_date,hours\n"
+    "101,Smith,Jane,APIM,Vacation,2025-01-06,2025-01-10,40\n"
+    "102,Jones,Bob,APIS,Sick,2025-01-07,2025-01-07,4\n"
+    "103,Davis,Carol,AAP,Personal,2025-01-08,2025-01-08,8\n"
+    "104,Wilson,Tom,APIM,FMLA,2025-01-13,2025-01-24,80\n"
+    "105,Brown,Alice,APIS,Bereavement,2025-01-13,2025-01-15,24\n"
+    "106,Green,Mark,AAP,Vacation,2025-02-03,2025-02-07,40\n"
 )
 
 
@@ -2079,7 +2079,9 @@ def pto_page(building: str) -> None:
     with st.expander("Upload PTO Data", expanded="pto_df" not in st.session_state):
         st.markdown(
             "Upload a CSV with columns: `employee_id` *(optional)*, `last_name`, `first_name`, "
-            "`building`, `pto_type`, `date` *(YYYY-MM-DD)*, `hours`"
+            "`building`, `pto_type`, `start_date` *(YYYY-MM-DD)*, `end_date` *(YYYY-MM-DD)*, `hours` *(total for the period)*  \n"
+            "Single-day entries: set `start_date` and `end_date` to the same date. "
+            "The legacy single-`date` format is also accepted."
         )
         col_up, col_dl = st.columns([3, 1])
         with col_up:
@@ -2097,19 +2099,44 @@ def pto_page(building: str) -> None:
             try:
                 raw = pd.read_csv(uploaded)
                 raw.columns = [c.strip().lower().replace(" ", "_") for c in raw.columns]
-                required = {"last_name", "first_name", "building", "pto_type", "date", "hours"}
-                missing = required - set(raw.columns)
-                if missing:
-                    st.error(f"CSV is missing required columns: {', '.join(sorted(missing))}")
+                cols = set(raw.columns)
+
+                # Detect format: range (start_date/end_date) or legacy (date)
+                if "start_date" in cols and "end_date" in cols:
+                    required = {"last_name", "first_name", "building", "pto_type", "start_date", "end_date", "hours"}
+                    missing = required - cols
+                    if missing:
+                        st.error(f"CSV is missing required columns: {', '.join(sorted(missing))}")
+                    else:
+                        raw["start_date"] = pd.to_datetime(raw["start_date"], errors="coerce")
+                        raw["end_date"] = pd.to_datetime(raw["end_date"], errors="coerce")
+                        raw["hours"] = pd.to_numeric(raw["hours"], errors="coerce").fillna(0)
+                        raw["building"] = raw["building"].astype(str).str.strip()
+                        raw["pto_type"] = raw["pto_type"].astype(str).str.strip()
+                        raw["employee"] = raw["last_name"].str.strip() + ", " + raw["first_name"].str.strip()
+                        raw["days"] = (raw["hours"] / 8).round(2)
+                        raw = raw.dropna(subset=["start_date", "end_date"])
+                        st.session_state["pto_df"] = raw
+                        st.success(f"Loaded {len(raw):,} PTO records.")
+                elif "date" in cols:
+                    # Legacy single-day format — convert to range format
+                    required = {"last_name", "first_name", "building", "pto_type", "date", "hours"}
+                    missing = required - cols
+                    if missing:
+                        st.error(f"CSV is missing required columns: {', '.join(sorted(missing))}")
+                    else:
+                        raw["start_date"] = pd.to_datetime(raw["date"], errors="coerce")
+                        raw["end_date"] = raw["start_date"]
+                        raw["hours"] = pd.to_numeric(raw["hours"], errors="coerce").fillna(0)
+                        raw["building"] = raw["building"].astype(str).str.strip()
+                        raw["pto_type"] = raw["pto_type"].astype(str).str.strip()
+                        raw["employee"] = raw["last_name"].str.strip() + ", " + raw["first_name"].str.strip()
+                        raw["days"] = (raw["hours"] / 8).round(2)
+                        raw = raw.dropna(subset=["start_date"])
+                        st.session_state["pto_df"] = raw
+                        st.success(f"Loaded {len(raw):,} PTO records (legacy single-day format).")
                 else:
-                    raw["date"] = pd.to_datetime(raw["date"], errors="coerce")
-                    raw["hours"] = pd.to_numeric(raw["hours"], errors="coerce").fillna(0)
-                    raw["building"] = raw["building"].astype(str).str.strip()
-                    raw["pto_type"] = raw["pto_type"].astype(str).str.strip()
-                    raw["employee"] = raw["last_name"].str.strip() + ", " + raw["first_name"].str.strip()
-                    raw = raw.dropna(subset=["date"])
-                    st.session_state["pto_df"] = raw
-                    st.success(f"Loaded {len(raw):,} PTO records.")
+                    st.error("CSV must contain either `start_date`/`end_date` columns or a `date` column.")
             except Exception as exc:
                 st.error(f"Could not parse CSV: {exc}")
 
@@ -2124,8 +2151,8 @@ def pto_page(building: str) -> None:
     section_label("Filters")
     fc1, fc2, fc3, fc4 = st.columns(4)
 
-    date_min = df_all["date"].min().date()
-    date_max = df_all["date"].max().date()
+    date_min = df_all["start_date"].min().date()
+    date_max = df_all["end_date"].max().date()
     with fc1:
         date_start = st.date_input("From", value=date_min, min_value=date_min, max_value=date_max, key="pto_from")
     with fc2:
@@ -2141,10 +2168,10 @@ def pto_page(building: str) -> None:
     with fc4:
         sel_types = st.multiselect("PTO Types", all_types, default=all_types, key="pto_types")
 
-    # Apply filters
+    # Apply filters — include any PTO event that overlaps the selected date range
     df = df_all[
-        (df_all["date"].dt.date >= date_start)
-        & (df_all["date"].dt.date <= date_end)
+        (df_all["start_date"].dt.date <= date_end)
+        & (df_all["end_date"].dt.date >= date_start)
     ]
     if sel_building != "All":
         df = df[df["building"] == sel_building]
@@ -2163,7 +2190,7 @@ def pto_page(building: str) -> None:
     total_days = total_hours / 8
     unique_emps = df["employee"].nunique()
     all_emps_in_filter = df_all[
-        (df_all["date"].dt.date >= date_start) & (df_all["date"].dt.date <= date_end)
+        (df_all["start_date"].dt.date <= date_end) & (df_all["end_date"].dt.date >= date_start)
     ]
     if sel_building != "All":
         all_emps_in_filter = all_emps_in_filter[all_emps_in_filter["building"] == sel_building]
@@ -2215,7 +2242,7 @@ def pto_page(building: str) -> None:
     with trend_col:
         section_label("Monthly PTO Trend (hours)")
         df_trend = df.copy()
-        df_trend["month"] = df_trend["date"].dt.to_period("M").dt.to_timestamp()
+        df_trend["month"] = df_trend["start_date"].dt.to_period("M").dt.to_timestamp()
         monthly = df_trend.groupby(["month", "pto_type"])["hours"].sum().reset_index()
         trend_fig = go.Figure()
         for pto_type in monthly["pto_type"].unique():
@@ -2245,16 +2272,18 @@ def pto_page(building: str) -> None:
         if sel_type:
             divider()
             section_label(f"Employees — {sel_type}")
+            drill_src = df[df["pto_type"] == sel_type].copy()
+            drill_src["start_date"] = drill_src["start_date"].dt.strftime("%Y-%m-%d")
+            drill_src["end_date"] = drill_src["end_date"].dt.strftime("%Y-%m-%d")
             drill = (
-                df[df["pto_type"] == sel_type]
-                .groupby(["employee", "building"])
-                .agg(days=("hours", lambda h: h.sum() / 8), hours=("hours", "sum"), incidents=("hours", "count"))
-                .reset_index()
-                .sort_values("hours", ascending=False)
+                drill_src[["employee", "building", "start_date", "end_date", "hours", "days"]]
+                .rename(columns={"employee": "Employee", "building": "Building",
+                                 "start_date": "Start", "end_date": "End",
+                                 "hours": "Hours", "days": "Days"})
+                .sort_values("Hours", ascending=False)
             )
-            drill = drill.rename(columns={"employee": "Employee", "building": "Building", "days": "Days", "hours": "Hours", "incidents": "Occurrences"})
-            drill["Days"] = drill["Days"].round(1)
             drill["Hours"] = drill["Hours"].round(1)
+            drill["Days"] = drill["Days"].round(1)
             st.dataframe(drill, use_container_width=True, hide_index=True)
 
     # ── Building comparison ─────────────────────────────────────────────────
@@ -2286,7 +2315,7 @@ def pto_page(building: str) -> None:
         section_label("Most Popular Days of Week for PTO")
         dow_map = {0: "Mon", 1: "Tue", 2: "Wed", 3: "Thu", 4: "Fri", 5: "Sat", 6: "Sun"}
         df_dow = df.copy()
-        df_dow["dow"] = df_dow["date"].dt.dayofweek
+        df_dow["dow"] = df_dow["start_date"].dt.dayofweek
         df_dow["dow_label"] = df_dow["dow"].map(dow_map)
         dow_order = ["Mon", "Tue", "Wed", "Thu", "Fri"]
         dow_totals = (
@@ -2335,7 +2364,7 @@ def pto_page(building: str) -> None:
         section_label("Zero PTO — No Usage Recorded")
         emps_with_pto = set(df["employee"].unique())
         all_scope = df_all[
-            (df_all["date"].dt.date >= date_start) & (df_all["date"].dt.date <= date_end)
+            (df_all["start_date"].dt.date <= date_end) & (df_all["end_date"].dt.date >= date_start)
         ]
         if sel_building != "All":
             all_scope = all_scope[all_scope["building"] == sel_building]
@@ -2350,9 +2379,9 @@ def pto_page(building: str) -> None:
     # ── Export ──────────────────────────────────────────────────────────────
     divider()
     section_label("Export Filtered Data")
-    exp_df = df[["employee", "building", "pto_type", "date", "hours"]].copy()
-    exp_df["date"] = exp_df["date"].dt.strftime("%Y-%m-%d")
-    exp_df["days"] = (exp_df["hours"] / 8).round(2)
+    exp_df = df[["employee", "building", "pto_type", "start_date", "end_date", "hours", "days"]].copy()
+    exp_df["start_date"] = exp_df["start_date"].dt.strftime("%Y-%m-%d")
+    exp_df["end_date"] = exp_df["end_date"].dt.strftime("%Y-%m-%d")
     st.download_button(
         "Download filtered PTO as CSV",
         data=to_csv(exp_df),
