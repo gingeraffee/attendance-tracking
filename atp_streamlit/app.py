@@ -858,7 +858,14 @@ def dashboard_page(conn, building: str) -> None:
     if not emp_ids:
         info_box("No employees found for this building filter.")
         return
-    ph = ",".join(["?" if not is_pg(conn) else "%s"] * len(emp_ids))    
+    ph = ",".join(["?" if not is_pg(conn) else "%s"] * len(emp_ids))   
+    
+    def _scalar_n(conn, sql: str, params: tuple) -> int:
+    rows = fetchall(conn, sql, params)
+    if not rows:
+        return 0
+    r0 = dict(rows[0])
+    return int(r0.get("n") or 0)
     
     # ── HR Live Monitor (data-driven animation) ───────────────────────────────
     since_24h = (today - timedelta(days=1)).isoformat()
@@ -889,10 +896,10 @@ def dashboard_page(conn, building: str) -> None:
                AND (perfect_attendance::date) <= (%s::date)
         """
 
-        points_24h = int(dict(fetchone(conn, sql_points_since, (*emp_ids, since_24h))).get("n") or 0)
-        points_7d = int(dict(fetchone(conn, sql_points_since, (*emp_ids, since_7d))).get("n") or 0)
-        rolloffs_due_7d = int(dict(fetchone(conn, sql_roll_due_7d, (*emp_ids, today.isoformat(), due_7d))).get("n") or 0)
-        perfect_due_7d = int(dict(fetchone(conn, sql_perf_due_7d, (*emp_ids, today.isoformat(), due_7d))).get("n") or 0)
+        points_24h = _scalar_n(conn, sql_points_since, (*emp_ids, since_24h))
+        points_7d = _scalar_n(conn, sql_points_since, (*emp_ids, since_7d))
+        rolloffs_due_7d = _scalar_n(conn, sql_roll_due_7d, (*emp_ids, today.isoformat(), due_7d))
+        perfect_due_7d = _scalar_n(conn, sql_perf_due_7d, (*emp_ids, today.isoformat(), due_7d))
 
     else:
         sql_points_since = f"""
@@ -919,10 +926,10 @@ def dashboard_page(conn, building: str) -> None:
                AND date(perfect_attendance) <= date(?)
         """
 
-        points_24h = int(dict(fetchone(conn, sql_points_since, (*emp_ids, since_24h))).get("n") or 0)
-        points_7d = int(dict(fetchone(conn, sql_points_since, (*emp_ids, since_7d))).get("n") or 0)
-        rolloffs_due_7d = int(dict(fetchone(conn, sql_roll_due_7d, (*emp_ids, today.isoformat(), due_7d))).get("n") or 0)
-        perfect_due_7d = int(dict(fetchone(conn, sql_perf_due_7d, (*emp_ids, today.isoformat(), due_7d))).get("n") or 0)
+        points_24h = _scalar_n(conn, sql_points_since, (*emp_ids, since_24h))
+        points_7d = _scalar_n(conn, sql_points_since, (*emp_ids, since_7d))
+        rolloffs_due_7d = _scalar_n(conn, sql_roll_due_7d, (*emp_ids, today.isoformat(), due_7d))
+        perfect_due_7d = _scalar_n(conn, sql_perf_due_7d, (*emp_ids, today.isoformat(), due_7d))
 
     render_hr_live_monitor(
         points_24h=points_24h,
