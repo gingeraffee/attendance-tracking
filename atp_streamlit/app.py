@@ -2314,13 +2314,25 @@ def pto_page(conn, building: str) -> None:
     type_totals = df.groupby("pto_type")["hours"].sum().sort_values(ascending=False)
     type_colors = {t: _PTO_PALETTE[i % len(_PTO_PALETTE)] for i, t in enumerate(type_totals.index)}
 
+    # Top-5 + "Other" for the donut
+    _top5 = type_totals.head(5)
+    _other_sum = type_totals.iloc[5:].sum()
+    if _other_sum > 0:
+        import pandas as _pd
+        donut_totals = _pd.concat([_top5, _pd.Series({"Other": _other_sum})])
+        _top5_types = set(_top5.index)
+    else:
+        donut_totals = _top5
+        _top5_types = set(_top5.index)
+    donut_colors = [type_colors.get(t, "#4a5568") for t in donut_totals.index]
+
     with chart_col:
         section_label("PTO by Type — click a slice to see employees")
         donut_fig = go.Figure(go.Pie(
-            labels=type_totals.index.tolist(),
-            values=type_totals.values.tolist(),
+            labels=donut_totals.index.tolist(),
+            values=donut_totals.values.tolist(),
             hole=0.52,
-            marker=dict(colors=[type_colors[t] for t in type_totals.index], line=dict(color="#060d1f", width=2)),
+            marker=dict(colors=donut_colors, line=dict(color="#060d1f", width=2)),
             textinfo="label+percent",
             hovertemplate="<b>%{label}</b><br>%{value:.0f} hrs (%{percent})<extra></extra>",
         ))
@@ -2371,7 +2383,10 @@ def pto_page(conn, building: str) -> None:
         if sel_type:
             divider()
             section_label(f"Employees — {sel_type}")
-            drill_src = df[df["pto_type"] == sel_type].copy()
+            if sel_type == "Other":
+                drill_src = df[~df["pto_type"].isin(_top5_types)].copy()
+            else:
+                drill_src = df[df["pto_type"] == sel_type].copy()
             drill_src["start_date"] = drill_src["start_date"].dt.strftime("%Y-%m-%d")
             drill_src["end_date"] = drill_src["end_date"].dt.strftime("%Y-%m-%d")
             drill = (
