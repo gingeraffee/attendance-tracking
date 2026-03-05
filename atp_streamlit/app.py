@@ -14,12 +14,6 @@ import sys
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
-try:
-    import plotly.express as px  # optional (enables clickable donut charts)
-    _HAS_PLOTLY = True
-except Exception:
-    px = None
-    _HAS_PLOTLY = False
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet
@@ -263,6 +257,30 @@ section[data-testid="stSidebar"] .sidebar-employee-item .value.highlight {
     font-size: .9rem;
     font-weight: 800;
 }
+
+/* ── Enterprise "high-tech" polish ── */
+.stTabs [data-baseweb="tab-list"] { gap: 10px; }
+.stTabs [data-baseweb="tab"] {
+    padding: 10px 14px;
+    border-radius: 14px;
+    background: rgba(255,255,255,.55);
+    border: 1px solid var(--border);
+    box-shadow: 0 1px 10px rgba(15,32,68,.05);
+    font-weight: 700;
+}
+.stTabs [aria-selected="true"] {
+    background: var(--surface);
+    border: 1px solid rgba(79,142,247,.35);
+    box-shadow: 0 6px 18px rgba(79,142,247,.12);
+}
+.stTabs [data-baseweb="tab-panel"] { padding-top: .5rem; }
+
+/* Subheaders feel more like a console */
+h2, h3 { letter-spacing: .2px; }
+hr { border-color: rgba(0,0,0,.06); }
+
+/* Dataframes: a bit crisper */
+[data-testid="stDataFrame"] { border: 1px solid var(--border); border-radius: 16px; overflow: hidden; box-shadow: var(--shadow); }
 </style>""",
         unsafe_allow_html=True,
     )
@@ -1368,420 +1386,383 @@ def dashboard_page(conn, building: str) -> None:
                 st.session_state["dashboard_bucket"] = key
             st.rerun()
 
-    col_left, col_right = st.columns([1.6, 1], gap="large")
+    # ── Dashboard views ───────────────────────────────────────────────────────
+    view_overview, view_insights = st.tabs(["Overview", "Insights"])
 
-    with col_left:
-        section_label("Employee Point Overview")
-        bucket_key = st.session_state.get("dashboard_bucket")
-        source_rows = list(emp_detail_rows)
-        if bucket_key in bucket_defs:
-            source_rows = [r for r in emp_detail_rows if bucket_defs[bucket_key](float(r.get("point_total") or 0))]
-            bucket_label_map = dict(tile_specs)
-            st.caption(f"Filtered by threshold tile: {bucket_label_map.get(bucket_key, bucket_key)}")
+    with view_overview:
+        col_left, col_right = st.columns([1.6, 1], gap="large")
 
-        source_rows = sorted(
-            source_rows,
-            key=lambda r: (
-                -float(r.get("point_total") or 0),
-                str(r.get("last_point_date") or ""),
-            ),
-        )
+        with col_left:
+            section_label("Employee Point Overview")
+            bucket_key = st.session_state.get("dashboard_bucket")
+            source_rows = list(emp_detail_rows)
+            if bucket_key in bucket_defs:
+                source_rows = [r for r in emp_detail_rows if bucket_defs[bucket_key](float(r.get("point_total") or 0))]
+                bucket_label_map = dict(tile_specs)
+                st.caption(f"Filtered by threshold tile: {bucket_label_map.get(bucket_key, bucket_key)}")
 
-        if source_rows:
-            df_emps = pd.DataFrame(
-                [
-                    {
-                        "employee_id": int(r["employee_id"]),
-                        "Employee #": str(r["employee_id"]),
-                        "Name": f"{r['last_name']}, {r['first_name']}",
-                        "Building": r.get("building") or "—",
-                        "Point Total": f"{float(r.get('point_total') or 0):.1f}",
-                        "Last Point Date": fmt_date(r.get("last_point_date")),
-                    }
-                    for r in source_rows
-                ]
+            source_rows = sorted(
+                source_rows,
+                key=lambda r: (
+                    -float(r.get("point_total") or 0),
+                    str(r.get("last_point_date") or ""),
+                ),
             )
-            event = st.dataframe(
-                df_emps[["Employee #", "Name", "Building", "Point Total", "Last Point Date"]],
-                use_container_width=True,
-                hide_index=True,
-                height=575,
-                key="dash_emp_above5_table",
-                on_select="rerun",
-                selection_mode="single-row",
-            )
-            selected_rows = (event.selection.get("rows") if event else []) or []
-            if selected_rows:
-                idx = int(selected_rows[0])
-                if 0 <= idx < len(df_emps):
-                    st.session_state["selected_employee_id"] = int(df_emps.iloc[idx]["employee_id"])
 
-        else:
-            info_box("None 🎉")
+            if source_rows:
+                df_emps = pd.DataFrame(
+                    [
+                        {
+                            "employee_id": int(r["employee_id"]),
+                            "Employee #": str(r["employee_id"]),
+                            "Name": f"{r['last_name']}, {r['first_name']}",
+                            "Building": r.get("building") or "—",
+                            "Point Total": f"{float(r.get('point_total') or 0):.1f}",
+                            "Last Point Date": fmt_date(r.get("last_point_date")),
+                        }
+                        for r in source_rows
+                    ]
+                )
+                event = st.dataframe(
+                    df_emps[["Employee #", "Name", "Building", "Point Total", "Last Point Date"]],
+                    use_container_width=True,
+                    hide_index=True,
+                    height=575,
+                    key="dash_emp_above5_table",
+                    on_select="rerun",
+                    selection_mode="single-row",
+                )
+                selected_rows = (event.selection.get("rows") if event else []) or []
+                if selected_rows:
+                    idx = int(selected_rows[0])
+                    if 0 <= idx < len(df_emps):
+                        st.session_state["selected_employee_id"] = int(df_emps.iloc[idx]["employee_id"])
+
+            else:
+                info_box("None 🎉")
 
 
-    with col_right:
-        section_label("Roll Offs Due (Next 30 Days)")
-        if roll_due_rows:
-            df_roll = pd.DataFrame(
-                [
-                    {
-                        "Employee #": str(r["employee_id"]),
-                        "Name": f"{r['last_name']}, {r['first_name']}",
-                        "Building": r.get("building") or "—",
-                        "Rolloff Date": fmt_date(r.get("rolloff_date")),
-                        "Current Points": f"{float(r.get('point_total') or 0):.1f}",
-                    }
-                    for r in roll_due_rows
-                ]
-            )
-            st.dataframe(df_roll, use_container_width=True, hide_index=True, height=235)
-        else:
-            info_box("No roll-offs due in the next 30 days.")
+        with col_right:
+            section_label("Roll Offs Due (Next 30 Days)")
+            if roll_due_rows:
+                df_roll = pd.DataFrame(
+                    [
+                        {
+                            "Employee #": str(r["employee_id"]),
+                            "Name": f"{r['last_name']}, {r['first_name']}",
+                            "Building": r.get("building") or "—",
+                            "Rolloff Date": fmt_date(r.get("rolloff_date")),
+                            "Current Points": f"{float(r.get('point_total') or 0):.1f}",
+                        }
+                        for r in roll_due_rows
+                    ]
+                )
+                st.dataframe(df_roll, use_container_width=True, hide_index=True, height=235)
+            else:
+                info_box("No roll-offs due in the next 30 days.")
+
+            divider()
+            section_label("Perfect Attendance Due (Next 30 Days)")
+            if perf_due_rows:
+                df_perf = pd.DataFrame(
+                    [
+                        {
+                            "Employee #": str(r["employee_id"]),
+                            "Name": f"{r['last_name']}, {r['first_name']}",
+                            "Building": r.get("building") or "—",
+                            "Perfect Date": fmt_date(r.get("perfect_attendance")),
+                            "Current Points": f"{float(r.get('point_total') or 0):.1f}",
+                        }
+                        for r in perf_due_rows
+                    ]
+                )
+                st.dataframe(df_perf, use_container_width=True, hide_index=True, height=235)
+            else:
+                info_box("No perfect attendance dates due in the next 30 days.")
 
         divider()
-        section_label("Perfect Attendance Due (Next 30 Days)")
-        if perf_due_rows:
-            df_perf = pd.DataFrame(
+        section_label("Building Snapshot (Average Points per Employee)")
+
+        active_rows = [
+            dict(r)
+            for r in fetchall(
+                conn,
+                """SELECT COALESCE("Location", '') AS building, COUNT(*) AS n
+                   FROM employees
+                  WHERE COALESCE(is_active,1)=1
+                  GROUP BY COALESCE("Location", '')""",
+            )
+        ]
+        avg_total_rows = [
+            dict(r)
+            for r in fetchall(
+                conn,
+                """SELECT COALESCE("Location", '') AS building,
+                          AVG(COALESCE(point_total, 0.0)) AS avg_point_total
+                   FROM employees
+                  WHERE COALESCE(is_active,1)=1
+                  GROUP BY COALESCE("Location", '')""",
+            )
+        ]
+        active_by_build = {b: 0 for b in BUILDINGS}
+        avg_total_by_build = {b: 0.0 for b in BUILDINGS}
+        for r in active_rows:
+            if r["building"] in active_by_build:
+                active_by_build[r["building"]] = int(r["n"] or 0)
+        for r in avg_total_rows:
+            if r["building"] in avg_total_by_build:
+                avg_total_by_build[r["building"]] = float(r.get("avg_point_total") or 0.0)
+
+        since_30 = (today - timedelta(days=30)).isoformat()
+        since_60 = (today - timedelta(days=60)).isoformat()
+        tomorrow = (today + timedelta(days=1)).isoformat()
+
+        current_rows = [dict(r) for r in fetchall(conn, sql_build_points_window, (*emp_ids, since_30, tomorrow))]
+        prior_rows = [dict(r) for r in fetchall(conn, sql_build_points_window, (*emp_ids, since_60, since_30))]
+        current_points = {r.get("building") or "": float(r.get("pts") or 0.0) for r in current_rows}
+        prior_points = {r.get("building") or "": float(r.get("pts") or 0.0) for r in prior_rows}
+
+        snap_rows = []
+        for b in BUILDINGS:
+            headcount = int(active_by_build.get(b) or 0)
+            avg_point_total = float(avg_total_by_build.get(b) or 0.0)
+            cur_total = float(current_points.get(b) or 0.0)
+            prev_total = float(prior_points.get(b) or 0.0)
+            cur_avg_30d = (cur_total / headcount) if headcount else 0.0
+            prev_avg_30d = (prev_total / headcount) if headcount else 0.0
+            if prev_avg_30d > 0:
+                pct_change = ((cur_avg_30d - prev_avg_30d) / prev_avg_30d) * 100.0
+                pct_txt = f"{pct_change:+.1f}%"
+            else:
+                pct_txt = "—"
+            reason_rows = [dict(r) for r in fetchall(conn, sql_build_reasons, (since_30, b))]
+            most_common_reason = (reason_rows[0].get("reason") if reason_rows else None) or "—"
+            snap_rows.append(
+                {
+                    "Building": b,
+                    "Active Employees": headcount,
+                    "Avg Point Total / Employee": f"{avg_point_total:.2f}",
+                    "% Change in Avg Points (30d)": pct_txt,
+                    "Most Common Reason (30d)": most_common_reason,
+                }
+            )
+
+        st.dataframe(pd.DataFrame(snap_rows), use_container_width=True, hide_index=True)
+
+
+
+    with view_insights:
+        divider()
+        section_label("Insights")
+
+        st.markdown("#### Employees > 1.0 Point (Last 30 Days)")
+        gt1_rows = [dict(r) for r in fetchall(conn, sql_insights_gt1, (since_30, *emp_ids, since_30))]
+        if gt1_rows:
+            df_gt1 = pd.DataFrame(
                 [
                     {
                         "Employee #": str(r["employee_id"]),
                         "Name": f"{r['last_name']}, {r['first_name']}",
                         "Building": r.get("building") or "—",
-                        "Perfect Date": fmt_date(r.get("perfect_attendance")),
-                        "Current Points": f"{float(r.get('point_total') or 0):.1f}",
+                        "Points (30d)": f"{float(r.get('points_30d') or 0.0):.1f}",
+                        "Last Point Date": fmt_date(r.get("last_point_date")),
+                        "Top Reason": (r.get("top_reason") or "—"),
                     }
-                    for r in perf_due_rows
+                    for r in gt1_rows
                 ]
             )
-            st.dataframe(df_perf, use_container_width=True, hide_index=True, height=235)
+            st.dataframe(df_gt1.head(25), use_container_width=True, hide_index=True)
+            if len(df_gt1) > 25:
+                with st.expander(f"Show all ({len(df_gt1)})"):
+                    st.dataframe(df_gt1, use_container_width=True, hide_index=True)
         else:
-            info_box("No perfect attendance dates due in the next 30 days.")
+            info_box("No employees over 1.0 points in the last 30 days.")
 
-    divider()
-    section_label("Building Snapshot (Average Points per Employee)")
-
-    active_rows = [
-        dict(r)
-        for r in fetchall(
-            conn,
-            """SELECT COALESCE("Location", '') AS building, COUNT(*) AS n
-               FROM employees
-              WHERE COALESCE(is_active,1)=1
-              GROUP BY COALESCE("Location", '')""",
-        )
-    ]
-    avg_total_rows = [
-        dict(r)
-        for r in fetchall(
-            conn,
-            """SELECT COALESCE("Location", '') AS building,
-                      AVG(COALESCE(point_total, 0.0)) AS avg_point_total
-               FROM employees
-              WHERE COALESCE(is_active,1)=1
-              GROUP BY COALESCE("Location", '')""",
-        )
-    ]
-    active_by_build = {b: 0 for b in BUILDINGS}
-    avg_total_by_build = {b: 0.0 for b in BUILDINGS}
-    for r in active_rows:
-        if r["building"] in active_by_build:
-            active_by_build[r["building"]] = int(r["n"] or 0)
-    for r in avg_total_rows:
-        if r["building"] in avg_total_by_build:
-            avg_total_by_build[r["building"]] = float(r.get("avg_point_total") or 0.0)
-
-    since_30 = (today - timedelta(days=30)).isoformat()
-    since_60 = (today - timedelta(days=60)).isoformat()
-    tomorrow = (today + timedelta(days=1)).isoformat()
-
-    current_rows = [dict(r) for r in fetchall(conn, sql_build_points_window, (*emp_ids, since_30, tomorrow))]
-    prior_rows = [dict(r) for r in fetchall(conn, sql_build_points_window, (*emp_ids, since_60, since_30))]
-    current_points = {r.get("building") or "": float(r.get("pts") or 0.0) for r in current_rows}
-    prior_points = {r.get("building") or "": float(r.get("pts") or 0.0) for r in prior_rows}
-
-    snap_rows = []
-    for b in BUILDINGS:
-        headcount = int(active_by_build.get(b) or 0)
-        avg_point_total = float(avg_total_by_build.get(b) or 0.0)
-        cur_total = float(current_points.get(b) or 0.0)
-        prev_total = float(prior_points.get(b) or 0.0)
-        cur_avg_30d = (cur_total / headcount) if headcount else 0.0
-        prev_avg_30d = (prev_total / headcount) if headcount else 0.0
-        if prev_avg_30d > 0:
-            pct_change = ((cur_avg_30d - prev_avg_30d) / prev_avg_30d) * 100.0
-            pct_txt = f"{pct_change:+.1f}%"
-        else:
-            pct_txt = "—"
-        reason_rows = [dict(r) for r in fetchall(conn, sql_build_reasons, (since_30, b))]
-        most_common_reason = (reason_rows[0].get("reason") if reason_rows else None) or "—"
-        snap_rows.append(
-            {
-                "Building": b,
-                "Active Employees": headcount,
-                "Avg Point Total / Employee": f"{avg_point_total:.2f}",
-                "% Change in Avg Points (30d)": pct_txt,
-                "Most Common Reason (30d)": most_common_reason,
-            }
-        )
-
-    st.dataframe(pd.DataFrame(snap_rows), use_container_width=True, hide_index=True)
-
-    divider()
-    section_label("Insights")
-
-    st.markdown("#### Employees > 1.0 Point (Last 30 Days)")
-    gt1_rows = [dict(r) for r in fetchall(conn, sql_insights_gt1, (since_30, *emp_ids, since_30))]
-
-    # --- Donut: Share of repeat offenders by building (click to filter list) ---
-    selected_building = st.session_state.get("repeat_offenders_building")
-    if gt1_rows:
-        _counts = {}
-        for r in gt1_rows:
-            b = (r.get("building") or "").strip() or "—"
-            _counts[b] = _counts.get(b, 0) + 1
-        df_counts = pd.DataFrame([{"Building": b, "Employees": int(n)} for b, n in _counts.items()])
-        df_counts = df_counts[df_counts["Building"].isin(BUILDINGS)].sort_values("Building")
-
-        if not df_counts.empty:
-            # Pie chart removed to reduce dashboard clutter.
-            # Keep a simple filter to drill into repeat offenders list by building.
-            options = ["All"] + BUILDINGS
-            idx = options.index(selected_building) if selected_building in BUILDINGS else 0
-            pick = st.selectbox(
-                "Filter repeat offenders list",
-                options,
-                index=idx,
-                key="repeat_offenders_building_filter",
-            )
-            if pick == "All":
-                selected_building = None
-                st.session_state["repeat_offenders_building"] = None
-            else:
-                selected_building = pick
-                st.session_state["repeat_offenders_building"] = pick
-
-            # Quick, low-noise summary (counts by building)
-            try:
-                summary = ", ".join(
-                    f"{b}: {int(n)}" for b, n in zip(df_counts["Building"].tolist(), df_counts["Employees"].tolist())
+        st.markdown("#### Trending Risks  — On track to exceed 8 points")
+        pts60_rows = [dict(r) for r in fetchall(conn, sql_points_60d, (*emp_ids, since_60))]
+        points60_by_emp = {int(r.get("employee_id")): float(r.get("points_60d") or 0.0) for r in pts60_rows}
+        weekdays_60 = max(len(pd.bdate_range(start=today - timedelta(days=60), end=today)), 1)
+        weekdays_30 = len(pd.bdate_range(start=today + timedelta(days=1), end=today + timedelta(days=30)))
+        risk_rows = []
+        for r in emp_detail_rows:
+            emp_id = int(r["employee_id"])
+            current_points = float(r.get("point_total") or 0.0)
+            points_60d = float(points60_by_emp.get(emp_id) or 0.0)
+            projected_30d = (points_60d / weekdays_60) * weekdays_30
+            projected_total = current_points + projected_30d
+            if projected_total >= 8.0:
+                risk_rows.append(
+                    {
+                        "Employee #": str(emp_id),
+                        "Name": f"{r['last_name']}, {r['first_name']}",
+                        "Building": r.get("building") or "—",
+                        "Current Points": f"{current_points:.1f}",
+                        "Points (60d)": f"{points_60d:.1f}",
+                        "Projected +30d": f"{projected_30d:.1f}",
+                        "Projected Total": f"{projected_total:.1f}",
+                        "Confidence Note": "Low data" if points_60d < 2.0 else "Based on last 60 days",
+                        "_projected_total": projected_total,
+                    }
                 )
-                if summary:
-                    st.caption(f"Repeat offenders (>1.0 pts, last 30 days): {summary}")
-            except Exception:
-                pass
+        if risk_rows:
+            df_risk = pd.DataFrame(risk_rows).sort_values(by="_projected_total", ascending=False).drop(columns=["_projected_total"])
+            st.dataframe(df_risk, use_container_width=True, hide_index=True)
+        else:
+            info_box("No active employees currently trend to 8.0+ points in the next 30 days.")
 
-    if gt1_rows:
-
-        df_gt1 = pd.DataFrame(
-            [
+        st.markdown("#### Absenteeism Trend (90 Days)")
+        trend_rows = [dict(r) for r in fetchall(conn, sql_trend_90d, (*emp_ids, (today - timedelta(days=90)).isoformat()))]
+        all_days = pd.bdate_range(start=today - timedelta(days=90), end=today)
+        trend_df = pd.DataFrame({"point_day": all_days, "Total Points": 0.0})
+        if trend_rows:
+            trend_points = pd.DataFrame(
                 {
-                    "Employee #": str(r["employee_id"]),
-                    "Name": f"{r['last_name']}, {r['first_name']}",
-                    "Building": r.get("building") or "—",
-                    "Points (30d)": f"{float(r.get('points_30d') or 0.0):.1f}",
-                    "Last Point Date": fmt_date(r.get("last_point_date")),
-                    "Top Reason": (r.get("top_reason") or "—"),
-                }
-                for r in gt1_rows
-            ]
-        )
-        # Apply donut/building filter (if a building is selected)
-        if selected_building:
-            df_gt1 = df_gt1[df_gt1["Building"] == selected_building]
-            st.caption(f"Showing repeat offenders for **{selected_building}**. (Clear via the filter dropdown.)")
-
-        st.dataframe(df_gt1.head(25), use_container_width=True, hide_index=True)
-        if len(df_gt1) > 25:
-            with st.expander(f"Show all ({len(df_gt1)})"):
-                st.dataframe(df_gt1, use_container_width=True, hide_index=True)
-    else:
-        info_box("No employees over 1.0 points in the last 30 days.")
-
-    st.markdown("#### Trending Risks  — On track to exceed 8 points")
-    pts60_rows = [dict(r) for r in fetchall(conn, sql_points_60d, (*emp_ids, since_60))]
-    points60_by_emp = {int(r.get("employee_id")): float(r.get("points_60d") or 0.0) for r in pts60_rows}
-    weekdays_60 = max(len(pd.bdate_range(start=today - timedelta(days=60), end=today)), 1)
-    weekdays_30 = len(pd.bdate_range(start=today + timedelta(days=1), end=today + timedelta(days=30)))
-    risk_rows = []
-    for r in emp_detail_rows:
-        emp_id = int(r["employee_id"])
-        current_points = float(r.get("point_total") or 0.0)
-        points_60d = float(points60_by_emp.get(emp_id) or 0.0)
-        projected_30d = (points_60d / weekdays_60) * weekdays_30
-        projected_total = current_points + projected_30d
-        if projected_total >= 8.0:
-            risk_rows.append(
-                {
-                    "Employee #": str(emp_id),
-                    "Name": f"{r['last_name']}, {r['first_name']}",
-                    "Building": r.get("building") or "—",
-                    "Current Points": f"{current_points:.1f}",
-                    "Points (60d)": f"{points_60d:.1f}",
-                    "Projected +30d": f"{projected_30d:.1f}",
-                    "Projected Total": f"{projected_total:.1f}",
-                    "Confidence Note": "Low data" if points_60d < 2.0 else "Based on last 60 days",
-                    "_projected_total": projected_total,
+                    "point_day": pd.to_datetime([r.get("point_day") for r in trend_rows]),
+                    "Total Points": [float(r.get("pts") or 0.0) for r in trend_rows],
                 }
             )
-    if risk_rows:
-        df_risk = pd.DataFrame(risk_rows).sort_values(by="_projected_total", ascending=False).drop(columns=["_projected_total"])
-        st.dataframe(df_risk, use_container_width=True, hide_index=True)
-    else:
-        info_box("No active employees currently trend to 8.0+ points in the next 30 days.")
+            trend_df = trend_df.merge(trend_points, on="point_day", how="left", suffixes=("", "_q"))
+            trend_df["Total Points"] = trend_df["Total Points_q"].fillna(trend_df["Total Points"]) 
+            trend_df = trend_df.drop(columns=["Total Points_q"])
+        trend_df = trend_df.rename(columns={"point_day": "Date"}).set_index("Date")
+        st.line_chart(trend_df)
 
-    st.markdown("#### Absenteeism Trend (90 Days)")
-    trend_rows = [dict(r) for r in fetchall(conn, sql_trend_90d, (*emp_ids, (today - timedelta(days=90)).isoformat()))]
-    all_days = pd.bdate_range(start=today - timedelta(days=90), end=today)
-    trend_df = pd.DataFrame({"point_day": all_days, "Total Points": 0.0})
-    if trend_rows:
-        trend_points = pd.DataFrame(
-            {
-                "point_day": pd.to_datetime([r.get("point_day") for r in trend_rows]),
-                "Total Points": [float(r.get("pts") or 0.0) for r in trend_rows],
+        st.markdown("#### Day-of-Week Trend")
+        ctrl_col1, ctrl_col2 = st.columns([1.2, 1])
+        with ctrl_col1:
+            window_label = st.selectbox(
+                "Window",
+                ["Last 30 days", "Last 90 days", "Last 12 months"],
+                index=1,
+                key="dow_window",
+            )
+        with ctrl_col2:
+            metric_choice = st.radio("Metric", ["Count", "Points", "Rate"], index=0, horizontal=True, key="dow_metric")
+
+        window_days = {"Last 30 days": 30, "Last 90 days": 90, "Last 12 months": 365}[window_label]
+        window_start = today - timedelta(days=window_days - 1)
+        window_end = today + timedelta(days=1)
+        prior_start = window_start - timedelta(days=window_days)
+        prior_end = window_start
+
+        current_rows = [
+            dict(r)
+            for r in fetchall(conn, sql_weekday_window, (*emp_ids, window_start.isoformat(), window_end.isoformat(), *emp_ids, window_start.isoformat(), window_end.isoformat()))
+        ]
+        prior_rows = [
+            dict(r)
+            for r in fetchall(conn, sql_weekday_window, (*emp_ids, prior_start.isoformat(), prior_end.isoformat(), *emp_ids, prior_start.isoformat(), prior_end.isoformat()))
+        ]
+
+        current_by_dow = {
+            int(r.get("dow") or 0): {
+                "incidents": int(r.get("incidents") or 0),
+                "employees_pointed": int(r.get("employees_pointed") or 0),
+                "points": float(r.get("total_points") or 0.0),
             }
-        )
-        trend_df = trend_df.merge(trend_points, on="point_day", how="left", suffixes=("", "_q"))
-        trend_df["Total Points"] = trend_df["Total Points_q"].fillna(trend_df["Total Points"]) 
-        trend_df = trend_df.drop(columns=["Total Points_q"])
-    trend_df = trend_df.rename(columns={"point_day": "Date"}).set_index("Date")
-    st.line_chart(trend_df)
-
-    st.markdown("#### Day-of-Week Trend")
-    ctrl_col1, ctrl_col2 = st.columns([1.2, 1])
-    with ctrl_col1:
-        window_label = st.selectbox(
-            "Window",
-            ["Last 30 days", "Last 90 days", "Last 12 months"],
-            index=1,
-            key="dow_window",
-        )
-    with ctrl_col2:
-        metric_choice = st.radio("Metric", ["Count", "Points", "Rate"], index=0, horizontal=True, key="dow_metric")
-
-    window_days = {"Last 30 days": 30, "Last 90 days": 90, "Last 12 months": 365}[window_label]
-    window_start = today - timedelta(days=window_days - 1)
-    window_end = today + timedelta(days=1)
-    prior_start = window_start - timedelta(days=window_days)
-    prior_end = window_start
-
-    current_rows = [
-        dict(r)
-        for r in fetchall(conn, sql_weekday_window, (*emp_ids, window_start.isoformat(), window_end.isoformat(), *emp_ids, window_start.isoformat(), window_end.isoformat()))
-    ]
-    prior_rows = [
-        dict(r)
-        for r in fetchall(conn, sql_weekday_window, (*emp_ids, prior_start.isoformat(), prior_end.isoformat(), *emp_ids, prior_start.isoformat(), prior_end.isoformat()))
-    ]
-
-    current_by_dow = {
-        int(r.get("dow") or 0): {
-            "incidents": int(r.get("incidents") or 0),
-            "employees_pointed": int(r.get("employees_pointed") or 0),
-            "points": float(r.get("total_points") or 0.0),
+            for r in current_rows
         }
-        for r in current_rows
-    }
-    prior_by_dow = {
-        int(r.get("dow") or 0): {
-            "incidents": int(r.get("incidents") or 0),
-            "employees_pointed": int(r.get("employees_pointed") or 0),
-            "points": float(r.get("total_points") or 0.0),
+        prior_by_dow = {
+            int(r.get("dow") or 0): {
+                "incidents": int(r.get("incidents") or 0),
+                "employees_pointed": int(r.get("employees_pointed") or 0),
+                "points": float(r.get("total_points") or 0.0),
+            }
+            for r in prior_rows
         }
-        for r in prior_rows
-    }
 
-    dow_order = [1, 2, 3, 4, 5]
-    dow_labels = {1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri"}
+        dow_order = [1, 2, 3, 4, 5]
+        dow_labels = {1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri"}
 
-    denominator_count = max(len(emp_ids), 1)
-    if metric_choice == "Rate":
-        st.caption("Rate uses approximate active-headcount denominator: incidents ÷ active employees × 100.")
+        denominator_count = max(len(emp_ids), 1)
+        if metric_choice == "Rate":
+            st.caption("Rate uses approximate active-headcount denominator: incidents ÷ active employees × 100.")
 
-    def metric_value(stats: dict, metric: str) -> float:
-        incidents = float(stats.get("incidents") or 0)
-        employees_pointed = float(stats.get("employees_pointed") or 0)
-        points = float(stats.get("points") or 0)
-        if metric == "Count":
-            return employees_pointed
-        if metric == "Points":
-            return points
-        return (incidents / denominator_count) * 100.0
+        def metric_value(stats: dict, metric: str) -> float:
+            incidents = float(stats.get("incidents") or 0)
+            employees_pointed = float(stats.get("employees_pointed") or 0)
+            points = float(stats.get("points") or 0)
+            if metric == "Count":
+                return employees_pointed
+            if metric == "Points":
+                return points
+            return (incidents / denominator_count) * 100.0
 
-    table_rows = []
-    metric_values = {}
-    for dow in dow_order:
-        stats = current_by_dow.get(dow, {"incidents": 0, "employees_pointed": 0, "points": 0.0})
-        incidents = int(stats.get("incidents") or 0)
-        employees_pointed = int(stats.get("employees_pointed") or 0)
-        points = float(stats.get("points") or 0.0)
-        selected_val = metric_value(stats, metric_choice)
-        metric_values[dow] = selected_val
+        table_rows = []
+        metric_values = {}
+        for dow in dow_order:
+            stats = current_by_dow.get(dow, {"incidents": 0, "employees_pointed": 0, "points": 0.0})
+            incidents = int(stats.get("incidents") or 0)
+            employees_pointed = int(stats.get("employees_pointed") or 0)
+            points = float(stats.get("points") or 0.0)
+            selected_val = metric_value(stats, metric_choice)
+            metric_values[dow] = selected_val
 
-        weekday_reason_rows = [
+            weekday_reason_rows = [
+                dict(r)
+                for r in fetchall(
+                    conn,
+                    sql_weekday_reason,
+                    (*emp_ids, window_start.isoformat(), window_end.isoformat(), dow),
+                )
+            ]
+            top_reason_day = (weekday_reason_rows[0].get("reason") if weekday_reason_rows else None) or "—"
+
+            table_rows.append(
+                {
+                    "Weekday": dow_labels[dow],
+                    "# of Employees Pointed": employees_pointed,
+                    "Total Points Issued": round(points, 1),
+                    "Top Reason": top_reason_day,
+                }
+            )
+
+        st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True)
+
+        worst_dow = max(dow_order, key=lambda d: metric_values.get(d, 0.0))
+        worst_label = dow_labels[worst_dow]
+        worst_value = metric_values.get(worst_dow, 0.0)
+        if metric_choice == "Count":
+            worst_value_txt = f"{int(round(worst_value))} employees pointed"
+        elif metric_choice == "Points":
+            worst_value_txt = f"{worst_value:.1f} points"
+        else:
+            worst_value_txt = f"{worst_value:.2f} incidents per 100 active"
+        st.markdown(f"• Worst weekday ({metric_choice.lower()}): **{worst_label}** — **{worst_value_txt}**")
+
+        delta_rows = []
+        for dow in dow_order:
+            cur_val = metric_value(current_by_dow.get(dow, {"incidents": 0, "employees_pointed": 0, "points": 0.0}), metric_choice)
+            prev_val = metric_value(prior_by_dow.get(dow, {"incidents": 0, "employees_pointed": 0, "points": 0.0}), metric_choice)
+            if prev_val > 0:
+                pct = ((cur_val - prev_val) / prev_val) * 100.0
+                pct_txt = f"{pct:+.1f}%"
+            elif cur_val > 0:
+                pct_txt = "new activity"
+            else:
+                pct_txt = "0.0%"
+            delta_rows.append((dow, abs(cur_val - prev_val), pct_txt))
+
+        if delta_rows:
+            ch_dow, _, pct_txt = max(delta_rows, key=lambda x: x[1])
+            st.markdown(f"• Biggest change vs prior matching window: **{dow_labels[ch_dow]}** — **{pct_txt}**")
+
+        reason_rows = [
             dict(r)
             for r in fetchall(
                 conn,
                 sql_weekday_reason,
-                (*emp_ids, window_start.isoformat(), window_end.isoformat(), dow),
+                (*emp_ids, window_start.isoformat(), window_end.isoformat(), worst_dow),
             )
         ]
-        top_reason_day = (weekday_reason_rows[0].get("reason") if weekday_reason_rows else None) or "—"
-
-        table_rows.append(
-            {
-                "Weekday": dow_labels[dow],
-                "# of Employees Pointed": employees_pointed,
-                "Total Points Issued": round(points, 1),
-                "Top Reason": top_reason_day,
-            }
-        )
-
-    st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True)
-
-    worst_dow = max(dow_order, key=lambda d: metric_values.get(d, 0.0))
-    worst_label = dow_labels[worst_dow]
-    worst_value = metric_values.get(worst_dow, 0.0)
-    if metric_choice == "Count":
-        worst_value_txt = f"{int(round(worst_value))} employees pointed"
-    elif metric_choice == "Points":
-        worst_value_txt = f"{worst_value:.1f} points"
-    else:
-        worst_value_txt = f"{worst_value:.2f} incidents per 100 active"
-    st.markdown(f"• Worst weekday ({metric_choice.lower()}): **{worst_label}** — **{worst_value_txt}**")
-
-    delta_rows = []
-    for dow in dow_order:
-        cur_val = metric_value(current_by_dow.get(dow, {"incidents": 0, "employees_pointed": 0, "points": 0.0}), metric_choice)
-        prev_val = metric_value(prior_by_dow.get(dow, {"incidents": 0, "employees_pointed": 0, "points": 0.0}), metric_choice)
-        if prev_val > 0:
-            pct = ((cur_val - prev_val) / prev_val) * 100.0
-            pct_txt = f"{pct:+.1f}%"
-        elif cur_val > 0:
-            pct_txt = "new activity"
-        else:
-            pct_txt = "0.0%"
-        delta_rows.append((dow, abs(cur_val - prev_val), pct_txt))
-
-    if delta_rows:
-        ch_dow, _, pct_txt = max(delta_rows, key=lambda x: x[1])
-        st.markdown(f"• Biggest change vs prior matching window: **{dow_labels[ch_dow]}** — **{pct_txt}**")
-
-    reason_rows = [
-        dict(r)
-        for r in fetchall(
-            conn,
-            sql_weekday_reason,
-            (*emp_ids, window_start.isoformat(), window_end.isoformat(), worst_dow),
-        )
-    ]
-    top_reason = (reason_rows[0].get("reason") if reason_rows else None) or "—"
-    if top_reason != "—":
-        st.markdown(f"• Most common reason on {worst_label}: **{top_reason}**")
+        top_reason = (reason_rows[0].get("reason") if reason_rows else None) or "—"
+        if top_reason != "—":
+            st.markdown(f"• Most common reason on {worst_label}: **{top_reason}**")
 
 
 
-# ── Employees ─────────────────────────────────────────────────────────────────
+    # ── Employees ─────────────────────────────────────────────────────────────────
+
 def employees_page(conn, building: str) -> None:
     page_heading("Employees", "Look up employees and review current attendance status.")
 
