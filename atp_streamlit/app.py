@@ -1344,6 +1344,22 @@ def dashboard_page(conn, building: str) -> None:
              ORDER BY n DESC, ph.reason
              LIMIT 1
         '''
+        sql_weekday_employees = f'''
+            SELECT e.employee_id,
+                   e.last_name || ', ' || e.first_name AS employee,
+                   COALESCE(e."Location", '') AS building,
+                   COUNT(*) AS incidents,
+                   ROUND(COALESCE(SUM(ph.points), 0.0)::numeric, 1)::float8 AS total_points
+              FROM points_history ph
+              JOIN employees e ON e.employee_id = ph.employee_id
+             WHERE ph.employee_id IN ({ph})
+               AND (ph.point_date::date) >= (%s::date)
+               AND (ph.point_date::date) < (%s::date)
+               AND EXTRACT(DOW FROM ph.point_date::date)::int = (%s)
+               AND COALESCE(ph.points, 0.0) > 0.0
+             GROUP BY e.employee_id, e.last_name, e.first_name, e."Location"
+             ORDER BY total_points DESC, lower(e.last_name), lower(e.first_name)
+        '''
     else:
         sql_emp_detail = f'''
             SELECT e.employee_id, e.last_name, e.first_name,
@@ -1507,6 +1523,22 @@ def dashboard_page(conn, building: str) -> None:
              GROUP BY ph.reason
              ORDER BY n DESC, ph.reason
              LIMIT 1
+        '''
+        sql_weekday_employees = f'''
+            SELECT e.employee_id,
+                   e.last_name || ', ' || e.first_name AS employee,
+                   COALESCE(e."Location", '') AS building,
+                   COUNT(*) AS incidents,
+                   ROUND(COALESCE(SUM(ph.points), 0.0), 1) AS total_points
+              FROM points_history ph
+              JOIN employees e ON e.employee_id = ph.employee_id
+             WHERE ph.employee_id IN ({ph})
+               AND date(ph.point_date) >= date(?)
+               AND date(ph.point_date) < date(?)
+               AND CAST(strftime('%w', ph.point_date) AS INTEGER) = ?
+               AND COALESCE(ph.points, 0.0) > 0.0
+             GROUP BY e.employee_id, e.last_name, e.first_name, e."Location"
+             ORDER BY total_points DESC, lower(e.last_name), lower(e.first_name)
         '''
 
     emp_detail_rows = [dict(r) for r in fetchall(conn, sql_emp_detail, tuple(emp_ids))]
@@ -1931,7 +1963,42 @@ def dashboard_page(conn, building: str) -> None:
             }
         )
 
-    st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True)
+    dow_df = pd.DataFrame(table_rows)
+    dow_event = st.dataframe(
+        dow_df,
+        use_container_width=True,
+        hide_index=True,
+        on_select="rerun",
+        selection_mode="single-row",
+    )
+
+    selected_rows = dow_event.selection.rows
+    if selected_rows:
+        sel_idx = selected_rows[0]
+        sel_dow = dow_order[sel_idx]
+        sel_label = dow_labels[sel_dow]
+        emp_rows = [
+            dict(r)
+            for r in fetchall(
+                conn,
+                sql_weekday_employees,
+                (*emp_ids, window_start.isoformat(), window_end.isoformat(), sel_dow),
+            )
+        ]
+        if emp_rows:
+            st.markdown(f"**Employees pointed on {sel_label}s** ({window_start.strftime('%b %d')} – {window_end.strftime('%b %d, %Y')})")
+            emp_display = pd.DataFrame([
+                {
+                    "Employee": r["employee"],
+                    "Building": r["building"],
+                    "Incidents": int(r["incidents"]),
+                    "Points": float(r["total_points"]),
+                }
+                for r in emp_rows
+            ])
+            st.dataframe(emp_display, use_container_width=True, hide_index=True)
+        else:
+            st.info(f"No employees pointed on {sel_label}s in this window.")
 
     worst_dow = max(dow_order, key=lambda d: metric_values.get(d, 0.0))
     worst_label = dow_labels[worst_dow]
