@@ -12,6 +12,7 @@ from pathlib import Path
 import secrets
 import sys
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 import streamlit.components.v1 as components
 from reportlab.lib import colors
@@ -2042,6 +2043,324 @@ def dashboard_page(conn, building: str) -> None:
 
 
 
+# ── PTO Usage Analysis ────────────────────────────────────────────────────────
+_PTO_PALETTE = [
+    "#00d4ff", "#7b61ff", "#00e5a0", "#ff6b6b", "#ffa94d",
+    "#a9e34b", "#f06595", "#74c0fc", "#e599f7", "#63e6be",
+]
+
+_PTO_SAMPLE_CSV = (
+    "employee_id,last_name,first_name,building,pto_type,date,hours\n"
+    "101,Smith,Jane,APIM,Vacation,2025-01-06,8\n"
+    "102,Jones,Bob,APIS,Sick,2025-01-07,4\n"
+    "103,Davis,Carol,AAP,Personal,2025-01-08,8\n"
+    "101,Smith,Jane,APIM,Vacation,2025-01-09,8\n"
+    "104,Wilson,Tom,APIM,FMLA,2025-01-10,8\n"
+    "105,Brown,Alice,APIS,Bereavement,2025-01-13,8\n"
+)
+
+
+def _pto_metric(label: str, value: str, sub: str = "") -> None:
+    sub_html = f"<div style='font-size:.75rem;color:#6b8cba;margin-top:.2rem'>{sub}</div>" if sub else ""
+    st.markdown(
+        f"<div style='background:#0d1b2e;border:1px solid #1a3a5c;border-radius:10px;"
+        f"padding:1rem 1.25rem;text-align:center'>"
+        f"<div style='font-size:.78rem;color:#4a7fa5;text-transform:uppercase;letter-spacing:.08em'>{label}</div>"
+        f"<div style='font-size:1.8rem;font-weight:700;color:#e8f4fd;line-height:1.2;margin-top:.3rem'>{value}</div>"
+        f"{sub_html}</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def pto_page(building: str) -> None:
+    page_heading("PTO Usage Analysis", "Upload a CSV export to analyze PTO patterns by type, building, and employee.")
+
+    # ── CSV upload ──────────────────────────────────────────────────────────
+    with st.expander("Upload PTO Data", expanded="pto_df" not in st.session_state):
+        st.markdown(
+            "Upload a CSV with columns: `employee_id` *(optional)*, `last_name`, `first_name`, "
+            "`building`, `pto_type`, `date` *(YYYY-MM-DD)*, `hours`"
+        )
+        col_up, col_dl = st.columns([3, 1])
+        with col_up:
+            uploaded = st.file_uploader("Choose CSV file", type="csv", label_visibility="collapsed")
+        with col_dl:
+            st.download_button(
+                "Download template",
+                data=_PTO_SAMPLE_CSV,
+                file_name="pto_template.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+
+        if uploaded is not None:
+            try:
+                raw = pd.read_csv(uploaded)
+                raw.columns = [c.strip().lower().replace(" ", "_") for c in raw.columns]
+                required = {"last_name", "first_name", "building", "pto_type", "date", "hours"}
+                missing = required - set(raw.columns)
+                if missing:
+                    st.error(f"CSV is missing required columns: {', '.join(sorted(missing))}")
+                else:
+                    raw["date"] = pd.to_datetime(raw["date"], errors="coerce")
+                    raw["hours"] = pd.to_numeric(raw["hours"], errors="coerce").fillna(0)
+                    raw["building"] = raw["building"].astype(str).str.strip()
+                    raw["pto_type"] = raw["pto_type"].astype(str).str.strip()
+                    raw["employee"] = raw["last_name"].str.strip() + ", " + raw["first_name"].str.strip()
+                    raw = raw.dropna(subset=["date"])
+                    st.session_state["pto_df"] = raw
+                    st.success(f"Loaded {len(raw):,} PTO records.")
+            except Exception as exc:
+                st.error(f"Could not parse CSV: {exc}")
+
+    if "pto_df" not in st.session_state:
+        st.info("Upload a PTO CSV above to begin analysis.")
+        return
+
+    df_all: pd.DataFrame = st.session_state["pto_df"].copy()
+
+    # ── Filters ─────────────────────────────────────────────────────────────
+    divider()
+    section_label("Filters")
+    fc1, fc2, fc3, fc4 = st.columns(4)
+
+    date_min = df_all["date"].min().date()
+    date_max = df_all["date"].max().date()
+    with fc1:
+        date_start = st.date_input("From", value=date_min, min_value=date_min, max_value=date_max, key="pto_from")
+    with fc2:
+        date_end = st.date_input("To", value=date_max, min_value=date_min, max_value=date_max, key="pto_to")
+
+    all_buildings = sorted(df_all["building"].dropna().unique())
+    bldg_opts = ["All"] + all_buildings
+    default_bldg = building if building in all_buildings else "All"
+    with fc3:
+        sel_building = st.selectbox("Building", bldg_opts, index=bldg_opts.index(default_bldg), key="pto_bldg")
+
+    all_types = sorted(df_all["pto_type"].dropna().unique())
+    with fc4:
+        sel_types = st.multiselect("PTO Types", all_types, default=all_types, key="pto_types")
+
+    # Apply filters
+    df = df_all[
+        (df_all["date"].dt.date >= date_start)
+        & (df_all["date"].dt.date <= date_end)
+    ]
+    if sel_building != "All":
+        df = df[df["building"] == sel_building]
+    if sel_types:
+        df = df[df["pto_type"].isin(sel_types)]
+
+    if df.empty:
+        info_box("No PTO records match the current filters.")
+        return
+
+    # ── KPI tiles ───────────────────────────────────────────────────────────
+    divider()
+    section_label("Summary")
+    k1, k2, k3, k4 = st.columns(4)
+    total_hours = df["hours"].sum()
+    total_days = total_hours / 8
+    unique_emps = df["employee"].nunique()
+    all_emps_in_filter = df_all[
+        (df_all["date"].dt.date >= date_start) & (df_all["date"].dt.date <= date_end)
+    ]
+    if sel_building != "All":
+        all_emps_in_filter = all_emps_in_filter[all_emps_in_filter["building"] == sel_building]
+    total_emps_in_scope = all_emps_in_filter["employee"].nunique()
+    utilization_pct = (unique_emps / total_emps_in_scope * 100) if total_emps_in_scope else 0
+    top_type = df.groupby("pto_type")["hours"].sum().idxmax() if not df.empty else "—"
+    avg_hours = total_hours / unique_emps if unique_emps else 0
+
+    with k1:
+        _pto_metric("Total PTO Days", f"{total_days:,.1f}", f"{total_hours:,.0f} hours")
+    with k2:
+        _pto_metric("Employees Used PTO", str(unique_emps), f"{utilization_pct:.0f}% utilization")
+    with k3:
+        _pto_metric("Top PTO Type", top_type)
+    with k4:
+        _pto_metric("Avg Days / Employee", f"{avg_hours / 8:.1f}", f"{avg_hours:.0f} hrs avg")
+
+    # ── Donut chart + Monthly trend ─────────────────────────────────────────
+    divider()
+    chart_col, trend_col = st.columns(2)
+
+    type_totals = df.groupby("pto_type")["hours"].sum().sort_values(ascending=False)
+    type_colors = {t: _PTO_PALETTE[i % len(_PTO_PALETTE)] for i, t in enumerate(type_totals.index)}
+
+    with chart_col:
+        section_label("PTO by Type — click a slice to see employees")
+        donut_fig = go.Figure(go.Pie(
+            labels=type_totals.index.tolist(),
+            values=type_totals.values.tolist(),
+            hole=0.52,
+            marker=dict(colors=[type_colors[t] for t in type_totals.index], line=dict(color="#060d1f", width=2)),
+            textinfo="label+percent",
+            hovertemplate="<b>%{label}</b><br>%{value:.0f} hrs (%{percent})<extra></extra>",
+        ))
+        donut_fig.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            showlegend=False,
+            margin=dict(t=10, b=10, l=10, r=10),
+            font=dict(color="#c8dff0", family="SF Mono, Fira Code, monospace"),
+        )
+        donut_event = st.plotly_chart(
+            donut_fig,
+            use_container_width=True,
+            on_select="rerun",
+            key="pto_donut",
+        )
+
+    with trend_col:
+        section_label("Monthly PTO Trend (hours)")
+        df_trend = df.copy()
+        df_trend["month"] = df_trend["date"].dt.to_period("M").dt.to_timestamp()
+        monthly = df_trend.groupby(["month", "pto_type"])["hours"].sum().reset_index()
+        trend_fig = go.Figure()
+        for pto_type in monthly["pto_type"].unique():
+            sub = monthly[monthly["pto_type"] == pto_type]
+            trend_fig.add_trace(go.Scatter(
+                x=sub["month"], y=sub["hours"], name=pto_type, mode="lines+markers",
+                line=dict(color=type_colors.get(pto_type, "#00d4ff"), width=2),
+                marker=dict(size=5),
+                hovertemplate=f"<b>{pto_type}</b><br>%{{x|%b %Y}}: %{{y:.0f}} hrs<extra></extra>",
+            ))
+        trend_fig.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#c8dff0", family="SF Mono, Fira Code, monospace"),
+            xaxis=dict(showgrid=False, color="#4a7fa5"),
+            yaxis=dict(showgrid=True, gridcolor="#0d1b2e", color="#4a7fa5"),
+            legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(size=11)),
+            margin=dict(t=10, b=10, l=10, r=10),
+            hovermode="x unified",
+        )
+        st.plotly_chart(trend_fig, use_container_width=True, key="pto_trend")
+
+    # ── Donut drill-down ────────────────────────────────────────────────────
+    selected_points = donut_event.selection.get("points", []) if donut_event.selection else []
+    if selected_points:
+        sel_type = selected_points[0].get("label")
+        if sel_type:
+            divider()
+            section_label(f"Employees — {sel_type}")
+            drill = (
+                df[df["pto_type"] == sel_type]
+                .groupby(["employee", "building"])
+                .agg(days=("hours", lambda h: h.sum() / 8), hours=("hours", "sum"), incidents=("hours", "count"))
+                .reset_index()
+                .sort_values("hours", ascending=False)
+            )
+            drill = drill.rename(columns={"employee": "Employee", "building": "Building", "days": "Days", "hours": "Hours", "incidents": "Occurrences"})
+            drill["Days"] = drill["Days"].round(1)
+            drill["Hours"] = drill["Hours"].round(1)
+            st.dataframe(drill, use_container_width=True, hide_index=True)
+
+    # ── Building comparison ─────────────────────────────────────────────────
+    divider()
+    bc1, bc2 = st.columns(2)
+
+    with bc1:
+        section_label("PTO Hours by Building")
+        bldg_totals = df.groupby("building")["hours"].sum().sort_values(ascending=False).reset_index()
+        bar_fig = go.Figure(go.Bar(
+            x=bldg_totals["building"],
+            y=bldg_totals["hours"],
+            marker=dict(color=_PTO_PALETTE[:len(bldg_totals)], line=dict(color="#060d1f", width=1)),
+            hovertemplate="<b>%{x}</b>: %{y:.0f} hrs<extra></extra>",
+            text=(bldg_totals["hours"] / 8).round(1).astype(str) + "d",
+            textposition="outside",
+        ))
+        bar_fig.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#c8dff0", family="SF Mono, Fira Code, monospace"),
+            xaxis=dict(showgrid=False, color="#4a7fa5"),
+            yaxis=dict(showgrid=True, gridcolor="#0d1b2e", color="#4a7fa5", title="Hours"),
+            margin=dict(t=10, b=10, l=10, r=10),
+        )
+        st.plotly_chart(bar_fig, use_container_width=True, key="pto_bldg_bar")
+
+    with bc2:
+        section_label("Most Popular Days of Week for PTO")
+        dow_map = {0: "Mon", 1: "Tue", 2: "Wed", 3: "Thu", 4: "Fri", 5: "Sat", 6: "Sun"}
+        df_dow = df.copy()
+        df_dow["dow"] = df_dow["date"].dt.dayofweek
+        df_dow["dow_label"] = df_dow["dow"].map(dow_map)
+        dow_order = ["Mon", "Tue", "Wed", "Thu", "Fri"]
+        dow_totals = (
+            df_dow[df_dow["dow_label"].isin(dow_order)]
+            .groupby("dow_label")["hours"]
+            .sum()
+            .reindex(dow_order)
+            .fillna(0)
+            .reset_index()
+        )
+        dow_fig = go.Figure(go.Bar(
+            x=dow_totals["dow_label"],
+            y=dow_totals["hours"],
+            marker=dict(color="#7b61ff", line=dict(color="#060d1f", width=1)),
+            hovertemplate="<b>%{x}</b>: %{y:.0f} hrs<extra></extra>",
+        ))
+        dow_fig.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#c8dff0", family="SF Mono, Fira Code, monospace"),
+            xaxis=dict(showgrid=False, color="#4a7fa5"),
+            yaxis=dict(showgrid=True, gridcolor="#0d1b2e", color="#4a7fa5", title="Hours"),
+            margin=dict(t=10, b=10, l=10, r=10),
+        )
+        st.plotly_chart(dow_fig, use_container_width=True, key="pto_dow_bar")
+
+    # ── Top PTO users ───────────────────────────────────────────────────────
+    divider()
+    tu1, tu2 = st.columns([3, 2])
+
+    with tu1:
+        section_label("Top PTO Users")
+        top_users = (
+            df.groupby(["employee", "building"])["hours"]
+            .sum()
+            .reset_index()
+            .sort_values("hours", ascending=False)
+            .head(15)
+        )
+        top_users["Days"] = (top_users["hours"] / 8).round(1)
+        top_users = top_users.rename(columns={"employee": "Employee", "building": "Building", "hours": "Hours"})
+        top_users["Hours"] = top_users["Hours"].round(1)
+        st.dataframe(top_users[["Employee", "Building", "Days", "Hours"]], use_container_width=True, hide_index=True)
+
+    with tu2:
+        section_label("Zero PTO — No Usage Recorded")
+        emps_with_pto = set(df["employee"].unique())
+        all_scope = df_all[
+            (df_all["date"].dt.date >= date_start) & (df_all["date"].dt.date <= date_end)
+        ]
+        if sel_building != "All":
+            all_scope = all_scope[all_scope["building"] == sel_building]
+        emps_all_scope = set(all_scope["employee"].unique())
+        no_pto = sorted(emps_all_scope - emps_with_pto)
+        if no_pto:
+            no_pto_df = pd.DataFrame({"Employee": no_pto})
+            st.dataframe(no_pto_df, use_container_width=True, hide_index=True)
+        else:
+            info_box("All employees in scope have PTO recorded in this period.")
+
+    # ── Export ──────────────────────────────────────────────────────────────
+    divider()
+    section_label("Export Filtered Data")
+    exp_df = df[["employee", "building", "pto_type", "date", "hours"]].copy()
+    exp_df["date"] = exp_df["date"].dt.strftime("%Y-%m-%d")
+    exp_df["days"] = (exp_df["hours"] / 8).round(2)
+    st.download_button(
+        "Download filtered PTO as CSV",
+        data=to_csv(exp_df),
+        file_name=f"pto_export_{date_start}_{date_end}.csv",
+        mime="text/csv",
+    )
+
+
 # ── Employees ─────────────────────────────────────────────────────────────────
 def employees_page(conn, building: str) -> None:
     page_heading("Employees", "Look up employees and review current attendance status.")
@@ -2626,7 +2945,7 @@ def main() -> None:
         st.markdown("<span class='sidebar-nav-label'>Navigation</span>", unsafe_allow_html=True)
         page = st.radio(
             "nav",
-            ["Dashboard", "Employees", "Points Ledger", "Manage Employees", "Exports & Forecasts", "System Updates"],
+            ["Dashboard", "PTO Usage Analysis", "Employees", "Points Ledger", "Manage Employees", "Exports & Forecasts", "System Updates"],
             key="page",
             label_visibility="collapsed",
         )
@@ -2644,6 +2963,8 @@ def main() -> None:
 
     if page == "Dashboard":
         dashboard_page(conn, building)
+    elif page == "PTO Usage Analysis":
+        pto_page(building)
     elif page == "Employees":
         employees_page(conn, building)
     elif page == "Points Ledger":
