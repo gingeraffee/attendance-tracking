@@ -4,3 +4,4 @@ python-dateutil==2.9.0.post0
 reportlab==4.2.5
 psycopg[binary]
 psycopg2-binary
+plotly==5.22.0
