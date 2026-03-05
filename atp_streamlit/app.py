@@ -95,19 +95,6 @@ footer, #MainMenu { visibility: hidden; }
     pointer-events: none; z-index: 2;
 }
 
-/* ── Scanline sweep (injected div) ── */
-@keyframes scanline-sweep {
-    0%   { top: -4px; opacity: 0; }
-    4%   { opacity: 1; }
-    96%  { opacity: 1; }
-    100% { top: 100vh; opacity: 0; }
-}
-.scanline-overlay {
-    position: fixed; left: 0; right: 0; height: 4px;
-    background: linear-gradient(180deg, transparent, rgba(0,212,255,.07), transparent);
-    animation: scanline-sweep 14s linear infinite;
-    pointer-events: none; z-index: 9998;
-}
 
 /* ── Sidebar ── */
 section[data-testid="stSidebar"] {
@@ -434,11 +421,10 @@ div[data-testid="stMetric"]:nth-child(5) { animation-delay: 1.6s; }
 </style>""",
         unsafe_allow_html=True,
     )
-    # Inject fixed-position atmospheric overlays (aurora glow, tech grid, scanline)
+    # Inject fixed-position atmospheric overlays (aurora glow, tech grid)
     st.markdown(
         '<div class="aurora-bg"></div>'
-        '<div class="tech-grid-overlay"></div>'
-        '<div class="scanline-overlay"></div>',
+        '<div class="tech-grid-overlay"></div>',
         unsafe_allow_html=True,
     )
 
