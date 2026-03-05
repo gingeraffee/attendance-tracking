@@ -257,6 +257,125 @@ section[data-testid="stSidebar"] .sidebar-employee-item .value.highlight {
     font-size: .9rem;
     font-weight: 800;
 }
+
+/* ── Breathing / live animations ── */
+
+/* Metric tiles — slow inhale/exhale glow */
+@keyframes tile-breathe {
+  0%, 100% {
+    box-shadow: 0 2px 16px rgba(15,32,68,.07);
+    transform: translateY(0px);
+  }
+  50% {
+    box-shadow: 0 6px 28px rgba(79,142,247,.16), 0 0 0 1px rgba(79,142,247,.08);
+    transform: translateY(-2px);
+  }
+}
+div[data-testid="stMetric"] {
+    animation: tile-breathe 5s ease-in-out infinite;
+}
+/* Stagger each tile so they don't all pulse together */
+div[data-testid="stMetric"]:nth-child(1) { animation-delay: 0s; }
+div[data-testid="stMetric"]:nth-child(2) { animation-delay: 1s; }
+div[data-testid="stMetric"]:nth-child(3) { animation-delay: 2s; }
+div[data-testid="stMetric"]:nth-child(4) { animation-delay: 3s; }
+div[data-testid="stMetric"]:nth-child(5) { animation-delay: 1.5s; }
+
+/* Accent bar — gradient breathes side-to-side */
+@keyframes accent-shift {
+  0%   { background-position: 0% 50%;   box-shadow: 0 0 8px rgba(79,142,247,.25); }
+  50%  { background-position: 100% 50%; box-shadow: 0 0 18px rgba(0,184,230,.45); }
+  100% { background-position: 0% 50%;   box-shadow: 0 0 8px rgba(79,142,247,.25); }
+}
+.accent-bar {
+    background: linear-gradient(90deg, var(--blue), var(--cyan), #a78bfa, var(--blue));
+    background-size: 300% 300%;
+    animation: accent-shift 4s ease-in-out infinite !important;
+}
+
+/* Cards — very subtle shadow pulse */
+@keyframes card-glow {
+  0%, 100% { box-shadow: 0 2px 16px rgba(15,32,68,.07); }
+  50%       { box-shadow: 0 4px 24px rgba(79,142,247,.11); }
+}
+.card, .card-sm {
+    animation: card-glow 6s ease-in-out infinite;
+}
+
+/* Pulsing LIVE dot */
+@keyframes live-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(0,168,122,.55);
+    background: #00a87a;
+  }
+  50% {
+    box-shadow: 0 0 0 7px rgba(0,168,122,0);
+    background: #00c994;
+  }
+}
+.live-dot {
+    display: inline-block;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: #00a87a;
+    margin-right: 7px;
+    vertical-align: middle;
+    animation: live-pulse 2s ease-in-out infinite;
+}
+
+/* Section labels — faint shimmer */
+@keyframes label-shimmer {
+  0%, 100% { opacity: 0.65; }
+  50%       { opacity: 1; }
+}
+.section-label {
+    animation: label-shimmer 4s ease-in-out infinite;
+}
+
+/* Sidebar brand bar — slow color breathe */
+@keyframes sidebar-brand-breathe {
+  0%, 100% { border-bottom-color: rgba(255,255,255,.07); }
+  50%       { border-bottom-color: rgba(79,142,247,.22); }
+}
+.sidebar-brand {
+    animation: sidebar-brand-breathe 5s ease-in-out infinite;
+}
+
+/* Info / warn / danger boxes — entrance fade */
+@keyframes box-fade-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.info-box, .warn-box, .danger-box {
+    animation: box-fade-in .45s ease-out both;
+}
+
+/* Page heading entrance */
+@keyframes heading-in {
+  from { opacity: 0; transform: translateX(-10px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.page-heading {
+    animation: heading-in .5s ease-out both;
+}
+
+/* Chart containers — subtle glow ring */
+@keyframes chart-frame-pulse {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(79,142,247,.05); }
+  50%       { box-shadow: 0 0 0 2px rgba(79,142,247,.18); }
+}
+.stDataFrame, [data-testid="stArrowVegaLiteChart"] {
+    animation: chart-frame-pulse 5s ease-in-out infinite;
+    border-radius: 12px !important;
+}
+
+/* Respect prefers-reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
 </style>""",
         unsafe_allow_html=True,
     )
@@ -846,7 +965,7 @@ def load_employees(conn, q: str = "", building: str = "All") -> list[dict]:
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 def dashboard_page(conn, building: str) -> None:
     page_heading(
-        "Dashboard",
+        '<span class="live-dot"></span>Dashboard',
         "Real-time overview of attendance activity, thresholds, and upcoming actions.",
     )
 
@@ -1581,18 +1700,22 @@ def dashboard_page(conn, building: str) -> None:
 
     st.markdown("#### Absenteeism Trend (90 Days)")
     trend_rows = [dict(r) for r in fetchall(conn, sql_trend_90d, (*emp_ids, (today - timedelta(days=90)).isoformat()))]
-    all_days = pd.bdate_range(start=today - timedelta(days=90), end=today)
-    trend_df = pd.DataFrame({"point_day": all_days, "Total Points": 0.0})
+    # Merge on plain string dates to avoid pandas datetime-resolution mismatches
+    # (bdate_range may return datetime64[ns] while pd.to_datetime from SQL strings
+    #  returns datetime64[us] in newer pandas, causing silent merge failures).
+    all_day_strs = pd.bdate_range(start=today - timedelta(days=90), end=today).strftime("%Y-%m-%d").tolist()
+    trend_df = pd.DataFrame({"point_day": all_day_strs, "Total Points": 0.0})
     if trend_rows:
         trend_points = pd.DataFrame(
             {
-                "point_day": pd.to_datetime([r.get("point_day") for r in trend_rows]),
+                "point_day": [str(r.get("point_day") or "")[:10] for r in trend_rows],
                 "Total Points": [float(r.get("pts") or 0.0) for r in trend_rows],
             }
         )
         trend_df = trend_df.merge(trend_points, on="point_day", how="left", suffixes=("", "_q"))
-        trend_df["Total Points"] = trend_df["Total Points_q"].fillna(trend_df["Total Points"]) 
+        trend_df["Total Points"] = trend_df["Total Points_q"].fillna(trend_df["Total Points"])
         trend_df = trend_df.drop(columns=["Total Points_q"])
+    trend_df["point_day"] = pd.to_datetime(trend_df["point_day"])
     trend_df = trend_df.rename(columns={"point_day": "Date"}).set_index("Date")
     st.line_chart(trend_df)
 
