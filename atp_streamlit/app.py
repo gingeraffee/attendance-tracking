@@ -2247,6 +2247,7 @@ def pto_page(conn, building: str) -> None:
             min-height: 26px !important;
             line-height: 1.15 !important;
             font-weight: 600 !important;
+            white-space: nowrap !important;
             transition: all 0.15s ease !important;
         }}
         {(', '.join(active_sel) or '.pto-na') + ' { background: rgba(0,212,255,.1) !important; border: 1px solid rgba(0,212,255,.7) !important; color: #00d4ff !important; box-shadow: 0 0 10px rgba(0,212,255,.2), inset 0 0 6px rgba(0,212,255,.05) !important; }'}
@@ -2684,12 +2685,21 @@ def pto_page(conn, building: str) -> None:
     conc_pts = conc_event.selection.get("points", []) if (conc_event and conc_event.selection) else []
     if conc_pts:
         bar_label = conc_pts[0].get("y") or conc_pts[0].get("label") or ""
-        if bar_label == "Top 10 Users":
+        if bar_label in ("Top 10 Users", "Rest of Team"):
+            _group = emp_hrs.head(10) if bar_label == "Top 10 Users" else emp_hrs.iloc[10:]
+            _grp_names = set(_group["employee"])
+            _grp_df = df[df["employee"].isin(_grp_names)]
+            _grp_agg = (
+                _grp_df.groupby("pto_type")["hours"].sum()
+                .reset_index()
+                .rename(columns={"pto_type": "PTO Type", "hours": "Hours"})
+                .sort_values("Hours", ascending=False)
+            )
+            _grp_agg["Hours"] = _grp_agg["Hours"].round(1)
+            _grp_agg["Days"] = (_grp_agg["Hours"] / 8).round(1)
             divider()
-            _drill_table(df[df["employee"].isin(set(emp_hrs.head(10)["employee"]))], "Top 10 PTO Users")
-        elif bar_label == "Rest of Team":
-            divider()
-            _drill_table(df[df["employee"].isin(set(emp_hrs.iloc[10:]["employee"]))], "Rest of Team")
+            section_label(f"PTO Breakdown — {bar_label}")
+            st.dataframe(_grp_agg, use_container_width=True, hide_index=True)
 
     hist_pts = hist_event.selection.get("points", []) if (hist_event and hist_event.selection) else []
     if hist_pts:
@@ -2699,8 +2709,19 @@ def pto_page(conn, building: str) -> None:
             lo, hi = _bin_edges[bi], _bin_edges[bi + 1]
             names_in_bin = set(_emp_hrs_b[(_emp_hrs_b["hours"] >= lo) & (_emp_hrs_b["hours"] <= hi)]["employee"])
             if names_in_bin:
+                _hist_df = df[df["employee"].isin(names_in_bin)]
+                _hist_agg = (
+                    _hist_df.groupby(["employee", "building", "pto_type"])["hours"].sum()
+                    .reset_index()
+                    .rename(columns={"employee": "Employee", "building": "Building",
+                                     "pto_type": "PTO Type", "hours": "Hours"})
+                    .sort_values(["Employee", "Hours"], ascending=[True, False])
+                )
+                _hist_agg["Hours"] = _hist_agg["Hours"].round(1)
+                _hist_agg["Days"] = (_hist_agg["Hours"] / 8).round(1)
                 divider()
-                _drill_table(df[df["employee"].isin(names_in_bin)], f"Employees Using {bin_sel}")
+                section_label(f"Employees Using {bin_sel} — by PTO Type")
+                st.dataframe(_hist_agg, use_container_width=True, hide_index=True)
 
     # ── Module 3: Burnout & Retention Risk ──────────────────────────────────
     divider()
