@@ -2493,6 +2493,238 @@ def pto_page(conn, building: str) -> None:
         else:
             info_box("All active employees have PTO recorded in this period.")
 
+    # ── Module 1: Planned vs Unplanned ──────────────────────────────────────
+    divider()
+    section_label("Planned vs Unplanned PTO")
+
+    _PLANNED_KW   = {"vacation", "holiday", "reward", "personal", "floating"}
+    _UNPLANNED_KW = {"sick", "absence", "absent", "call"}
+    _PROTECTED_KW = {"jury", "bereavement", "fmla", "leave", "long term"}
+
+    def _classify_pto(t: str) -> str:
+        tl = t.lower()
+        if any(k in tl for k in _PLANNED_KW):   return "Planned"
+        if any(k in tl for k in _UNPLANNED_KW): return "Unplanned"
+        if any(k in tl for k in _PROTECTED_KW): return "Protected / Neutral"
+        return "Other"
+
+    df_cls = df.copy()
+    df_cls["category"] = df_cls["pto_type"].apply(_classify_pto)
+    cat_hrs = df_cls.groupby("category")["hours"].sum()
+    total_cls_h = cat_hrs.sum()
+    plan_h = cat_hrs.get("Planned", 0)
+    unpl_h = cat_hrs.get("Unplanned", 0)
+    prot_h = cat_hrs.get("Protected / Neutral", 0)
+
+    pv1, pv2, pv3, pv4 = st.columns(4)
+    _pct = lambda h: f"{h / total_cls_h * 100:.0f}%" if total_cls_h else "—"
+    with pv1:
+        _pto_metric("Planned", _pct(plan_h), f"{plan_h / 8:.1f} days")
+    with pv2:
+        _pto_metric("Unplanned", _pct(unpl_h), f"{unpl_h / 8:.1f} days")
+    with pv3:
+        _pto_metric("Protected / Neutral", _pct(prot_h), f"{prot_h / 8:.1f} days")
+    with pv4:
+        ratio_str = f"{plan_h / unpl_h:.1f}×" if unpl_h else "N/A"
+        _pto_metric("Plan : Unplan Ratio", ratio_str, "higher = more predictable")
+
+    df_cls["month"] = df_cls["start_date"].dt.to_period("M").dt.to_timestamp()
+    mcat = (
+        df_cls[df_cls["category"].isin(["Planned", "Unplanned"])]
+        .groupby(["month", "category"])["hours"].sum().reset_index()
+    )
+    pv_l, pv_r = st.columns([2, 1])
+    with pv_l:
+        if not mcat.empty:
+            _CAT_CLR = {"Planned": "#00e5a0", "Unplanned": "#ff6b6b"}
+            pu_fig = go.Figure()
+            for cat in ["Planned", "Unplanned"]:
+                sub = mcat[mcat["category"] == cat]
+                if not sub.empty:
+                    pu_fig.add_trace(go.Scatter(
+                        x=sub["month"], y=sub["hours"], name=cat,
+                        mode="lines+markers",
+                        line=dict(color=_CAT_CLR[cat], width=2.5),
+                        marker=dict(size=6),
+                        fill="tozeroy",
+                        fillcolor="rgba(0,229,160,0.07)" if cat == "Planned" else "rgba(255,107,107,0.07)",
+                        hovertemplate=f"<b>{cat}</b><br>%{{x|%b %Y}}: %{{y:.0f}} hrs<extra></extra>",
+                    ))
+            pu_fig.update_layout(
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#c8dff0", family="SF Mono, Fira Code, monospace"),
+                xaxis=dict(showgrid=False, color="#4a7fa5"),
+                yaxis=dict(showgrid=True, gridcolor="#0d1b2e", color="#4a7fa5", title="Hours"),
+                legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(size=11)),
+                margin=dict(t=10, b=10, l=10, r=10),
+                hovermode="x unified",
+            )
+            st.plotly_chart(pu_fig, use_container_width=True, key="pto_pu_trend")
+        else:
+            info_box("Not enough monthly data for trend.")
+    with pv_r:
+        section_label("Type → Category Map")
+        cls_tbl = (
+            df_cls.groupby(["pto_type", "category"])["hours"].sum()
+            .reset_index()
+            .rename(columns={"pto_type": "Type", "category": "Category", "hours": "Hours"})
+            .sort_values("Hours", ascending=False)
+        )
+        cls_tbl["Hours"] = cls_tbl["Hours"].round(1)
+        st.dataframe(cls_tbl, use_container_width=True, hide_index=True, height=300)
+
+    # ── Module 2: Concentration ──────────────────────────────────────────────
+    divider()
+    section_label("PTO Concentration — Who's Driving Usage?")
+
+    emp_hrs = df.groupby("employee")["hours"].sum().sort_values(ascending=False).reset_index()
+    n_total_emp = len(emp_hrs)
+    top10_n = max(1, round(n_total_emp * 0.10))
+    total_emp_hrs = emp_hrs["hours"].sum()
+    top10_pct_hrs = emp_hrs.head(top10_n)["hours"].sum() / total_emp_hrs * 100 if total_emp_hrs else 0
+    concentration_label = "High" if top10_pct_hrs > 50 else ("Moderate" if top10_pct_hrs > 33 else "Even")
+
+    cn1, cn2, cn3 = st.columns(3)
+    with cn1:
+        _pto_metric("Employees with PTO", str(n_total_emp), "in selected period")
+    with cn2:
+        _pto_metric(f"Top 10% ({top10_n} people)", f"{top10_pct_hrs:.0f}% of hours", "concentration signal")
+    with cn3:
+        _pto_metric("Distribution", concentration_label, "of PTO across team")
+
+    cc1, cc2 = st.columns(2)
+    with cc1:
+        top10_hrs_sum = emp_hrs.head(10)["hours"].sum()
+        rest_hrs_sum = emp_hrs.iloc[10:]["hours"].sum() if n_total_emp > 10 else 0
+        conc_fig = go.Figure(go.Bar(
+            y=["Top 10 Users", "Rest of Team"],
+            x=[top10_hrs_sum, rest_hrs_sum],
+            orientation="h",
+            marker=dict(color=["#00d4ff", "#1a3a5c"], line=dict(color="#060d1f", width=1)),
+            text=[f"{top10_hrs_sum / 8:.0f}d", f"{rest_hrs_sum / 8:.0f}d"],
+            textposition="inside",
+            textfont=dict(color="#e8f4fd"),
+            hovertemplate="<b>%{y}</b>: %{x:.0f} hrs<extra></extra>",
+        ))
+        conc_fig.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#c8dff0", family="SF Mono, Fira Code, monospace"),
+            xaxis=dict(showgrid=True, gridcolor="#0d1b2e", color="#4a7fa5", title="Hours"),
+            yaxis=dict(showgrid=False, color="#4a7fa5"),
+            margin=dict(t=10, b=10, l=10, r=10),
+            height=180,
+        )
+        st.plotly_chart(conc_fig, use_container_width=True, key="pto_conc_bar")
+    with cc2:
+        hist_fig = go.Figure(go.Histogram(
+            x=emp_hrs["hours"],
+            nbinsx=14,
+            marker=dict(color="#7b61ff", line=dict(color="#060d1f", width=1)),
+            hovertemplate="~%{x} hrs: %{y} employees<extra></extra>",
+        ))
+        hist_fig.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#c8dff0", family="SF Mono, Fira Code, monospace"),
+            xaxis=dict(showgrid=False, color="#4a7fa5", title="Total Hours Used"),
+            yaxis=dict(showgrid=True, gridcolor="#0d1b2e", color="#4a7fa5", title="# Employees"),
+            margin=dict(t=10, b=10, l=10, r=10),
+            height=180,
+            bargap=0.05,
+        )
+        st.plotly_chart(hist_fig, use_container_width=True, key="pto_dist_hist")
+
+    # ── Module 3: Burnout & Retention Risk ──────────────────────────────────
+    divider()
+    section_label("Burnout & Retention Risk")
+
+    low10_n = max(1, round(n_total_emp * 0.10))
+    low_users = emp_hrs.tail(low10_n).copy() if n_total_emp >= 5 else pd.DataFrame()
+    low_avg_days = low_users["hours"].mean() / 8 if not low_users.empty else 0
+    no_pto_count = len(no_pto)
+    no_pto_rate = no_pto_count / max(1, len(all_active_names)) * 100
+
+    br1, br2, br3 = st.columns(3)
+    with br1:
+        _pto_metric("No PTO Recorded", str(no_pto_count), "employees — 0 hrs")
+    with br2:
+        _pto_metric("Zero-PTO Rate", f"{no_pto_rate:.0f}%", "of active headcount")
+    with br3:
+        _pto_metric("Lowest 10% Avg", f"{low_avg_days:.1f} days", "potential burnout flag")
+
+    brl, brr = st.columns(2)
+    with brl:
+        section_label("No PTO — Burnout / Safety Risk")
+        if no_pto:
+            st.dataframe(pd.DataFrame({"Employee": no_pto}), use_container_width=True, hide_index=True)
+        else:
+            info_box("All active employees have PTO recorded. ✓")
+    with brr:
+        section_label(f"Lowest Usage — Bottom 10% ({low10_n} employees)")
+        if not low_users.empty:
+            low_users["Days"] = (low_users["hours"] / 8).round(1)
+            low_users = low_users.rename(columns={"employee": "Employee", "hours": "Hours"})
+            low_users["Hours"] = low_users["Hours"].round(1)
+            st.dataframe(low_users[["Employee", "Hours", "Days"]], use_container_width=True, hide_index=True)
+        else:
+            info_box("Not enough data for bottom 10% analysis.")
+
+    # ── Module 4: Pace & Seasonality ────────────────────────────────────────
+    divider()
+    section_label("PTO Pace & Seasonality")
+
+    from datetime import timedelta as _td
+    period_days = max(1, (date_end - date_start).days + 1)
+    annualized_total = total_days / period_days * 365
+    annualized_per_emp = avg_hours / 8 / period_days * 365 if unique_emps else 0
+
+    mid = date_start + _td(days=period_days // 2)
+    fh_hrs = df[df["start_date"].dt.date < mid]["hours"].sum()
+    sh_hrs = df[df["start_date"].dt.date >= mid]["hours"].sum()
+    fh_rate = fh_hrs / max(1, period_days // 2)
+    sh_rate = sh_hrs / max(1, period_days - period_days // 2)
+    delta_pct = (sh_rate - fh_rate) / fh_rate * 100 if fh_rate else 0
+    trend_arrow = "▲" if delta_pct > 5 else ("▼" if delta_pct < -5 else "→")
+
+    ps1, ps2, ps3 = st.columns(3)
+    with ps1:
+        _pto_metric("Annualized PTO Days", f"{annualized_total:,.0f}", "at current pace — total")
+    with ps2:
+        _pto_metric("Days / Employee (ann.)", f"{annualized_per_emp:.1f}", "per active employee")
+    with ps3:
+        _pto_metric("Usage Trend", f"{trend_arrow} {abs(delta_pct):.0f}%", "2nd vs 1st half of period")
+
+    _MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    df_season = df_all.copy()
+    if sel_building != "All":
+        df_season = df_season[df_season["building"] == sel_building]
+    df_season["cal_month"] = df_season["start_date"].dt.month
+    season = (
+        df_season.groupby("cal_month")["hours"].sum()
+        .reindex(range(1, 13)).fillna(0).reset_index()
+    )
+    season["label"] = [_MONTH_LABELS[m - 1] for m in season["cal_month"]]
+    season_fig = go.Figure(go.Bar(
+        x=season["label"],
+        y=season["hours"],
+        marker=dict(
+            color=season["hours"],
+            colorscale=[[0, "#0d1b2e"], [0.5, "#7b61ff"], [1, "#00d4ff"]],
+            line=dict(color="#060d1f", width=1),
+        ),
+        text=(season["hours"] / 8).round(0).astype(int).astype(str) + "d",
+        textposition="outside",
+        hovertemplate="<b>%{x}</b>: %{y:.0f} total hrs<extra></extra>",
+    ))
+    season_fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="#c8dff0", family="SF Mono, Fira Code, monospace"),
+        xaxis=dict(showgrid=False, color="#4a7fa5"),
+        yaxis=dict(showgrid=True, gridcolor="#0d1b2e", color="#4a7fa5", title="Total Hours"),
+        margin=dict(t=30, b=10, l=10, r=10),
+    )
+    st.plotly_chart(season_fig, use_container_width=True, key="pto_seasonality")
+
     # ── Export ──────────────────────────────────────────────────────────────
     divider()
     section_label("Export Filtered Data")
