@@ -1587,7 +1587,6 @@ def dashboard_page(conn, building: str) -> None:
                     st.session_state["repeat_offenders_building"] = pick
 
     if gt1_rows:
-    if gt1_rows:
         df_gt1 = pd.DataFrame(
             [
                 {
