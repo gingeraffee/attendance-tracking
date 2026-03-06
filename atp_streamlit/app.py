@@ -2541,6 +2541,24 @@ def pto_page(conn, building: str) -> None:
     else:
         active_count_in_scope = len(active_db)
 
+    # ── Load persisted PTO data from DB into session state if not already loaded ──
+    if "pto_df" not in st.session_state:
+        try:
+            db_rows = repo.load_pto_data(conn)
+            if db_rows:
+                import pandas as _pd
+                _df = _pd.DataFrame([dict(r) for r in db_rows])
+                _df["start_date"] = _pd.to_datetime(_df["start_date"], errors="coerce")
+                _df["end_date"] = _pd.to_datetime(_df["end_date"], errors="coerce")
+                _df["hours"] = _pd.to_numeric(_df["hours"], errors="coerce").fillna(0)
+                _df["building"] = _df["building"].astype(str).str.strip()
+                _df["pto_type"] = _df["pto_type"].astype(str).str.strip()
+                _df["employee"] = _df["last_name"].str.strip() + ", " + _df["first_name"].str.strip()
+                _df["days"] = (_df["hours"] / 8).round(2)
+                st.session_state["pto_df"] = _df
+        except Exception:
+            pass  # No persisted data or schema not yet migrated
+
     # ── CSV upload ──────────────────────────────────────────────────────────
     with st.expander("Upload PTO Data", expanded="pto_df" not in st.session_state):
         st.markdown(
@@ -2625,6 +2643,11 @@ def pto_page(conn, building: str) -> None:
                         raw = _normalize_and_filter(raw)
                         st.session_state["pto_df"] = raw
                         st.session_state.pop("pto_type_toggles", None)
+                        try:
+                            with db.tx(conn):
+                                repo.save_pto_data(conn, raw.to_dict("records"))
+                        except Exception as _save_err:
+                            st.warning(f"PTO data loaded but could not be saved to database: {_save_err}")
                         st.success(f"Loaded {len(raw):,} PTO records for active employees.")
                 elif "date" in cols:
                     # Legacy single-day format — convert to range format
@@ -2639,6 +2662,11 @@ def pto_page(conn, building: str) -> None:
                         raw = _normalize_and_filter(raw)
                         st.session_state["pto_df"] = raw
                         st.session_state.pop("pto_type_toggles", None)
+                        try:
+                            with db.tx(conn):
+                                repo.save_pto_data(conn, raw.to_dict("records"))
+                        except Exception as _save_err:
+                            st.warning(f"PTO data loaded but could not be saved to database: {_save_err}")
                         st.success(f"Loaded {len(raw):,} PTO records for active employees (legacy format).")
                 else:
                     st.error("CSV must contain either `start_date`/`end_date` columns or a `date` column.")
@@ -2648,6 +2676,17 @@ def pto_page(conn, building: str) -> None:
     if "pto_df" not in st.session_state:
         st.info("Upload a PTO CSV above to begin analysis.")
         return
+
+    # ── Clear PTO data button ────────────────────────────────────────────────
+    if st.button("Clear PTO Data", key="pto_clear_btn"):
+        st.session_state.pop("pto_df", None)
+        st.session_state.pop("pto_type_toggles", None)
+        try:
+            with db.tx(conn):
+                repo.clear_pto_data(conn)
+        except Exception:
+            pass
+        st.rerun()
 
     df_all: pd.DataFrame = st.session_state["pto_df"].copy()
 
