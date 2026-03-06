@@ -1850,6 +1850,7 @@ def dashboard_page(conn, building: str) -> None:
               FROM employees
              WHERE employee_id IN ({ph})
                AND rolloff_date IS NOT NULL
+               AND COALESCE(point_total, 0.0) >= 0.5
                AND (rolloff_date::date) >= (%s::date)
                AND (rolloff_date::date) <= (%s::date)
         """
@@ -1880,6 +1881,7 @@ def dashboard_page(conn, building: str) -> None:
               FROM employees
              WHERE employee_id IN ({ph})
                AND rolloff_date IS NOT NULL
+               AND COALESCE(point_total, 0.0) >= 0.5
                AND date(rolloff_date) >= date(?)
                AND date(rolloff_date) <= date(?)
         """
@@ -1915,6 +1917,7 @@ def dashboard_page(conn, building: str) -> None:
               FROM employees
              WHERE employee_id IN ({ph})
                AND rolloff_date IS NOT NULL
+               AND COALESCE(point_total, 0.0) >= 0.5
                AND (rolloff_date::date) >= (%s::date)
                AND (rolloff_date::date) <= (%s::date)
              ORDER BY (rolloff_date::date), lower(last_name), lower(first_name)
@@ -2094,6 +2097,7 @@ def dashboard_page(conn, building: str) -> None:
               FROM employees
              WHERE employee_id IN ({ph})
                AND rolloff_date IS NOT NULL
+               AND COALESCE(point_total, 0.0) >= 0.5
                AND date(rolloff_date) >= date(?)
                AND date(rolloff_date) <= date(?)
              ORDER BY date(rolloff_date), lower(last_name), lower(first_name)
@@ -4036,11 +4040,13 @@ def run_export_query(conn, export_type: str, building: str, start_date: date, en
             sql = """SELECT employee_id, last_name, first_name, COALESCE("Location",'') AS location,
                             point_total, rolloff_date
                        FROM employees WHERE rolloff_date IS NOT NULL
+                         AND COALESCE(point_total, 0.0) >= 0.5
                          AND (rolloff_date::date) BETWEEN (%s::date) AND (%s::date)"""
         else:
             sql = """SELECT employee_id, last_name, first_name, COALESCE("Location",'') AS location,
                             point_total, rolloff_date
                        FROM employees WHERE rolloff_date IS NOT NULL
+                         AND COALESCE(point_total, 0.0) >= 0.5
                          AND date(rolloff_date) BETWEEN date(?) AND date(?)"""
         params = [start_date.isoformat(), end_date.isoformat()]
 
