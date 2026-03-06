@@ -2519,6 +2519,14 @@ _PTO_PALETTE = [
     "#a9e34b", "#f06595", "#74c0fc", "#e599f7", "#63e6be",
 ]
 
+# Fixed colors for canonical PTO types — override palette-assigned colors
+_PTO_TYPE_COLORS = {
+    "Vacation": "#00d4ff",  # light blue
+    "Personal": "#7b61ff",  # purple
+    "Absence":  "#ff6b6b",  # red
+    "Other":    "#6b7280",  # dark gray
+}
+
 _PTO_SAMPLE_CSV = (
     "employee_id,last_name,first_name,building,pto_type,start_date,end_date,hours\n"
     "101,Smith,Jane,APIM,Vacation,2025-01-06,2025-01-10,40\n"
@@ -2826,7 +2834,7 @@ def pto_page(conn, building: str) -> None:
     chart_col, trend_col = st.columns(2)
 
     type_totals = df.groupby("pto_type")["hours"].sum().sort_values(ascending=False)
-    type_colors = {t: _PTO_PALETTE[i % len(_PTO_PALETTE)] for i, t in enumerate(type_totals.index)}
+    type_colors = {t: _PTO_TYPE_COLORS.get(t, _PTO_PALETTE[i % len(_PTO_PALETTE)]) for i, t in enumerate(type_totals.index)}
 
     # Top-5 + "Other" for the donut
     _top5 = type_totals.head(5)
@@ -2886,7 +2894,7 @@ def pto_page(conn, building: str) -> None:
             font=dict(color="#c8dff0", family="SF Mono, Fira Code, monospace"),
             xaxis=dict(showgrid=False, color="#4a7fa5"),
             yaxis=dict(showgrid=True, gridcolor="#0d1b2e", color="#4a7fa5"),
-            legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(size=11)),
+            legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(size=11, color="#4a7fa5")),
             margin=dict(t=10, b=10, l=10, r=10),
             hovermode="x unified",
         )
@@ -2961,7 +2969,7 @@ def pto_page(conn, building: str) -> None:
         df_dow["dow_label"] = df_dow["dow"].map(dow_map)
         dow_order = ["Mon", "Tue", "Wed", "Thu", "Fri"]
         _DOW_FOCUS = {"Personal", "Vacation", "Absence"}
-        _DOW_COLORS = {"Vacation": "#00d4ff", "Personal": "#ff6b6b", "Absence": "#ffa94d", "Other": "#4a7fa5"}
+        _DOW_COLORS = {"Vacation": "#00d4ff", "Personal": "#7b61ff", "Absence": "#ff6b6b", "Other": "#6b7280"}
         df_dow_filtered = df_dow[df_dow["dow_label"].isin(dow_order)].copy()
         df_dow_filtered["dow_category"] = df_dow_filtered["pto_type"].apply(
             lambda t: t if t in _DOW_FOCUS else "Other"
@@ -2997,7 +3005,7 @@ def pto_page(conn, building: str) -> None:
             font=dict(color="#c8dff0", family="SF Mono, Fira Code, monospace"),
             xaxis=dict(showgrid=False, color="#4a7fa5"),
             yaxis=dict(showgrid=True, gridcolor="#0d1b2e", color="#4a7fa5", title="Hours"),
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=10)),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=10, color="#4a7fa5")),
             margin=dict(t=30, b=10, l=10, r=10),
         )
         st.plotly_chart(dow_fig, use_container_width=True, key="pto_dow_bar")
@@ -3115,7 +3123,7 @@ def pto_page(conn, building: str) -> None:
                 font=dict(color="#c8dff0", family="SF Mono, Fira Code, monospace"),
                 xaxis=dict(showgrid=False, color="#4a7fa5"),
                 yaxis=dict(showgrid=True, gridcolor="#0d1b2e", color="#4a7fa5", title="Hours"),
-                legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(size=11)),
+                legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(size=11, color="#4a7fa5")),
                 margin=dict(t=10, b=10, l=10, r=10),
                 barmode="group",
             )
