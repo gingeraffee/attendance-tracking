@@ -1424,7 +1424,7 @@ def login_page() -> None:
         st.markdown(
             f"<div class='login-card'>"
             f"  <div class='login-card-header'>"
-            f"    <div class='login-system-tag'>Status|●Online</div>"
+            f"    <div class='login-system-tag'>Status: ●Online</div>"
             f"    {logo_tag}"
             f"    <div class='login-title'>Attendance Tracking</div>"
             f"  </div>"
@@ -1463,7 +1463,7 @@ def login_page() -> None:
         st.markdown("</div></div>", unsafe_allow_html=True)
 
         st.markdown(
-            "<div class='login-footer'>CLASSIFIED · AUTHORIZED PERSONNEL ONLY</div>",
+            "<div class='login-footer'>AUTHORIZED PERSONNEL ONLY</div>",
             unsafe_allow_html=True,
         )
 
