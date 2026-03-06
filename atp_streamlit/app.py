@@ -2797,17 +2797,6 @@ def pto_page(conn, building: str) -> None:
         st.info("Upload a PTO CSV above to begin analysis.")
         return
 
-    # ── Clear PTO data button ────────────────────────────────────────────────
-    if st.button("Clear PTO Data", key="pto_clear_btn"):
-        st.session_state.pop("pto_df", None)
-        st.session_state.pop("pto_type_toggles", None)
-        try:
-            with db.tx(conn):
-                repo.clear_pto_data(conn)
-        except Exception:
-            pass
-        st.rerun()
-
     df_all: pd.DataFrame = st.session_state["pto_df"].copy()
 
     # ── 30-day PTO utilization for the At a Glance bar ───────────────────────
@@ -3225,7 +3214,7 @@ def pto_page(conn, building: str) -> None:
     _pu_trace_cats: list[str] = []
     with pv_l:
         if not mcat.empty:
-            _CAT_CLR = {"Planned": "#00e5a0", "Unplanned": "#ff6b6b"}
+            _CAT_CLR = {"Planned": "#7C5CFC", "Unplanned": "#D97706"}
             pu_fig = go.Figure()
             for cat in ["Planned", "Unplanned"]:
                 sub = mcat[mcat["category"] == cat]
@@ -3519,6 +3508,15 @@ def pto_page(conn, building: str) -> None:
         "Clear the loaded CSV data to start over with a new file.</p>",
         unsafe_allow_html=True,
     )
+    if st.button("Clear PTO Data", key="pto_clear_btn"):
+        st.session_state.pop("pto_df", None)
+        st.session_state.pop("pto_type_toggles", None)
+        try:
+            with db.tx(conn):
+                repo.clear_pto_data(conn)
+        except Exception:
+            pass
+        st.rerun()
 
 # ── Employees ─────────────────────────────────────────────────────────────────
 def employees_page(conn, building: str) -> None:
