@@ -3148,7 +3148,7 @@ def pto_page(conn, building: str) -> None:
 
     cn1, cn2, cn3 = st.columns(3)
     with cn1:
-        _pto_metric("Employees with PTO", str(n_total_emp), "in selected period")
+        _pto_metric("Employees using PTO", str(n_total_emp), "in selected period")
     with cn2:
         _pto_metric(f"Top 10% ({top10_n} people)", f"{top10_pct_hrs:.0f}% of hours", "concentration signal")
     with cn3:
@@ -3270,13 +3270,13 @@ def pto_page(conn, building: str) -> None:
     brl, brr = st.columns(2)
 
     with brl:
-        section_label("No PTO — Burnout / Safety Risk")
+        section_label("No PTO Usage — Burnout Risk")
         if no_pto:
             st.dataframe(pd.DataFrame({"Employee": no_pto}), use_container_width=True, hide_index=True)
         else:
             info_box("All active employees have PTO recorded. ✓")
     with brr:
-        section_label(f"Lowest Usage — Bottom 10% ({low10_n} employees)")
+        section_label(f"Bottom 10% of Users({low10_n} employees)")
         if not low_users.empty:
             low_users["Days"] = (low_users["hours"] / 8).round(1)
             low_users = low_users.rename(columns={"employee": "Employee", "hours": "Hours"})
