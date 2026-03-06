@@ -2960,22 +2960,24 @@ def pto_page(conn, building: str) -> None:
         df_dow["dow"] = df_dow["start_date"].dt.dayofweek
         df_dow["dow_label"] = df_dow["dow"].map(dow_map)
         dow_order = ["Mon", "Tue", "Wed", "Thu", "Fri"]
+        _DOW_FOCUS = {"Personal", "Vacation", "Absence"}
+        _DOW_COLORS = {"Vacation": "#00d4ff", "Personal": "#ff6b6b", "Absence": "#ffa94d", "Other": "#4a7fa5"}
+        df_dow_filtered = df_dow[df_dow["dow_label"].isin(dow_order)].copy()
+        df_dow_filtered["dow_category"] = df_dow_filtered["pto_type"].apply(
+            lambda t: t if t in _DOW_FOCUS else "Other"
+        )
         dow_pivot = (
-            df_dow[df_dow["dow_label"].isin(dow_order)]
-            .groupby(["dow_label", "pto_type"])["hours"]
+            df_dow_filtered
+            .groupby(["dow_label", "dow_category"])["hours"]
             .sum()
             .reset_index()
         )
-        pto_type_order = (
-            dow_pivot.groupby("pto_type")["hours"]
-            .sum()
-            .sort_values(ascending=False)
-            .index.tolist()
-        )
+        dow_cat_order = ["Vacation", "Personal", "Absence", "Other"]
+        dow_cat_order = [c for c in dow_cat_order if c in dow_pivot["dow_category"].unique()]
         dow_traces = []
-        for pt in pto_type_order:
+        for pt in dow_cat_order:
             subset = (
-                dow_pivot[dow_pivot["pto_type"] == pt]
+                dow_pivot[dow_pivot["dow_category"] == pt]
                 .set_index("dow_label")
                 .reindex(dow_order)["hours"]
                 .fillna(0)
@@ -2984,7 +2986,7 @@ def pto_page(conn, building: str) -> None:
                 name=pt,
                 x=dow_order,
                 y=subset.values,
-                marker=dict(color=type_colors.get(pt, "#7b61ff"), line=dict(color="#060d1f", width=1)),
+                marker=dict(color=_DOW_COLORS.get(pt, "#7b61ff"), line=dict(color="#060d1f", width=1)),
                 hovertemplate=f"<b>%{{x}}</b> — {pt}: %{{y:.0f}} hrs<extra></extra>",
             ))
         dow_fig = go.Figure(data=dow_traces)
@@ -3041,8 +3043,8 @@ def pto_page(conn, building: str) -> None:
     divider()
     section_header("Planned vs Unplanned PTO")
 
-    _PLANNED_TYPES   = {"vacation", "personal", "floating holiday", "reward pto"}
-    _UNPLANNED_TYPES = {"absence", "absence (sick)", "absence (covid)", "long term sick leave"}
+    _PLANNED_TYPES   = {"vacation", "floating holiday", "reward pto"}
+    _UNPLANNED_TYPES = {"personal", "absence", "absence (sick)", "absence (covid)", "long term sick leave"}
     _PROTECTED_TYPES = {"jury duty", "bereavement", "fmla"}
 
     def _classify_pto(t: str) -> str:
