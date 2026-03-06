@@ -2841,7 +2841,7 @@ def pto_page(conn, building: str) -> None:
     donut_colors = [type_colors.get(t, "#4a5568") for t in donut_totals.index]
 
     with chart_col:
-        section_header("PTO by Type — click a slice to see employees")
+        section_header("PTO by Type")
         donut_fig = go.Figure(go.Pie(
             labels=donut_totals.index.tolist(),
             values=donut_totals.values.tolist(),
@@ -2933,7 +2933,7 @@ def pto_page(conn, building: str) -> None:
     bc1, bc2 = st.columns(2)
 
     with bc1:
-        section_header("PTO Hours by Building")
+        section_header("PTO Hours by Location")
         bldg_totals = df.groupby("building")["hours"].sum().sort_values(ascending=False).reset_index()
         bar_fig = go.Figure(go.Bar(
             x=bldg_totals["building"],
@@ -2954,7 +2954,7 @@ def pto_page(conn, building: str) -> None:
         st.plotly_chart(bar_fig, use_container_width=True, key="pto_bldg_bar")
 
     with bc2:
-        section_header("Most Popular Days of Week for PTO")
+        section_header("Day of the Week PTO Trends")
         dow_map = {0: "Mon", 1: "Tue", 2: "Wed", 3: "Thu", 4: "Fri", 5: "Sat", 6: "Sun"}
         df_dow = df.copy()
         df_dow["dow"] = df_dow["start_date"].dt.dayofweek
