@@ -368,6 +368,50 @@ def report_points_last_30_days(conn, as_of: date | None = None):
     return _fetchall(conn, sql, (start.isoformat(),))
 
 
+def save_pto_data(conn, rows: list) -> None:
+    """Replace all stored PTO data with the provided rows (list of dicts)."""
+    pg = _is_pg(conn)
+    if pg:
+        _exec(conn, "TRUNCATE pto_uploads;")
+    else:
+        _exec(conn, "DELETE FROM pto_uploads;")
+    for row in rows:
+        _exec(
+            conn,
+            """
+            INSERT INTO pto_uploads (employee_id, last_name, first_name, building, pto_type, start_date, end_date, hours)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+            """,
+            (
+                row.get("employee_id"),
+                str(row.get("last_name", "")).strip(),
+                str(row.get("first_name", "")).strip(),
+                str(row.get("building", "")).strip(),
+                str(row.get("pto_type", "")).strip(),
+                str(row.get("start_date", ""))[:10],
+                str(row.get("end_date", ""))[:10],
+                float(row.get("hours", 0) or 0),
+            ),
+        )
+
+
+def load_pto_data(conn) -> list:
+    """Return all stored PTO rows as a list of dicts. Empty list if none saved."""
+    return _fetchall(
+        conn,
+        """
+        SELECT employee_id, last_name, first_name, building, pto_type, start_date, end_date, hours
+        FROM pto_uploads
+        ORDER BY start_date, last_name, first_name;
+        """,
+    )
+
+
+def clear_pto_data(conn) -> None:
+    """Delete all stored PTO data."""
+    _exec(conn, "DELETE FROM pto_uploads;")
+
+
 def report_full_year_perfect_attendance(conn, year: int):
     start = date(year, 1, 1).isoformat()
     end = date(year + 1, 1, 1).isoformat()

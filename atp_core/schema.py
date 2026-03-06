@@ -40,11 +40,27 @@ def ensure_schema(conn):
         );
         """)
 
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS pto_uploads (
+            id BIGSERIAL PRIMARY KEY,
+            employee_id BIGINT,
+            last_name TEXT NOT NULL,
+            first_name TEXT NOT NULL,
+            building TEXT,
+            pto_type TEXT,
+            start_date TEXT NOT NULL,
+            end_date TEXT NOT NULL,
+            hours DOUBLE PRECISION DEFAULT 0.0
+        );
+        """)
+
         # Indexes (idempotent)
         cur.execute("CREATE INDEX IF NOT EXISTS idx_emp_name ON employees(last_name, first_name);")
         cur.execute('CREATE INDEX IF NOT EXISTS idx_emp_loc_name ON employees("Location", last_name, first_name);')
         cur.execute("CREATE INDEX IF NOT EXISTS idx_points_emp ON points_history(employee_id);")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_points_date ON points_history(point_date);")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_pto_emp ON pto_uploads(employee_id);")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_pto_dates ON pto_uploads(start_date, end_date);")
 
         conn.commit()
         return
@@ -86,10 +102,26 @@ def ensure_schema(conn):
     if "Location" not in cols:
         cur.execute('ALTER TABLE employees ADD COLUMN "Location" TEXT;')
 
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS pto_uploads (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_id INTEGER,
+            last_name TEXT NOT NULL,
+            first_name TEXT NOT NULL,
+            building TEXT,
+            pto_type TEXT,
+            start_date TEXT NOT NULL,
+            end_date TEXT NOT NULL,
+            hours REAL DEFAULT 0.0
+        );
+    """)
+
     # Indexes
     cur.execute("CREATE INDEX IF NOT EXISTS idx_emp_name ON employees(last_name, first_name);")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_points_emp ON points_history(employee_id);")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_points_date ON points_history(point_date);")
     cur.execute('CREATE INDEX IF NOT EXISTS idx_emp_loc_name ON employees("Location", last_name, first_name);')
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_pto_emp ON pto_uploads(employee_id);")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_pto_dates ON pto_uploads(start_date, end_date);")
 
     conn.commit()
