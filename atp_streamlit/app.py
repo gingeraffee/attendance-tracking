@@ -3251,6 +3251,8 @@ def pto_page(conn, building: str) -> None:
         _pto_metric("Lowest 10% Avg", f"{low_avg_days:.1f} days", "potential burnout flag")
 
     brl, brr = st.columns(2)
+    divider()
+    section_label("0% PTO Usage")
     with brl:
         section_label("No PTO — Burnout / Safety Risk")
         if no_pto:
