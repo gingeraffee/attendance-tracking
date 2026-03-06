@@ -2797,7 +2797,7 @@ def pto_page(conn, building: str) -> None:
     donut_colors = [type_colors.get(t, "#4a5568") for t in donut_totals.index]
 
     with chart_col:
-        section_label("PTO by Type")
+        section_label("PTO by Type — click a slice to see employees")
         donut_fig = go.Figure(go.Pie(
             labels=donut_totals.index.tolist(),
             values=donut_totals.values.tolist(),
@@ -2812,8 +2812,15 @@ def pto_page(conn, building: str) -> None:
             showlegend=False,
             margin=dict(t=10, b=10, l=10, r=10),
             font=dict(color="#c8dff0", family="SF Mono, Fira Code, monospace"),
+            # Required: makes single clicks on pie slices fire selection events
+            clickmode="event+select",
         )
-        st.plotly_chart(donut_fig, use_container_width=True, key="pto_donut")
+        donut_event = st.plotly_chart(
+            donut_fig,
+            use_container_width=True,
+            on_select="rerun",
+            key="pto_donut",
+        )
 
     with trend_col:
         section_label("Monthly PTO Trend (hours)")
@@ -2841,41 +2848,41 @@ def pto_page(conn, building: str) -> None:
         )
         st.plotly_chart(trend_fig, use_container_width=True, key="pto_trend")
 
-    # ── Drill-down: select a PTO type to see which employees used it ─────────
-    divider()
-    drill_options = ["— Select a PTO type to see employees —"] + donut_totals.index.tolist()
-    sel_type = st.selectbox(
-        "Drill into PTO type",
-        drill_options,
-        key="pto_drill_type",
-        label_visibility="collapsed",
-    )
-    if sel_type != drill_options[0]:
-        section_label(f"Employees — {sel_type}")
-        if sel_type == "Other":
-            drill_src = df[~df["pto_type"].isin(_top5_types)].copy()
-        else:
-            drill_src = df[df["pto_type"] == sel_type].copy()
+    # ── Donut drill-down ────────────────────────────────────────────────────
+    selected_points = donut_event.selection.get("points", []) if donut_event.selection else []
+    if selected_points:
+        sel_type = selected_points[0].get("label")
+        if sel_type:
+            divider()
+            section_label(f"Employees — {sel_type}")
+            if sel_type == "Other":
+                drill_src = df[~df["pto_type"].isin(_top5_types)].copy()
+            else:
+                drill_src = df[df["pto_type"] == sel_type].copy()
 
-        drill = (
-            drill_src.groupby(["employee", "pto_type", "building"])
-            .agg(
-                hours_used=("hours", "sum"),
-                days_impacted=("hours", "count"),
+            # Aggregate per employee + PTO type:
+            #   Hours Used   = sum of all hours for that employee+type
+            #   Days Impacted = count of individual PTO records (separate usage events)
+            drill = (
+                drill_src.groupby(["employee", "pto_type", "building"])
+                .agg(
+                    hours_used=("hours", "sum"),
+                    days_impacted=("hours", "count"),
+                )
+                .reset_index()
+                .sort_values("hours_used", ascending=False)
+                .rename(columns={
+                    "employee":      "Employee",
+                    "pto_type":      "PTO Type",
+                    "building":      "Building",
+                    "hours_used":    "Hours Used",
+                    "days_impacted": "Days Impacted",
+                })
             )
-            .reset_index()
-            .sort_values("hours_used", ascending=False)
-            .rename(columns={
-                "employee":      "Employee",
-                "pto_type":      "PTO Type",
-                "building":      "Building",
-                "hours_used":    "Hours Used",
-                "days_impacted": "Days Impacted",
-            })
-        )
-        drill["Hours Used"] = drill["Hours Used"].round(1)
-        col_order = ["Employee", "PTO Type", "Hours Used", "Days Impacted", "Building"]
-        st.dataframe(drill[col_order], use_container_width=True, hide_index=True)
+            drill["Hours Used"] = drill["Hours Used"].round(1)
+
+            col_order = ["Employee", "PTO Type", "Hours Used", "Days Impacted", "Building"]
+            st.dataframe(drill[col_order], use_container_width=True, hide_index=True)
 
     # ── Building comparison ─────────────────────────────────────────────────
     divider()
