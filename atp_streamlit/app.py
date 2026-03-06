@@ -484,25 +484,25 @@ p, label { color: var(--muted) !important; }
 /* ── Employee spotlight card ── */
 section[data-testid="stSidebar"] .sidebar-employee-card {
     margin-top: 1rem; padding: 1rem .9rem .85rem;
-    border-radius: 14px; border: 1px solid rgba(255,48,80,.16);
+    border-radius: 14px; border: 1px solid rgba(0,200,240,.26);
     background: rgba(4,6,18,0.92); backdrop-filter: blur(14px);
     box-shadow: 0 12px 36px rgba(0,0,0,.65), inset 0 1px 0 rgba(255,255,255,.025);
     position: relative; overflow: hidden;
 }
 section[data-testid="stSidebar"] .sidebar-employee-card::before {
     content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
-    background: linear-gradient(90deg, #ff3050, #cc1228, #ff3050);
+    background: linear-gradient(90deg, #00c8f0, #0078ff, #00c8f0);
     animation: card-top-border-glow 3s ease-in-out infinite;
 }
 @keyframes card-top-border-glow {
     0%,100% { opacity: .75; }
-    50% { opacity: 1; box-shadow: 0 0 16px rgba(255,48,80,.55); }
+    50% { opacity: 1; box-shadow: 0 0 16px rgba(0,200,240,.55); }
 }
 section[data-testid="stSidebar"] .sidebar-employee-title {
     font-size: .65rem; letter-spacing: .18em; text-transform: uppercase; font-weight: 700;
-    color: #ff3050 !important; -webkit-text-fill-color: #ff3050 !important;
+    color: var(--cyan) !important; -webkit-text-fill-color: var(--cyan) !important;
     font-family: 'Space Mono', monospace !important;
-    text-shadow: 0 0 10px rgba(255,48,80,.40); margin-bottom: .42rem;
+    text-shadow: 0 0 10px rgba(0,200,240,.45); margin-bottom: .42rem;
 }
 section[data-testid="stSidebar"] .sidebar-employee-name {
     font-size: 1.26rem; font-weight: 700;
@@ -528,8 +528,8 @@ section[data-testid="stSidebar"] .sidebar-employee-item .value {
     letter-spacing: -.01em;
 }
 section[data-testid="stSidebar"] .sidebar-employee-item .value.highlight {
-    color: #ff3050 !important; -webkit-text-fill-color: #ff3050 !important;
-    font-weight: 800; text-shadow: 0 0 8px rgba(255,48,80,.32);
+    color: var(--cyan) !important; -webkit-text-fill-color: var(--cyan) !important;
+    font-weight: 800; text-shadow: 0 0 8px rgba(0,200,240,.32);
 }
 
 /* ── Live dot ── */
@@ -1780,8 +1780,8 @@ def selected_employee_sidebar(conn, employee_id: int | None) -> None:
         """<style>
         .st-key-spotlight_add_point button {
             background: transparent !important;
-            border: 1px solid rgba(255,61,86,.35) !important;
-            color: rgba(255,61,86,.85) !important;
+            border: 1px solid rgba(0,200,240,.45) !important;
+            color: rgba(0,200,240,.95) !important;
             font-size: .6rem !important;
             padding: .18rem .5rem !important;
             border-radius: 6px !important;
@@ -1793,10 +1793,10 @@ def selected_employee_sidebar(conn, employee_id: int | None) -> None:
             transition: all .15s ease !important;
         }
         .st-key-spotlight_add_point button:hover {
-            background: rgba(255,61,86,.08) !important;
-            border-color: rgba(255,61,86,.8) !important;
-            color: #ff3d56 !important;
-            box-shadow: 0 0 10px rgba(255,61,86,.25) !important;
+            background: rgba(0,200,240,.10) !important;
+            border-color: rgba(0,200,240,.9) !important;
+            color: #00c8f0 !important;
+            box-shadow: 0 0 10px rgba(0,200,240,.28) !important;
         }
         </style>""",
         unsafe_allow_html=True,
