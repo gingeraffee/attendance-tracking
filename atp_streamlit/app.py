@@ -415,6 +415,19 @@ p, label { color: var(--muted) !important; }
     text-shadow: 0 0 16px rgba(0,200,240,.38);
 }
 
+/* ── Section header (prominent section titles) ── */
+.section-header {
+    font-size: .82rem; font-weight: 700; letter-spacing: .13em;
+    text-transform: uppercase; color: var(--cyan);
+    margin: 0 0 .85rem 0;
+    font-family: 'Space Mono', monospace;
+    padding: .45rem .8rem;
+    border-left: 3px solid var(--cyan);
+    background: rgba(0,200,240,.05);
+    border-radius: 0 6px 6px 0;
+    text-shadow: 0 0 22px rgba(0,200,240,.50);
+}
+
 /* ── Divider ── */
 .divider {
     height: 1px;
@@ -763,6 +776,10 @@ def page_heading(title: str, sub: str) -> None:
 
 def section_label(text: str) -> None:
     st.markdown(f"<div class='section-label'>{text}</div>", unsafe_allow_html=True)
+
+
+def section_header(text: str) -> None:
+    st.markdown(f"<div class='section-header'>{text}</div>", unsafe_allow_html=True)
 
 
 def divider() -> None:
@@ -2770,7 +2787,7 @@ def pto_page(conn, building: str) -> None:
 
     # ── KPI tiles ───────────────────────────────────────────────────────────
     divider()
-    section_label("Summary")
+    section_header("Summary")
     k1, k2, k3, k4 = st.columns(4)
     total_hours = df["hours"].sum()
     # Count distinct calendar dates where ANY employee had PTO.
@@ -2824,7 +2841,7 @@ def pto_page(conn, building: str) -> None:
     donut_colors = [type_colors.get(t, "#4a5568") for t in donut_totals.index]
 
     with chart_col:
-        section_label("PTO by Type — click a slice to see employees")
+        section_header("PTO by Type — click a slice to see employees")
         donut_fig = go.Figure(go.Pie(
             labels=donut_totals.index.tolist(),
             values=donut_totals.values.tolist(),
@@ -2850,7 +2867,7 @@ def pto_page(conn, building: str) -> None:
         )
 
     with trend_col:
-        section_label("Monthly PTO Trend (hours)")
+        section_header("Monthly PTO Trend (hours)")
         df_trend = df.copy()
         df_trend["month"] = df_trend["start_date"].dt.to_period("M").dt.to_timestamp()
         monthly = df_trend.groupby(["month", "pto_type"])["hours"].sum().reset_index()
@@ -2916,7 +2933,7 @@ def pto_page(conn, building: str) -> None:
     bc1, bc2 = st.columns(2)
 
     with bc1:
-        section_label("PTO Hours by Building")
+        section_header("PTO Hours by Building")
         bldg_totals = df.groupby("building")["hours"].sum().sort_values(ascending=False).reset_index()
         bar_fig = go.Figure(go.Bar(
             x=bldg_totals["building"],
@@ -2937,7 +2954,7 @@ def pto_page(conn, building: str) -> None:
         st.plotly_chart(bar_fig, use_container_width=True, key="pto_bldg_bar")
 
     with bc2:
-        section_label("Most Popular Days of Week for PTO")
+        section_header("Most Popular Days of Week for PTO")
         dow_map = {0: "Mon", 1: "Tue", 2: "Wed", 3: "Thu", 4: "Fri", 5: "Sat", 6: "Sun"}
         df_dow = df.copy()
         df_dow["dow"] = df_dow["start_date"].dt.dayofweek
@@ -2972,7 +2989,7 @@ def pto_page(conn, building: str) -> None:
     tu1, tu2 = st.columns([3, 2])
 
     with tu1:
-        section_label("Top PTO Users")
+        section_header("Top PTO Users")
         top_users = (
             df.groupby(["employee", "building"])["hours"]
             .sum()
@@ -2986,7 +3003,7 @@ def pto_page(conn, building: str) -> None:
         st.dataframe(top_users[["Employee", "Building", "Days", "Hours"]], use_container_width=True, hide_index=True)
 
     with tu2:
-        section_label("Zero PTO — No Usage Recorded")
+        section_header("Zero PTO — No Usage Recorded")
         emps_with_pto = set(df["employee"].unique())
         # Use the DB roster as the reference — not the CSV
         scoped_active = [
@@ -3006,7 +3023,7 @@ def pto_page(conn, building: str) -> None:
 
     # ── Module 1: Planned vs Unplanned ──────────────────────────────────────
     divider()
-    section_label("Planned vs Unplanned PTO")
+    section_header("Planned vs Unplanned PTO")
 
     _PLANNED_TYPES   = {"vacation", "personal", "floating holiday", "reward pto"}
     _UNPLANNED_TYPES = {"absence", "absence (sick)", "absence (covid)", "long term sick leave"}
@@ -3120,7 +3137,7 @@ def pto_page(conn, building: str) -> None:
 
     # ── Module 2: Concentration ──────────────────────────────────────
     divider()
-    section_label("PTO Concentration \u2014 Who's Driving Usage?")
+    section_header("PTO Concentration \u2014 Who's Driving Usage?")
 
     emp_hrs = df.groupby("employee")["hours"].sum().sort_values(ascending=False).reset_index()
     n_total_emp = len(emp_hrs)
@@ -3234,7 +3251,7 @@ def pto_page(conn, building: str) -> None:
 
     # ── Module 3: Burnout & Retention Risk ──────────────────────────────────
     divider()
-    section_label("Burnout & Retention Risk")
+    section_header("Burnout & Retention Risk")
 
     low10_n = max(1, round(n_total_emp * 0.10))
     low_users = emp_hrs.tail(low10_n).copy() if n_total_emp >= 5 else pd.DataFrame()
@@ -3269,7 +3286,7 @@ def pto_page(conn, building: str) -> None:
 
     # ── Module 4: Pace & Seasonality ────────────────────────────────────────
     divider()
-    section_label("PTO Pace & Seasonality")
+    section_header("PTO Pace & Seasonality")
 
     from datetime import timedelta as _td
     period_days = max(1, (date_end - date_start).days + 1)
