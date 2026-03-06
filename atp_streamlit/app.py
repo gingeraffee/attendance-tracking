@@ -766,10 +766,23 @@ def warn_box(msg: str) -> None:
     st.markdown(f"<div class='warn-box'>{msg}</div>", unsafe_allow_html=True)
 
 
-def page_heading(title: str, sub: str) -> None:
+def page_heading(title: str, sub: str, accent_override: str | None = None) -> None:
+    """Render the page title block.
+
+    accent_override: optional CSS color string that replaces the default
+    cyan->blue->purple gradient on the accent bar (e.g. '#ff3050' for urgent).
+    """
+    if accent_override:
+        bar_style = (
+            f"background:{accent_override};"
+            f"box-shadow:0 0 14px {accent_override};"
+        )
+    else:
+        bar_style = ""
     st.markdown(
         f"<div class='page-heading'><h1>{title}</h1>"
-        f"<div class='accent-bar'></div><p>{sub}</p></div>",
+        f"<div class='accent-bar' style='{bar_style}'></div>"
+        f"<p>{sub}</p></div>",
         unsafe_allow_html=True,
     )
 
@@ -958,8 +971,57 @@ def render_hr_live_monitor(
     )
 
 
-def render_tech_hud(building: str) -> None:
-    """Live HUD status bar — ticking clock, building, uptime, and animated indicators."""
+def render_tech_hud(
+    building: str,
+    *,
+    rolloffs_due_7d: int = 0,
+    at_risk_5plus: int = 0,
+    total_employees: int = 1,
+) -> None:
+    """Live HUD status bar — ticking clock, building, uptime, and reactive indicators.
+
+    ACTIVITY label:
+      Calm     — no roll-offs due in 7 days
+      Moderate — 1–2 roll-offs due in 7 days
+      Urgent   — 3+ roll-offs due in 7 days
+
+    Bar accent color driven by % of employees at 5+ points:
+      Green  — < 10 % at risk
+      Amber  — 10–24 %
+      Red    — 25 %+
+    """
+    # ── Activity level from roll-off urgency ──────────────────────────────────
+    if rolloffs_due_7d == 0:
+        activity_label = "CALM"
+        activity_color = "#00e896"   # green
+        activity_glow  = "rgba(0,232,150,.70)"
+        bar_speed      = "1.8s"
+    elif rolloffs_due_7d <= 2:
+        activity_label = "MODERATE"
+        activity_color = "#f0a800"   # amber
+        activity_glow  = "rgba(240,168,0,.70)"
+        bar_speed      = "1.1s"
+    else:
+        activity_label = "URGENT"
+        activity_color = "#ff3050"   # red
+        activity_glow  = "rgba(255,48,80,.80)"
+        bar_speed      = "0.55s"
+
+    # ── Accent / border color from % of employees at 5+ pts ──────────────────
+    pct_at_risk = (at_risk_5plus / max(total_employees, 1)) * 100.0
+    if pct_at_risk < 10.0:
+        risk_color     = "rgba(0,200,240,.30)"    # cyan (normal)
+        risk_glow_top  = "rgba(0,200,240,.30)"
+        risk_border    = "rgba(0,120,255,.22)"
+    elif pct_at_risk < 25.0:
+        risk_color     = "rgba(240,168,0,.55)"    # amber
+        risk_glow_top  = "rgba(240,168,0,.45)"
+        risk_border    = "rgba(240,168,0,.38)"
+    else:
+        risk_color     = "rgba(255,48,80,.60)"    # red
+        risk_glow_top  = "rgba(255,48,80,.50)"
+        risk_border    = "rgba(255,48,80,.45)"
+
     components.html(
         f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
@@ -974,7 +1036,7 @@ body {{
   display: flex; justify-content: space-between; align-items: center;
   padding: 7px 14px;
   background: rgba(2,8,22,0.94);
-  border: 1px solid rgba(0,120,255,.22);
+  border: 1px solid {risk_border};
   border-radius: 10px;
   font-size: 10.5px; letter-spacing: .08em; color: #2d4860;
   box-shadow: 0 0 0 1px rgba(0,200,240,.04), 0 4px 24px rgba(0,0,0,.60),
@@ -982,11 +1044,11 @@ body {{
   position: relative; overflow: hidden;
 }}
 
-/* Horizontal scan sweep across the whole HUD */
+/* Horizontal scan sweep */
 #hud::after {{
   content: '';
   position: absolute; top: 0; left: -80%; width: 40%; height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(0,200,240,.04), transparent);
+  background: linear-gradient(90deg, transparent, {risk_color}, transparent);
   animation: hud-sweep 7s linear infinite;
   pointer-events: none;
 }}
@@ -995,11 +1057,11 @@ body {{
   100% {{ left: 160%; }}
 }}
 
-/* Top border accent */
+/* Top border accent — color matches risk level */
 #hud::before {{
   content: '';
   position: absolute; top: 0; left: 0; right: 0; height: 1px;
-  background: linear-gradient(90deg, transparent 5%, rgba(0,200,240,.30) 50%, transparent 95%);
+  background: linear-gradient(90deg, transparent 5%, {risk_glow_top} 50%, transparent 95%);
   animation: hud-top 5s ease-in-out infinite;
 }}
 @keyframes hud-top {{
@@ -1009,7 +1071,6 @@ body {{
 
 .hud-left  {{ display:flex; align-items:center; gap:0; flex-wrap:nowrap; }}
 .hud-right {{ display:flex; align-items:center; gap:0; flex-wrap:nowrap; }}
-
 .seg {{ white-space:nowrap; }}
 
 /* Online status dot */
@@ -1024,23 +1085,26 @@ body {{
   50%      {{ opacity:.45; box-shadow:0 0 12px rgba(0,232,150,.95); }}
 }}
 
-/* Activity bars (3 mini bars) */
-.bars {{ display:inline-flex; align-items:flex-end; gap:2px; height:12px; margin:0 5px; vertical-align:middle; }}
-.bar  {{ width:3px; background:rgba(0,200,240,.35); border-radius:1px; }}
-.bar:nth-child(1) {{ animation:bar-bounce 1.4s ease-in-out infinite 0.0s; }}
-.bar:nth-child(2) {{ animation:bar-bounce 1.4s ease-in-out infinite 0.3s; }}
-.bar:nth-child(3) {{ animation:bar-bounce 1.4s ease-in-out infinite 0.6s; }}
+/* Activity bars — speed + color driven by roll-off urgency */
+.bars {{ display:inline-flex; align-items:flex-end; gap:2px; height:12px; margin:0 4px; vertical-align:middle; }}
+.bar  {{ width:3px; border-radius:1px; }}
+.bar:nth-child(1) {{ animation:bar-bounce {bar_speed} ease-in-out infinite 0.0s; }}
+.bar:nth-child(2) {{ animation:bar-bounce {bar_speed} ease-in-out infinite 0.15s; }}
+.bar:nth-child(3) {{ animation:bar-bounce {bar_speed} ease-in-out infinite 0.30s; }}
 @keyframes bar-bounce {{
-  0%,100% {{ height:3px;  background:rgba(0,200,240,.25); }}
-  50%      {{ height:11px; background:rgba(0,200,240,.75); box-shadow:0 0 5px rgba(0,200,240,.40); }}
+  0%,100% {{ height:3px;  background:{activity_color}; opacity:.35; }}
+  50%      {{ height:11px; background:{activity_color}; opacity:1; box-shadow:0 0 6px {activity_glow}; }}
 }}
 
-/* Signal strength (3 dots) */
+/* Activity label color */
+.activity-val {{ color:{activity_color}; font-weight:700; }}
+
+/* Signal strength dots */
 .signal {{ display:inline-flex; align-items:center; gap:3px; margin:0 4px; vertical-align:middle; }}
 .sig-dot {{ width:4px; height:4px; border-radius:50%; }}
-.sig-dot:nth-child(1) {{ background:rgba(0,200,240,.90); box-shadow:0 0 4px rgba(0,200,240,.50); animation:sig-pulse 2.4s ease-in-out infinite 0.0s; }}
-.sig-dot:nth-child(2) {{ background:rgba(0,200,240,.65); animation:sig-pulse 2.4s ease-in-out infinite 0.6s; }}
-.sig-dot:nth-child(3) {{ background:rgba(0,200,240,.35); animation:sig-pulse 2.4s ease-in-out infinite 1.2s; }}
+.sig-dot:nth-child(1) {{ background:{risk_color}; box-shadow:0 0 4px {risk_color}; animation:sig-pulse 2.4s ease-in-out infinite 0.0s; }}
+.sig-dot:nth-child(2) {{ background:{risk_color}; animation:sig-pulse 2.4s ease-in-out infinite 0.6s; opacity:.65; }}
+.sig-dot:nth-child(3) {{ background:{risk_color}; animation:sig-pulse 2.4s ease-in-out infinite 1.2s; opacity:.35; }}
 @keyframes sig-pulse {{ 0%,100%{{opacity:.50;}} 50%{{opacity:1;}} }}
 
 .val    {{ color:#4a88c0; }}
@@ -1059,7 +1123,7 @@ body {{
     <span class="sep">|</span>
     <span class="seg">
       <span class="bars"><span class="bar"></span><span class="bar"></span><span class="bar"></span></span>
-      ACTIVITY
+      ACTIVITY&nbsp;<span class="activity-val">{activity_label}</span>
     </span>
     <span class="sep">|</span>
     <span class="seg">BUILDING&nbsp;<span class="val">{building.upper()}</span></span>
@@ -1556,11 +1620,9 @@ def load_employees(conn, q: str = "", building: str = "All") -> list[dict]:
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 def dashboard_page(conn, building: str) -> None:
-    page_heading(
-        '<span class="live-dot"></span>Dashboard',
-        "Real-time overview of attendance activity, thresholds, and upcoming actions.",
-    )
-    render_tech_hud(building)
+    # Placeholders rendered now, filled in after data is loaded below
+    _heading_placeholder = st.empty()
+    _hud_placeholder     = st.empty()
 
     today = date.today()
     in_30_days = today + timedelta(days=30)
@@ -2027,6 +2089,32 @@ def dashboard_page(conn, building: str) -> None:
         for key, fn in bucket_defs.items()
     }
 
+    # ── Reactive heading + HUD — filled now that we have real data ────────────
+    at_risk_5plus = bucket_counts.get("5-6", 0) + bucket_counts.get("7", 0)
+    total_active  = len(emp_detail_rows)
+    pct_at_risk   = (at_risk_5plus / max(total_active, 1)) * 100.0
+
+    if pct_at_risk < 10.0:
+        accent_color = None          # default cyan gradient
+    elif pct_at_risk < 25.0:
+        accent_color = "#f0a800"     # amber
+    else:
+        accent_color = "#ff3050"     # red
+
+    with _heading_placeholder.container():
+        page_heading(
+            '<span class="live-dot"></span>Dashboard',
+            "Real-time overview of attendance activity, thresholds, and upcoming actions.",
+            accent_override=accent_color,
+        )
+    with _hud_placeholder.container():
+        render_tech_hud(
+            building,
+            rolloffs_due_7d=rolloffs_due_7d,
+            at_risk_5plus=at_risk_5plus,
+            total_employees=total_active,
+        )
+
 
     st.markdown(
         """<style>
@@ -2264,118 +2352,6 @@ def dashboard_page(conn, building: str) -> None:
         )
 
     st.dataframe(pd.DataFrame(snap_rows), use_container_width=True, hide_index=True)
-
-    divider()
-    section_label("Perfect Attendance Tracker — 0.0 Positive Points YTD")
-
-    ytd_start = date(today.year, 1, 1).isoformat()
-
-    # Active employees with NO positive-point entries since Jan 1 of this year.
-    # Roll-off entries (points <= 0) are ignored — only positive values disqualify.
-    if is_pg(conn):
-        sql_zero_ytd = """
-            SELECT e.employee_id,
-                   e.last_name,
-                   e.first_name,
-                   COALESCE(e."Location", '') AS building
-              FROM employees e
-             WHERE COALESCE(e.is_active, 1) = 1
-               AND NOT EXISTS (
-                   SELECT 1
-                     FROM points_history ph
-                    WHERE ph.employee_id = e.employee_id
-                      AND (ph.point_date::date) >= (%s::date)
-                      AND COALESCE(ph.points, 0.0) > 0.0
-               )
-             ORDER BY COALESCE(e."Location", ''), lower(e.last_name), lower(e.first_name)
-        """
-    else:
-        sql_zero_ytd = """
-            SELECT e.employee_id,
-                   e.last_name,
-                   e.first_name,
-                   COALESCE(e."Location", '') AS building
-              FROM employees e
-             WHERE COALESCE(e.is_active, 1) = 1
-               AND NOT EXISTS (
-                   SELECT 1
-                     FROM points_history ph
-                    WHERE ph.employee_id = e.employee_id
-                      AND date(ph.point_date) >= date(?)
-                      AND COALESCE(ph.points, 0.0) > 0.0
-               )
-             ORDER BY COALESCE(e."Location", ''), lower(e.last_name), lower(e.first_name)
-        """
-
-    zero_ytd_rows = [dict(r) for r in fetchall(conn, sql_zero_ytd, (ytd_start,))]
-
-    # Respect the global building filter
-    if building and building != "All":
-        zero_ytd_rows = [r for r in zero_ytd_rows if r.get("building") == building]
-
-    total_zero = len(zero_ytd_rows)
-    days_left_in_year = (date(today.year, 12, 31) - today).days
-
-    col_z1, col_z2, col_z3 = st.columns([2.5, 1, 1])
-    with col_z1:
-        st.markdown(
-            f"<div style='font-size:.83rem;color:#4dd8f0;padding:.38rem 0 .28rem 0'>"
-            f"Employees on this list have received <b>zero positive attendance points</b> since "
-            f"<b>January 1, {today.year}</b>. Roll-off credits do not count against this list. "
-            f"Only employees who remain here through <b>December 31, {today.year}</b> will have "
-            f"achieved perfect attendance for the year.</div>",
-            unsafe_allow_html=True,
-        )
-    with col_z2:
-        st.metric("On List Now", total_zero, help="Active employees with 0.0 positive points YTD")
-    with col_z3:
-        st.metric("Days Left in Year", days_left_in_year)
-
-    if zero_ytd_rows:
-        by_building: dict[str, int] = {}
-        for r in zero_ytd_rows:
-            b = r.get("building") or "—"
-            by_building[b] = by_building.get(b, 0) + 1
-
-        build_summary = "  |  ".join(
-            f"<span style='color:#00e896;font-weight:700'>{b}</span>: {n}"
-            for b, n in sorted(by_building.items())
-        )
-        st.markdown(
-            f"<div style='font-size:.80rem;color:#6a8ab8;margin:.3rem 0 .6rem 0'>{build_summary}</div>",
-            unsafe_allow_html=True,
-        )
-
-        df_zero = pd.DataFrame(
-            [
-                {
-                    "Employee #": str(r["employee_id"]),
-                    "Name": f"{r['last_name']}, {r['first_name']}",
-                    "Building": r.get("building") or "—",
-                }
-                for r in zero_ytd_rows
-            ]
-        )
-
-        THRESHOLD = 20
-        if total_zero <= THRESHOLD:
-            st.dataframe(df_zero, use_container_width=True, hide_index=True)
-        else:
-            st.dataframe(df_zero.head(THRESHOLD), use_container_width=True, hide_index=True)
-            with st.expander(f"Show all {total_zero} employees on perfect attendance list"):
-                st.dataframe(df_zero, use_container_width=True, hide_index=True)
-
-        st.download_button(
-            "⬇ Download Perfect Attendance List",
-            data=to_csv(df_zero),
-            file_name=f"perfect_attendance_ytd_{today}.csv",
-            mime="text/csv",
-            key="dl_zero_ytd",
-        )
-    else:
-        info_box(
-            f"No active employees currently have 0.0 positive points YTD for {today.year}."
-        )
 
     divider()
     section_label("Forecasting")
