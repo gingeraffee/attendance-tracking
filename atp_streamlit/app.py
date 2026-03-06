@@ -2270,23 +2270,21 @@ def dashboard_page(conn, building: str) -> None:
 
     ytd_start = date(today.year, 1, 1).isoformat()
 
-    # SQL: active employees who have had NO positive-point entries YTD.
-    # Roll-off entries (points <= 0) are completely excluded from the sum so they
-    # don't inflate or inflate anything — only positive point events disqualify.
+    # Active employees with NO positive-point entries since Jan 1 of this year.
+    # Roll-off entries (points <= 0) are ignored — only positive values disqualify.
     if is_pg(conn):
         sql_zero_ytd = """
             SELECT e.employee_id,
                    e.last_name,
                    e.first_name,
-                   COALESCE(e."Location", '') AS building,
-                   e.hire_date
+                   COALESCE(e."Location", '') AS building
               FROM employees e
              WHERE COALESCE(e.is_active, 1) = 1
                AND NOT EXISTS (
                    SELECT 1
                      FROM points_history ph
                     WHERE ph.employee_id = e.employee_id
-                      AND (ph.point_date::date) >= %s::date
+                      AND (ph.point_date::date) >= (%s::date)
                       AND COALESCE(ph.points, 0.0) > 0.0
                )
              ORDER BY COALESCE(e."Location", ''), lower(e.last_name), lower(e.first_name)
@@ -2296,8 +2294,7 @@ def dashboard_page(conn, building: str) -> None:
             SELECT e.employee_id,
                    e.last_name,
                    e.first_name,
-                   COALESCE(e."Location", '') AS building,
-                   e.hire_date
+                   COALESCE(e."Location", '') AS building
               FROM employees e
              WHERE COALESCE(e.is_active, 1) = 1
                AND NOT EXISTS (
@@ -2312,7 +2309,7 @@ def dashboard_page(conn, building: str) -> None:
 
     zero_ytd_rows = [dict(r) for r in fetchall(conn, sql_zero_ytd, (ytd_start,))]
 
-    # Apply building filter if one is active
+    # Respect the global building filter
     if building and building != "All":
         zero_ytd_rows = [r for r in zero_ytd_rows if r.get("building") == building]
 
@@ -2335,8 +2332,7 @@ def dashboard_page(conn, building: str) -> None:
         st.metric("Days Left in Year", days_left_in_year)
 
     if zero_ytd_rows:
-        # Build per-building breakdown for the expander header
-        by_building = {}
+        by_building: dict[str, int] = {}
         for r in zero_ytd_rows:
             b = r.get("building") or "—"
             by_building[b] = by_building.get(b, 0) + 1
@@ -2356,7 +2352,6 @@ def dashboard_page(conn, building: str) -> None:
                     "Employee #": str(r["employee_id"]),
                     "Name": f"{r['last_name']}, {r['first_name']}",
                     "Building": r.get("building") or "—",
-                    "Hire Date": fmt_date(r.get("hire_date")),
                 }
                 for r in zero_ytd_rows
             ]
@@ -2378,13 +2373,9 @@ def dashboard_page(conn, building: str) -> None:
             key="dl_zero_ytd",
         )
     else:
-        if today > date(today.year, 1, 1):
-            info_box(
-                f"No active employees have 0.0 positive points YTD "
-                f"({'all have received at least one point this year' if total_zero == 0 else ''})."
-            )
-        else:
-            info_box("No data yet for the current year.")
+        info_box(
+            f"No active employees currently have 0.0 positive points YTD for {today.year}."
+        )
 
     divider()
     section_label("Forecasting")
