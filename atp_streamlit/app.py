@@ -1166,7 +1166,7 @@ body {{
     <span class="sep">|</span>
     <span class="seg">SESSION&nbsp;<span class="hi" id="uptime">00:00:00</span></span>
     <span class="sep">|</span>
-    <span class="seg">SIGNAL | Strong<span class="signal"><span class="sig-dot"></span><span class="sig-dot"></span><span class="sig-dot"></span></span></span>
+    <span class="seg">SIGNAL: Strong <span class="signal"><span class="sig-dot"></span><span class="sig-dot"></span><span class="sig-dot"></span></span></span>
   </div>
   <div class="hud-right">
     <span class="seg" id="hud-date"></span>
