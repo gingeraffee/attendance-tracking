@@ -3234,6 +3234,7 @@ def pto_page(conn, building: str) -> None:
 
     from datetime import timedelta as _td
     period_days = max(1, (date_end - date_start).days + 1)
+    total_days = total_hours / 8
     annualized_total = total_days / period_days * 365
     annualized_per_emp = avg_hours / 8 / period_days * 365 if unique_emps else 0
 
