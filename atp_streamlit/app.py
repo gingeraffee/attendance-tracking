@@ -2960,27 +2960,43 @@ def pto_page(conn, building: str) -> None:
         df_dow["dow"] = df_dow["start_date"].dt.dayofweek
         df_dow["dow_label"] = df_dow["dow"].map(dow_map)
         dow_order = ["Mon", "Tue", "Wed", "Thu", "Fri"]
-        dow_totals = (
+        dow_pivot = (
             df_dow[df_dow["dow_label"].isin(dow_order)]
-            .groupby("dow_label")["hours"]
+            .groupby(["dow_label", "pto_type"])["hours"]
             .sum()
-            .reindex(dow_order)
-            .fillna(0)
             .reset_index()
         )
-        dow_fig = go.Figure(go.Bar(
-            x=dow_totals["dow_label"],
-            y=dow_totals["hours"],
-            marker=dict(color="#7b61ff", line=dict(color="#060d1f", width=1)),
-            hovertemplate="<b>%{x}</b>: %{y:.0f} hrs<extra></extra>",
-        ))
+        pto_type_order = (
+            dow_pivot.groupby("pto_type")["hours"]
+            .sum()
+            .sort_values(ascending=False)
+            .index.tolist()
+        )
+        dow_traces = []
+        for pt in pto_type_order:
+            subset = (
+                dow_pivot[dow_pivot["pto_type"] == pt]
+                .set_index("dow_label")
+                .reindex(dow_order)["hours"]
+                .fillna(0)
+            )
+            dow_traces.append(go.Bar(
+                name=pt,
+                x=dow_order,
+                y=subset.values,
+                marker=dict(color=type_colors.get(pt, "#7b61ff"), line=dict(color="#060d1f", width=1)),
+                hovertemplate=f"<b>%{{x}}</b> — {pt}: %{{y:.0f}} hrs<extra></extra>",
+            ))
+        dow_fig = go.Figure(data=dow_traces)
         dow_fig.update_layout(
+            barmode="stack",
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)",
             font=dict(color="#c8dff0", family="SF Mono, Fira Code, monospace"),
             xaxis=dict(showgrid=False, color="#4a7fa5"),
             yaxis=dict(showgrid=True, gridcolor="#0d1b2e", color="#4a7fa5", title="Hours"),
-            margin=dict(t=10, b=10, l=10, r=10),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=10)),
+            margin=dict(t=30, b=10, l=10, r=10),
         )
         st.plotly_chart(dow_fig, use_container_width=True, key="pto_dow_bar")
 
