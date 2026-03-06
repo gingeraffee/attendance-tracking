@@ -17,9 +17,11 @@ import streamlit as st
 import streamlit.components.v1 as components
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
+from reportlab.lib.enums import TA_LEFT, TA_RIGHT
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.lib.styles import ParagraphStyle
 
 st.set_page_config(
     page_title="Attendance Point Tracker",
@@ -1469,7 +1471,7 @@ def login_page() -> None:
 
 
 def build_point_history_pdf(employee: dict, history: list[dict]) -> bytes:
-    """Generate a printable attendance point history report as a PDF."""
+    """Generate a polished attendance point history PDF with premium visual styling."""
     buffer = BytesIO()
     doc = SimpleDocTemplate(
         buffer,
@@ -1480,56 +1482,206 @@ def build_point_history_pdf(employee: dict, history: list[dict]) -> bytes:
         bottomMargin=0.75 * inch,
     )
     styles = getSampleStyleSheet()
+    brand_navy = colors.HexColor("#0F172A")
+    brand_royal = colors.HexColor("#2563EB")
+    brand_cyan = colors.HexColor("#22D3EE")
+    slate_200 = colors.HexColor("#CBD5E1")
+    slate_100 = colors.HexColor("#F1F5F9")
+    ink = colors.HexColor("#0B1120")
+
+    title_style = ParagraphStyle(
+        "ReportTitle",
+        parent=styles["Title"],
+        fontName="Helvetica-Bold",
+        fontSize=24,
+        leading=28,
+        textColor=colors.white,
+        alignment=TA_LEFT,
+        spaceAfter=8,
+    )
+    subtitle_style = ParagraphStyle(
+        "ReportSubtitle",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=10,
+        leading=13,
+        textColor=colors.HexColor("#C7D2FE"),
+    )
+    label_style = ParagraphStyle(
+        "MetaLabel",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=8,
+        textColor=colors.HexColor("#64748B"),
+        spaceAfter=1,
+    )
+    value_style = ParagraphStyle(
+        "MetaValue",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=13,
+        textColor=ink,
+    )
+    note_style = ParagraphStyle(
+        "TableNote",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=8.5,
+        leading=10.5,
+        textColor=colors.HexColor("#1E293B"),
+    )
+    points_style = ParagraphStyle(
+        "Points",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=9,
+        alignment=TA_RIGHT,
+    )
+    empty_style = ParagraphStyle(
+        "EmptyState",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=10,
+        leading=14,
+        textColor=colors.HexColor("#475569"),
+    )
 
     full_name = f"{employee.get('last_name', '')}, {employee.get('first_name', '')}".strip(", ")
     employee_id = employee.get("employee_id", "—")
     location = employee.get("Location") or employee.get("location") or "—"
     generated_on = datetime.now().strftime("%m/%d/%Y %I:%M %p")
+    current_points = float(employee.get("point_total") or 0)
+
+    header_card = Table(
+        [
+            [
+                Paragraph("Attendance Point History", title_style),
+                Paragraph(
+                    "<b>Generated:</b><br/>"
+                    f"{generated_on}<br/><br/>"
+                    "<b>Status:</b><br/>"
+                    f"{'At Risk' if current_points >= 8 else 'Monitor' if current_points >= 4 else 'Stable'}",
+                    ParagraphStyle(
+                        "HeaderMeta",
+                        parent=styles["Normal"],
+                        fontName="Helvetica",
+                        fontSize=9,
+                        textColor=colors.white,
+                        leading=13,
+                        alignment=TA_RIGHT,
+                    ),
+                ),
+            ],
+            [Paragraph("Sleek performance summary and detailed event timeline", subtitle_style), ""],
+        ],
+        colWidths=[4.8 * inch, 1.7 * inch],
+    )
+    header_card.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), brand_navy),
+                ("SPAN", (0, 1), (1, 1)),
+                ("BOX", (0, 0), (-1, -1), 0, colors.white),
+                ("LINEBELOW", (0, 0), (-1, 0), 1, brand_cyan),
+                ("LEFTPADDING", (0, 0), (-1, -1), 16),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 16),
+                ("TOPPADDING", (0, 0), (-1, -1), 14),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ]
+        )
+    )
+
+    profile_grid = Table(
+        [
+            [Paragraph("EMPLOYEE", label_style), Paragraph("EMPLOYEE #", label_style), Paragraph("LOCATION", label_style), Paragraph("CURRENT POINTS", label_style)],
+            [Paragraph(full_name or "—", value_style), Paragraph(str(employee_id), value_style), Paragraph(str(location), value_style), Paragraph(f"{current_points:.1f}", value_style)],
+        ],
+        colWidths=[2.6 * inch, 1.2 * inch, 1.1 * inch, 1.6 * inch],
+    )
+    profile_grid.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), slate_100),
+                ("BACKGROUND", (0, 1), (-1, 1), colors.white),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#64748B")),
+                ("LINEABOVE", (0, 0), (-1, 0), 1, slate_200),
+                ("LINEBELOW", (0, 1), (-1, 1), 1, slate_200),
+                ("LINEBEFORE", (0, 0), (-1, -1), 0.5, slate_200),
+                ("LINEAFTER", (0, 0), (-1, -1), 0.5, slate_200),
+                ("LEFTPADDING", (0, 0), (-1, -1), 10),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+                ("TOPPADDING", (0, 0), (-1, -1), 8),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ]
+        )
+    )
 
     story = [
-        Paragraph("Attendance Point History Report", styles["Title"]),
-        Spacer(1, 0.1 * inch),
-        Paragraph(f"<b>Employee:</b> {full_name}", styles["Normal"]),
-        Paragraph(f"<b>Employee #:</b> {employee_id}", styles["Normal"]),
-        Paragraph(f"<b>Location:</b> {location}", styles["Normal"]),
-        Paragraph(
-            f"<b>Current Point Total:</b> {float(employee.get('point_total') or 0):.1f}",
-            styles["Normal"],
-        ),
-        Paragraph(f"<b>Generated:</b> {generated_on}", styles["Normal"]),
-        Spacer(1, 0.2 * inch),
+        header_card,
+        Spacer(1, 0.16 * inch),
+        profile_grid,
+        Spacer(1, 0.18 * inch),
     ]
 
     if history:
         table_rows = [["Date", "Points", "Reason", "Note", "Running Total"]]
+        point_cell_styles: list[tuple[int, colors.Color]] = []
         for row in history:
+            point_value = float(row.get("points") or 0)
+            running_total = float(row.get("point_total") or 0)
             table_rows.append(
                 [
                     fmt_date(row.get("point_date")),
-                    f"{float(row.get('points') or 0):.1f}",
+                    Paragraph(f"{point_value:+.1f}", points_style),
                     str(row.get("reason") or "—"),
-                    str(row.get("note") or "—"),
-                    f"{float(row.get('point_total') or 0):.1f}",
+                    Paragraph(str(row.get("note") or "—"), note_style),
+                    Paragraph(f"{running_total:.1f}", points_style),
                 ]
             )
+            color = colors.HexColor("#16A34A") if point_value < 0 else colors.HexColor("#DC2626") if point_value > 0 else colors.HexColor("#475569")
+            point_cell_styles.append((len(table_rows) - 1, color))
 
-        table = Table(table_rows, colWidths=[1.1 * inch, 0.8 * inch, 1.4 * inch, 2.9 * inch, 1.0 * inch])
-        table.setStyle(
+        table = Table(table_rows, colWidths=[1.0 * inch, 0.75 * inch, 1.5 * inch, 3.0 * inch, 0.95 * inch], repeatRows=1)
+        table_style_commands = [
+            ("BACKGROUND", (0, 0), (-1, 0), brand_royal),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("GRID", (0, 0), (-1, -1), 0.5, slate_200),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, slate_100]),
+            ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+            ("ALIGN", (4, 0), (4, -1), "RIGHT"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 7),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+        ]
+        for row_index, point_color in point_cell_styles:
+            table_style_commands.append(("TEXTCOLOR", (1, row_index), (1, row_index), point_color))
+        table.setStyle(TableStyle(table_style_commands))
+        story.append(table)
+    else:
+        empty_card = Table(
+            [[Paragraph("No point history entries were found for this employee.", empty_style)]],
+            colWidths=[6.5 * inch],
+        )
+        empty_card.setStyle(
             TableStyle(
                 [
-                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f0f4fa")),
-                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#1a2744")),
-                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                    ("FONTSIZE", (0, 0), (-1, -1), 9),
-                    ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cfd8e6")),
-                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f9fbff")]),
+                    ("BACKGROUND", (0, 0), (-1, -1), slate_100),
+                    ("TEXTCOLOR", (0, 0), (-1, -1), colors.HexColor("#334155")),
+                    ("BOX", (0, 0), (-1, -1), 1, slate_200),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 12),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 12),
+                    ("TOPPADDING", (0, 0), (-1, -1), 12),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
                 ]
             )
         )
-        story.append(table)
-    else:
-        story.append(Paragraph("No point history entries were found for this employee.", styles["Normal"]))
+        story.append(empty_card)
 
     doc.build(story)
     return buffer.getvalue()
