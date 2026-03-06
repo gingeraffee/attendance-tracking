@@ -1305,7 +1305,7 @@ def login_page() -> None:
         st.markdown(
             "<div class='login-status-bar'>"
             "<span class='login-status-dot'></span>"
-            "SYSTEM ONLINE &nbsp;·&nbsp; AWAITING AUTHORIZATION"
+            "SYSTEM ONLINE &nbsp;·&nbsp;"
             "</div>",
             unsafe_allow_html=True,
         )
@@ -1314,7 +1314,7 @@ def login_page() -> None:
         st.markdown(
             f"<div class='login-card'>"
             f"  <div class='login-card-header'>"
-            f"    <div class='login-system-tag'>HR Command Interface</div>"
+            f"    <div class='login-system-tag'>HR Analysis Tool</div>"
             f"    {logo_tag}"
             f"    <div class='login-title'>Attendance Tracking</div>"
             f"  </div>"
@@ -1329,7 +1329,7 @@ def login_page() -> None:
             placeholder="Enter authorization code",
             label_visibility="collapsed",
         )
-        start_clicked = st.button("Authorize Access", use_container_width=True)
+        start_clicked = st.button("Enter Portal", use_container_width=True)
 
         if start_clicked:
             expected = os.environ.get("ACCESS_CODE", "attendance2024")
@@ -2544,10 +2544,7 @@ def pto_page(conn, building: str) -> None:
     # ── CSV upload ──────────────────────────────────────────────────────────
     with st.expander("Upload PTO Data", expanded="pto_df" not in st.session_state):
         st.markdown(
-            "Upload a CSV with columns: `employee_id` *(optional)*, `last_name`, `first_name`, "
-            "`building`, `pto_type`, `start_date` *(YYYY-MM-DD)*, `end_date` *(YYYY-MM-DD)*, `hours` *(total for the period)*  \n"
-            "Single-day entries: set `start_date` and `end_date` to the same date. "
-            "The legacy single-`date` format is also accepted."
+            "Upload a completed template to upload employee PTO data and see trends and analytics."
         )
         col_up, col_dl = st.columns([3, 1])
         with col_up:
