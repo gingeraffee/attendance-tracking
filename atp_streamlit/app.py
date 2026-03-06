@@ -1137,27 +1137,16 @@ def login_page() -> None:
             pointer-events: none; z-index: 0;
         }}
 
-        /* ── TRUE full-viewport centering ── */
-        /* Make Streamlit's own containers flex so we can center within them */
-        [data-testid="stMain"] {{
-            display: flex !important;
-            align-items: center !important;
-            justify-content: center !important;
-            min-height: 100vh !important;
-        }}
-        [data-testid="stMainBlockContainer"] {{
-            display: flex !important;
-            flex-direction: column !important;
-            align-items: center !important;
-            justify-content: center !important;
-            width: 100% !important;
-            padding: 2rem 1rem !important;
-        }}
-        /* Cap the content width so it looks like a card, not a full-width block */
+        /* ── Vertical centering via top padding ── */
         .block-container {{
-            padding: 0 !important;
-            max-width: 460px !important;
-            width: 100% !important;
+            padding-top: 12vh !important;
+            padding-bottom: 4rem !important;
+            max-width: 100% !important;
+        }}
+
+        /* ── Center the card within its column ── */
+        .login-card {{
+            margin: 0 auto !important;
         }}
 
         /* ── Status bar (top-of-card) ── */
@@ -1310,61 +1299,63 @@ def login_page() -> None:
         unsafe_allow_html=True,
     )
 
-    # Status bar above card
-    st.markdown(
-        "<div class='login-status-bar'>"
-        "<span class='login-status-dot'></span>"
-        "SYSTEM ONLINE &nbsp;·&nbsp; AWAITING AUTHORIZATION"
-        "</div>",
-        unsafe_allow_html=True,
-    )
-
-    # Card header (pure HTML — logo, system tag, title)
-    st.markdown(
-        f"<div class='login-card'>"
-        f"  <div class='login-card-header'>"
-        f"    <div class='login-system-tag'>HR Command Interface</div>"
-        f"    {logo_tag}"
-        f"    <div class='login-title'>Attendance Tracking</div>"
-        f"  </div>"
-        f"  <div class='login-card-body'>",
-        unsafe_allow_html=True,
-    )
-
-    st.markdown("<span class='login-field-label'>Access Code</span>", unsafe_allow_html=True)
-    access_code = st.text_input(
-        "Access Code",
-        type="password",
-        placeholder="Enter authorization code",
-        label_visibility="collapsed",
-    )
-    start_clicked = st.button("Authorize Access", use_container_width=True)
-
-    if start_clicked:
-        expected = os.environ.get("ACCESS_CODE", "attendance2024")
-        if access_code == expected:
-            token = secrets.token_urlsafe(16)
-            st.session_state["authenticated"] = True
-            st.session_state["_auth_token"] = token
-            st.session_state["_auth_redirect_pending"] = True
-            st.session_state["login_error"] = False
-            st.query_params["_s"] = token
-            st.rerun()
-        else:
-            st.session_state["login_error"] = True
-
-    if st.session_state.get("login_error"):
+    _, col, _ = st.columns([1, 1.4, 1])
+    with col:
+        # Status bar above card
         st.markdown(
-            "<div class='login-error'>ACCESS DENIED — Incorrect authorization code.</div>",
+            "<div class='login-status-bar'>"
+            "<span class='login-status-dot'></span>"
+            "SYSTEM ONLINE &nbsp;·&nbsp; AWAITING AUTHORIZATION"
+            "</div>",
             unsafe_allow_html=True,
         )
 
-    st.markdown("</div></div>", unsafe_allow_html=True)
+        # Card header (pure HTML — logo, system tag, title)
+        st.markdown(
+            f"<div class='login-card'>"
+            f"  <div class='login-card-header'>"
+            f"    <div class='login-system-tag'>HR Command Interface</div>"
+            f"    {logo_tag}"
+            f"    <div class='login-title'>Attendance Tracking</div>"
+            f"  </div>"
+            f"  <div class='login-card-body'>",
+            unsafe_allow_html=True,
+        )
 
-    st.markdown(
-        "<div class='login-footer'>CLASSIFIED · AUTHORIZED PERSONNEL ONLY</div>",
-        unsafe_allow_html=True,
-    )
+        st.markdown("<span class='login-field-label'>Access Code</span>", unsafe_allow_html=True)
+        access_code = st.text_input(
+            "Access Code",
+            type="password",
+            placeholder="Enter authorization code",
+            label_visibility="collapsed",
+        )
+        start_clicked = st.button("Authorize Access", use_container_width=True)
+
+        if start_clicked:
+            expected = os.environ.get("ACCESS_CODE", "attendance2024")
+            if access_code == expected:
+                token = secrets.token_urlsafe(16)
+                st.session_state["authenticated"] = True
+                st.session_state["_auth_token"] = token
+                st.session_state["_auth_redirect_pending"] = True
+                st.session_state["login_error"] = False
+                st.query_params["_s"] = token
+                st.rerun()
+            else:
+                st.session_state["login_error"] = True
+
+        if st.session_state.get("login_error"):
+            st.markdown(
+                "<div class='login-error'>ACCESS DENIED — Incorrect authorization code.</div>",
+                unsafe_allow_html=True,
+            )
+
+        st.markdown("</div></div>", unsafe_allow_html=True)
+
+        st.markdown(
+            "<div class='login-footer'>CLASSIFIED · AUTHORIZED PERSONNEL ONLY</div>",
+            unsafe_allow_html=True,
+        )
 
 
 def build_point_history_pdf(employee: dict, history: list[dict]) -> bytes:
