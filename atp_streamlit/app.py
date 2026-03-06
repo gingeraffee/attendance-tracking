@@ -2121,13 +2121,6 @@ def dashboard_page(conn, building: str) -> None:
         at_risk_5plus=at_risk_5plus,
         total_employees=total_active,
     )
-    render_hr_live_monitor(
-        points_24h=points_24h,
-        points_7d=points_7d,
-        rolloffs_due_7d=rolloffs_due_7d,
-        perfect_due_7d=perfect_due_7d,
-        label="At a glance",
-    )
 
 
     st.markdown(
