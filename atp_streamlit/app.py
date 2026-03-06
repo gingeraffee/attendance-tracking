@@ -611,12 +611,17 @@ div[data-testid="stMetric"]:nth-child(6) { animation-delay: 3.5s; }
 }
 .page-heading { animation: heading-in .45s ease-out both; }
 
-/* DataFrame / chart pulse */
+/* DataFrame table lines: temporarily static (no animated glow) */
+.stDataFrame {
+    animation: none !important;
+}
+
+/* Keep chart pulse animation */
 @keyframes dataframe-glow {
   0%,100% { box-shadow: 0 0 0 1px rgba(0,120,255,.06); }
   50%      { box-shadow: 0 0 0 1px rgba(0,120,255,.22), 0 0 24px rgba(0,120,255,.06); }
 }
-.stDataFrame, [data-testid="stArrowVegaLiteChart"] {
+[data-testid="stArrowVegaLiteChart"] {
     animation: dataframe-glow 6s ease-in-out infinite;
 }
 
