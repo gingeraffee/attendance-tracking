@@ -1439,7 +1439,7 @@ def login_page() -> None:
             placeholder="Enter authorization code",
             label_visibility="collapsed",
         )
-        start_clicked = st.button("Enter Portal", use_container_width=True)
+        start_clicked = st.button("Begin Tracking", use_container_width=True)
 
         if start_clicked:
             expected = os.environ.get("ACCESS_CODE", "attendance2024")
