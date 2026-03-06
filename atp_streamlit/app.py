@@ -2746,11 +2746,18 @@ def pto_page(conn, building: str) -> None:
     section_label("Summary")
     k1, k2, k3, k4 = st.columns(4)
     total_hours = df["hours"].sum()
-    # Count actual calendar dates impacted: each record spans start_date..end_date
-    # (for single-day entries start=end so date_count=1; partial days still count as 1 date)
-    total_dates_impacted = int(
-        ((df["end_date"] - df["start_date"]).dt.days + 1).sum()
-    )
+    # Count distinct calendar dates where ANY employee had PTO.
+    # Expand every record's start_date..end_date into individual dates,
+    # union across all employees, then count unique dates.
+    # Result is bounded by the filter range — 50 people on the same Monday = 1 day.
+    _pto_date_set: set = set()
+    for _sd, _ed in zip(df["start_date"], df["end_date"]):
+        if _sd == _ed:
+            _pto_date_set.add(_sd)
+        else:
+            for _d in pd.date_range(_sd, _ed):
+                _pto_date_set.add(_d)
+    total_dates_impacted = len(_pto_date_set)
     unique_emps = df["employee"].nunique()
     # Denominator is active DB headcount for the selected building — not the CSV
     denom = active_count_in_scope if sel_building == building else (
