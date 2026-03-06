@@ -4092,7 +4092,7 @@ def system_updates_page(conn) -> None:
 def corrective_action_page(conn, building: str) -> None:
     page_heading(
         "Corrective Action",
-        "Employees at disciplinary point thresholds. Edit Point Warning Date to log when action was issued.",
+        "Employees at disciplinary point thresholds. Tap a row to log a corrective action date.",
     )
 
     today = date.today()
@@ -4127,9 +4127,7 @@ def corrective_action_page(conn, building: str) -> None:
             SELECT employee_id, last_name, first_name, building, point_total,
                    last_point_date, point_warning_date
               FROM (
-                SELECT e.employee_id,
-                       e.last_name,
-                       e.first_name,
+                SELECT e.employee_id, e.last_name, e.first_name,
                        COALESCE(e."Location", '') AS building,
                        MAX(0.0, ROUND(COALESCE((
                            SELECT SUM(ph2.points) FROM points_history ph2
@@ -4150,147 +4148,305 @@ def corrective_action_page(conn, building: str) -> None:
 
     ca_rows = [dict(r) for r in fetchall(conn, sql_ca, tuple(emp_ids))]
 
-    # ── Threshold tier definitions ────────────────────────────────────────────
+    # (key, label, range_str, predicate, hex, r, g, b)
     tiers = [
-        ("termination",     "Termination",     lambda p: p > 7.5,          "#ff3050", "rgba(255,48,80,.10)",   "rgba(255,48,80,.35)"),
-        ("written_warning", "Written Warning",  lambda p: 7.0 <= p <= 7.5, "#b39ddb", "rgba(179,157,219,.10)", "rgba(179,157,219,.35)"),
-        ("verbal_warning",  "Verbal Warning",   lambda p: 6.0 <= p <= 6.5, "#f5e642", "rgba(245,230,66,.10)",  "rgba(245,230,66,.35)"),
-        ("verbal_coaching", "Verbal Coaching",  lambda p: 5.0 <= p <= 5.5, "#00c8f0", "rgba(0,200,240,.10)",   "rgba(0,200,240,.35)"),
+        ("termination",     "Termination",    "7.6 +",     lambda p: p > 7.5,         "#ff3b30", 255, 59,  48),
+        ("written_warning", "Written Warning", "7.0 – 7.5", lambda p: 7.0 <= p <= 7.5, "#bf5af2", 191, 90, 242),
+        ("verbal_warning",  "Verbal Warning",  "6.0 – 6.5", lambda p: 6.0 <= p <= 6.5, "#ffd60a", 255, 214, 10),
+        ("verbal_coaching", "Verbal Coaching", "5.0 – 5.5", lambda p: 5.0 <= p <= 5.5, "#32ade6", 50, 173, 230),
     ]
+
+    def tier_for(pts):
+        for key, lbl, rng, fn, col, r, g, b in tiers:
+            if fn(pts):
+                return key, lbl, rng, col, r, g, b
+        return "none", "—", "—", "#8e8e93", 142, 142, 147
 
     if not ca_rows:
         info_box("No active employees are currently at or above the 5.0 point threshold. 🎉")
         return
 
-    # ── Summary counts ────────────────────────────────────────────────────────
-    tier_counts = {key: sum(1 for r in ca_rows if fn(float(r.get("point_total") or 0)))
-                   for key, label, fn, color, bg, border in tiers}
-    c1, c2, c3, c4 = st.columns(4)
-    for col, (key, label, fn, color, bg, border) in zip([c4, c3, c2, c1], tiers):
-        n = tier_counts[key]
-        col.markdown(
-            f"<div style='background:{bg};border:1px solid {border};border-radius:10px;"
-            f"padding:.7rem 1rem;text-align:center'>"
-            f"<div style='font-size:.65rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;"
-            f"color:{color};font-family:Space Mono,monospace'>{label}</div>"
-            f"<div style='font-size:2rem;font-weight:800;color:{color};line-height:1.1;"
-            f"text-shadow:0 0 16px {color}55'>{n}</div>"
-            f"<div style='font-size:.72rem;color:#4a7090;margin-top:.1rem'>employee{'s' if n != 1 else ''}</div>"
-            f"</div>",
-            unsafe_allow_html=True,
+    # ── Shared CSS injected once ──────────────────────────────────────────────
+    st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+.ca-wrap { font-family: -apple-system, 'Inter', BlinkMacSystemFont, sans-serif; }
+
+/* Summary pills row */
+.ca-pills {
+  display: flex;
+  gap: .55rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.4rem;
+}
+.ca-pill {
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+  padding: .38rem .85rem;
+  border-radius: 999px;
+  border: 1px solid;
+  font-size: .72rem;
+  font-weight: 600;
+  letter-spacing: .02em;
+  white-space: nowrap;
+  cursor: default;
+}
+.ca-pill-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* Section label */
+.ca-section {
+  font-size: .68rem;
+  font-weight: 600;
+  letter-spacing: .10em;
+  text-transform: uppercase;
+  color: #636366;
+  margin: 1.6rem 0 .55rem 0;
+  padding-bottom: .35rem;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+}
+
+/* Employee row */
+.ca-row {
+  display: flex;
+  align-items: center;
+  padding: .72rem 1rem;
+  border-radius: 12px;
+  margin-bottom: .4rem;
+  border: 1px solid rgba(255,255,255,.07);
+  background: rgba(28,28,30,.55);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  transition: border-color .15s, background .15s;
+  gap: .8rem;
+}
+.ca-row:hover {
+  background: rgba(44,44,46,.70);
+  border-color: rgba(255,255,255,.13);
+}
+.ca-row-active {
+  border-color: rgba(255,255,255,.18) !important;
+  background: rgba(44,44,46,.85) !important;
+}
+
+/* Left color strip */
+.ca-strip {
+  width: 3px;
+  border-radius: 999px;
+  align-self: stretch;
+  min-height: 36px;
+  flex-shrink: 0;
+}
+
+/* Name + meta block */
+.ca-name {
+  font-size: .93rem;
+  font-weight: 600;
+  color: #f2f2f7;
+  line-height: 1.25;
+}
+.ca-meta {
+  font-size: .72rem;
+  color: #8e8e93;
+  margin-top: .1rem;
+}
+
+/* Points badge */
+.ca-pts {
+  font-size: 1.15rem;
+  font-weight: 700;
+  line-height: 1;
+  flex-shrink: 0;
+  min-width: 2.8rem;
+  text-align: right;
+}
+
+/* Date chips */
+.ca-dates {
+  display: flex;
+  flex-direction: column;
+  gap: .22rem;
+  margin-left: auto;
+  flex-shrink: 0;
+  text-align: right;
+}
+.ca-date-chip {
+  font-size: .67rem;
+  padding: .15rem .55rem;
+  border-radius: 999px;
+  background: rgba(255,255,255,.05);
+  color: #aeaeb2;
+  white-space: nowrap;
+}
+.ca-date-chip span { color: #f2f2f7; font-weight: 500; }
+
+/* Edit panel */
+.ca-edit-panel {
+  border-radius: 14px;
+  padding: 1rem 1.2rem;
+  margin-bottom: 1rem;
+  border: 1px solid;
+  background: rgba(28,28,30,.80);
+  backdrop-filter: blur(20px);
+}
+.ca-edit-title {
+  font-size: .68rem;
+  font-weight: 600;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  margin-bottom: .55rem;
+}
+.ca-edit-name {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #f2f2f7;
+}
+.ca-edit-sub {
+  font-size: .78rem;
+  color: #8e8e93;
+  margin-top: .15rem;
+  margin-bottom: .7rem;
+}
+</style>
+<div class="ca-wrap">
+""", unsafe_allow_html=True)
+
+    # ── Summary pills ─────────────────────────────────────────────────────────
+    pills_html = '<div class="ca-pills">'
+    total = len(ca_rows)
+    pills_html += (
+        f"<div class='ca-pill' style='color:#aeaeb2;border-color:rgba(174,174,178,.25);"
+        f"background:rgba(174,174,178,.06)'>"
+        f"<div class='ca-pill-dot' style='background:#8e8e93'></div>"
+        f"{total} flagged</div>"
+    )
+    for key, lbl, rng, fn, col, r, g, b in tiers:
+        n = sum(1 for row in ca_rows if fn(float(row.get("point_total") or 0)))
+        if n == 0:
+            continue
+        pills_html += (
+            f"<div class='ca-pill' style='color:{col};"
+            f"border-color:rgba({r},{g},{b},.30);"
+            f"background:rgba({r},{g},{b},.08)'>"
+            f"<div class='ca-pill-dot' style='background:{col}'></div>"
+            f"{n} {lbl}</div>"
         )
+    pills_html += "</div>"
+    st.markdown(pills_html, unsafe_allow_html=True)
 
-    divider()
-
-    # ── Edit modal state ──────────────────────────────────────────────────────
+    # ── Inline edit panel ─────────────────────────────────────────────────────
     if "ca_edit_id" not in st.session_state:
         st.session_state["ca_edit_id"] = None
-
     editing_id = st.session_state.get("ca_edit_id")
 
     if editing_id is not None:
         edit_row = next((r for r in ca_rows if int(r["employee_id"]) == editing_id), None)
         if edit_row:
-            with st.container():
-                st.markdown(
-                    f"<div class='info-box' style='margin-bottom:.8rem'>"
-                    f"<b>Editing Point Warning Date for:</b> "
-                    f"{edit_row['last_name']}, {edit_row['first_name']} "
-                    f"&nbsp;|&nbsp; Emp # {edit_row['employee_id']} "
-                    f"&nbsp;|&nbsp; {float(edit_row.get('point_total') or 0):.1f} pts"
-                    f"</div>",
-                    unsafe_allow_html=True,
-                )
-                existing = edit_row.get("point_warning_date")
-                try:
-                    default_val = date.fromisoformat(str(existing)[:10]) if existing else today
-                except Exception:
-                    default_val = today
-
-                ec1, ec2, ec3 = st.columns([2, 1, 1])
-                with ec1:
-                    new_date = st.date_input(
-                        "Point Warning Date",
-                        value=default_val,
-                        key=f"ca_date_input_{editing_id}",
-                    )
-                with ec2:
-                    st.markdown("<div style='height:1.7rem'></div>", unsafe_allow_html=True)
-                    if st.button("Save", key="ca_save_btn", use_container_width=True):
-                        try:
-                            if is_pg(conn):
-                                exec_sql(conn, "UPDATE employees SET point_warning_date = %s WHERE employee_id = %s", (new_date.isoformat(), editing_id))
-                                conn.commit()
-                            else:
-                                exec_sql(conn, "UPDATE employees SET point_warning_date = ? WHERE employee_id = ?", (new_date.isoformat(), editing_id))
-                                conn.commit()
-                            st.success("Saved.")
-                            st.session_state["ca_edit_id"] = None
-                            st.rerun()
-                        except Exception as exc:
-                            st.error(f"Could not save: {exc}")
-                with ec3:
-                    st.markdown("<div style='height:1.7rem'></div>", unsafe_allow_html=True)
-                    if st.button("Cancel", key="ca_cancel_btn", use_container_width=True):
+            pts_e = float(edit_row.get("point_total") or 0)
+            _, lbl_e, _, col_e, r_e, g_e, b_e = tier_for(pts_e)
+            st.markdown(
+                f"<div class='ca-edit-panel' style='border-color:rgba({r_e},{g_e},{b_e},.35)'>"
+                f"<div class='ca-edit-title' style='color:{col_e}'>Edit warning date</div>"
+                f"<div class='ca-edit-name'>{edit_row['last_name']}, {edit_row['first_name']}</div>"
+                f"<div class='ca-edit-sub'>Emp #{edit_row['employee_id']} &nbsp;·&nbsp; "
+                f"{pts_e:.1f} pts &nbsp;·&nbsp; {lbl_e}</div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+            existing = edit_row.get("point_warning_date")
+            try:
+                default_val = date.fromisoformat(str(existing)[:10]) if existing else today
+            except Exception:
+                default_val = today
+            ec1, ec2, ec3 = st.columns([2, 1, 1])
+            with ec1:
+                new_date = st.date_input("Warning date", value=default_val,
+                                         key=f"ca_date_{editing_id}",
+                                         label_visibility="collapsed")
+            with ec2:
+                if st.button("Save", key="ca_save", use_container_width=True):
+                    try:
+                        sym = "%s" if is_pg(conn) else "?"
+                        exec_sql(conn,
+                            f"UPDATE employees SET point_warning_date={sym} WHERE employee_id={sym}",
+                            (new_date.isoformat(), editing_id))
+                        conn.commit()
                         st.session_state["ca_edit_id"] = None
                         st.rerun()
+                    except Exception as exc:
+                        st.error(str(exc))
+            with ec3:
+                if st.button("Cancel", key="ca_cancel", use_container_width=True):
+                    st.session_state["ca_edit_id"] = None
+                    st.rerun()
 
-    # ── Tier tables ───────────────────────────────────────────────────────────
-    for key, label, fn, color, bg, border in tiers:
-        tier_rows = [r for r in ca_rows if fn(float(r.get("point_total") or 0))]
+    # ── Tier sections ─────────────────────────────────────────────────────────
+    for key, label, rng, fn, col, r, g, b in tiers:
+        tier_rows = [row for row in ca_rows if fn(float(row.get("point_total") or 0))]
         if not tier_rows:
             continue
 
         st.markdown(
-            f"<div style='background:{bg};border-left:3px solid {color};border-radius:0 8px 8px 0;"
-            f"padding:.45rem .9rem;margin:.9rem 0 .5rem 0;"
-            f"font-size:.78rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;"
-            f"color:{color};font-family:Space Mono,monospace'>"
-            f"⚠ {label} — {len(tier_rows)} employee{'s' if len(tier_rows) != 1 else ''}"
+            f"<div class='ca-section'>"
+            f"<span style='color:{col}'>{label}</span>"
+            f"<span style='color:#3a3a3c;margin:0 .4rem'>·</span>"
+            f"<span>{rng} pts</span>"
+            f"<span style='color:#3a3a3c;margin:0 .4rem'>·</span>"
+            f"{len(tier_rows)} {'employee' if len(tier_rows)==1 else 'employees'}"
             f"</div>",
             unsafe_allow_html=True,
         )
 
-        for r in tier_rows:
-            eid       = int(r["employee_id"])
-            pts       = float(r.get("point_total") or 0)
-            name      = f"{r['last_name']}, {r['first_name']}"
-            bldg      = r.get("building") or "—"
-            lpd       = fmt_date(r.get("last_point_date"))
-            pwd       = fmt_date(r.get("point_warning_date"))
-            is_editing = (editing_id == eid)
+        for row in tier_rows:
+            eid   = int(row["employee_id"])
+            pts   = float(row.get("point_total") or 0)
+            name  = f"{row['last_name']}, {row['first_name']}"
+            bldg  = row.get("building") or "—"
+            lpd   = fmt_date(row.get("last_point_date"))
+            pwd   = fmt_date(row.get("point_warning_date"))
+            is_ed = (editing_id == eid)
 
-            row_border = f"1px solid {border}" if not is_editing else f"2px solid {color}"
+            active_cls = "ca-row-active" if is_ed else ""
+            warn_color = col if pwd != "—" else "#48484a"
+            warn_label = pwd if pwd != "—" else "Not logged"
+
             st.markdown(
-                f"<div class='list-row' style='border:{row_border};display:grid;"
-                f"grid-template-columns:70px 1fr 80px 70px 120px 120px 90px;align-items:center;gap:.5rem'>"
-                f"<span style='font-size:.78rem;color:#4a7090'>#{eid}</span>"
-                f"<span style='font-size:.88rem;font-weight:600;color:#c8ddf0'>{name}</span>"
-                f"<span style='font-size:.78rem;color:#4a88c0'>{bldg}</span>"
-                f"<span style='font-size:.88rem;font-weight:700;color:{color}'>{pts:.1f}</span>"
-                f"<span style='font-size:.78rem;color:#4a7090'>Last:&nbsp;{lpd}</span>"
-                f"<span style='font-size:.78rem;color:#4a7090'>Warning:&nbsp;{pwd}</span>"
+                f"<div class='ca-row {active_cls}'>"
+                f"<div class='ca-strip' style='background:{col}'></div>"
+                f"<div style='flex:1;min-width:0'>"
+                f"  <div class='ca-name'>{name}</div>"
+                f"  <div class='ca-meta'>#{eid} &nbsp;·&nbsp; {bldg}</div>"
+                f"</div>"
+                f"<div class='ca-pts' style='color:{col}'>{pts:.1f}</div>"
+                f"<div class='ca-dates'>"
+                f"  <div class='ca-date-chip'>Last point &nbsp;<span>{lpd}</span></div>"
+                f"  <div class='ca-date-chip' style='color:{warn_color}'>"
+                f"    Warning &nbsp;<span style='color:{warn_color}'>{warn_label}</span></div>"
+                f"</div>"
                 f"</div>",
                 unsafe_allow_html=True,
             )
-            if st.button("✎ Edit Warning Date", key=f"ca_edit_{eid}", use_container_width=False):
+            if st.button("Set date", key=f"ca_edit_{eid}", use_container_width=False):
                 st.session_state["ca_edit_id"] = eid
                 st.rerun()
 
+    st.markdown("</div>", unsafe_allow_html=True)
+
     divider()
-    # ── Download ──────────────────────────────────────────────────────────────
     df_ca = pd.DataFrame([
         {
-            "Employee #": str(int(r["employee_id"])),
-            "Name": f"{r['last_name']}, {r['first_name']}",
-            "Building": r.get("building") or "—",
-            "Point Total": f"{float(r.get('point_total') or 0):.1f}",
-            "Last Point Date": fmt_date(r.get("last_point_date")),
+            "Employee #":         str(int(r["employee_id"])),
+            "Name":               f"{r['last_name']}, {r['first_name']}",
+            "Building":           r.get("building") or "—",
+            "Point Total":        f"{float(r.get('point_total') or 0):.1f}",
+            "Last Point Date":    fmt_date(r.get("last_point_date")),
             "Point Warning Date": fmt_date(r.get("point_warning_date")),
-            "Tier": next(
-                (lbl for _, lbl, fn, *_ in tiers if fn(float(r.get("point_total") or 0))),
-                "—"
-            ),
+            "Tier":               tier_for(float(r.get("point_total") or 0))[1],
         }
         for r in ca_rows
     ])
