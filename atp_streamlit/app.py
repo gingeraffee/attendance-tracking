@@ -766,23 +766,10 @@ def warn_box(msg: str) -> None:
     st.markdown(f"<div class='warn-box'>{msg}</div>", unsafe_allow_html=True)
 
 
-def page_heading(title: str, sub: str, accent_override: str | None = None) -> None:
-    """Render the page title block.
-
-    accent_override: optional CSS color string that replaces the default
-    cyan->blue->purple gradient on the accent bar (e.g. '#ff3050' for urgent).
-    """
-    if accent_override:
-        bar_style = (
-            f"background:{accent_override};"
-            f"box-shadow:0 0 14px {accent_override};"
-        )
-    else:
-        bar_style = ""
+def page_heading(title: str, sub: str) -> None:
     st.markdown(
         f"<div class='page-heading'><h1>{title}</h1>"
-        f"<div class='accent-bar' style='{bar_style}'></div>"
-        f"<p>{sub}</p></div>",
+        f"<div class='accent-bar'></div><p>{sub}</p></div>",
         unsafe_allow_html=True,
     )
 
@@ -971,57 +958,8 @@ def render_hr_live_monitor(
     )
 
 
-def render_tech_hud(
-    building: str,
-    *,
-    rolloffs_due_7d: int = 0,
-    at_risk_5plus: int = 0,
-    total_employees: int = 1,
-) -> None:
-    """Live HUD status bar — ticking clock, building, uptime, and reactive indicators.
-
-    ACTIVITY label:
-      Calm     — no roll-offs due in 7 days
-      Moderate — 1–2 roll-offs due in 7 days
-      Urgent   — 3+ roll-offs due in 7 days
-
-    Bar accent color driven by % of employees at 5+ points:
-      Green  — < 10 % at risk
-      Amber  — 10–24 %
-      Red    — 25 %+
-    """
-    # ── Activity level from roll-off urgency ──────────────────────────────────
-    if rolloffs_due_7d == 0:
-        activity_label = "CALM"
-        activity_color = "#00e896"   # green
-        activity_glow  = "rgba(0,232,150,.70)"
-        bar_speed      = "1.8s"
-    elif rolloffs_due_7d <= 2:
-        activity_label = "MODERATE"
-        activity_color = "#f0a800"   # amber
-        activity_glow  = "rgba(240,168,0,.70)"
-        bar_speed      = "1.1s"
-    else:
-        activity_label = "URGENT"
-        activity_color = "#ff3050"   # red
-        activity_glow  = "rgba(255,48,80,.80)"
-        bar_speed      = "0.55s"
-
-    # ── Accent / border color from % of employees at 5+ pts ──────────────────
-    pct_at_risk = (at_risk_5plus / max(total_employees, 1)) * 100.0
-    if pct_at_risk < 10.0:
-        risk_color     = "rgba(0,200,240,.30)"    # cyan (normal)
-        risk_glow_top  = "rgba(0,200,240,.30)"
-        risk_border    = "rgba(0,120,255,.22)"
-    elif pct_at_risk < 25.0:
-        risk_color     = "rgba(240,168,0,.55)"    # amber
-        risk_glow_top  = "rgba(240,168,0,.45)"
-        risk_border    = "rgba(240,168,0,.38)"
-    else:
-        risk_color     = "rgba(255,48,80,.60)"    # red
-        risk_glow_top  = "rgba(255,48,80,.50)"
-        risk_border    = "rgba(255,48,80,.45)"
-
+def render_tech_hud(building: str) -> None:
+    """Live HUD status bar — ticking clock, building, uptime, and animated indicators."""
     components.html(
         f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
@@ -1036,7 +974,7 @@ body {{
   display: flex; justify-content: space-between; align-items: center;
   padding: 7px 14px;
   background: rgba(2,8,22,0.94);
-  border: 1px solid {risk_border};
+  border: 1px solid rgba(0,120,255,.22);
   border-radius: 10px;
   font-size: 10.5px; letter-spacing: .08em; color: #2d4860;
   box-shadow: 0 0 0 1px rgba(0,200,240,.04), 0 4px 24px rgba(0,0,0,.60),
@@ -1044,11 +982,11 @@ body {{
   position: relative; overflow: hidden;
 }}
 
-/* Horizontal scan sweep */
+/* Horizontal scan sweep across the whole HUD */
 #hud::after {{
   content: '';
   position: absolute; top: 0; left: -80%; width: 40%; height: 100%;
-  background: linear-gradient(90deg, transparent, {risk_color}, transparent);
+  background: linear-gradient(90deg, transparent, rgba(0,200,240,.04), transparent);
   animation: hud-sweep 7s linear infinite;
   pointer-events: none;
 }}
@@ -1057,11 +995,11 @@ body {{
   100% {{ left: 160%; }}
 }}
 
-/* Top border accent — color matches risk level */
+/* Top border accent */
 #hud::before {{
   content: '';
   position: absolute; top: 0; left: 0; right: 0; height: 1px;
-  background: linear-gradient(90deg, transparent 5%, {risk_glow_top} 50%, transparent 95%);
+  background: linear-gradient(90deg, transparent 5%, rgba(0,200,240,.30) 50%, transparent 95%);
   animation: hud-top 5s ease-in-out infinite;
 }}
 @keyframes hud-top {{
@@ -1071,6 +1009,7 @@ body {{
 
 .hud-left  {{ display:flex; align-items:center; gap:0; flex-wrap:nowrap; }}
 .hud-right {{ display:flex; align-items:center; gap:0; flex-wrap:nowrap; }}
+
 .seg {{ white-space:nowrap; }}
 
 /* Online status dot */
@@ -1085,26 +1024,23 @@ body {{
   50%      {{ opacity:.45; box-shadow:0 0 12px rgba(0,232,150,.95); }}
 }}
 
-/* Activity bars — speed + color driven by roll-off urgency */
-.bars {{ display:inline-flex; align-items:flex-end; gap:2px; height:12px; margin:0 4px; vertical-align:middle; }}
-.bar  {{ width:3px; border-radius:1px; }}
-.bar:nth-child(1) {{ animation:bar-bounce {bar_speed} ease-in-out infinite 0.0s; }}
-.bar:nth-child(2) {{ animation:bar-bounce {bar_speed} ease-in-out infinite 0.15s; }}
-.bar:nth-child(3) {{ animation:bar-bounce {bar_speed} ease-in-out infinite 0.30s; }}
+/* Activity bars (3 mini bars) */
+.bars {{ display:inline-flex; align-items:flex-end; gap:2px; height:12px; margin:0 5px; vertical-align:middle; }}
+.bar  {{ width:3px; background:rgba(0,200,240,.35); border-radius:1px; }}
+.bar:nth-child(1) {{ animation:bar-bounce 1.4s ease-in-out infinite 0.0s; }}
+.bar:nth-child(2) {{ animation:bar-bounce 1.4s ease-in-out infinite 0.3s; }}
+.bar:nth-child(3) {{ animation:bar-bounce 1.4s ease-in-out infinite 0.6s; }}
 @keyframes bar-bounce {{
-  0%,100% {{ height:3px;  background:{activity_color}; opacity:.35; }}
-  50%      {{ height:11px; background:{activity_color}; opacity:1; box-shadow:0 0 6px {activity_glow}; }}
+  0%,100% {{ height:3px;  background:rgba(0,200,240,.25); }}
+  50%      {{ height:11px; background:rgba(0,200,240,.75); box-shadow:0 0 5px rgba(0,200,240,.40); }}
 }}
 
-/* Activity label color */
-.activity-val {{ color:{activity_color}; font-weight:700; }}
-
-/* Signal strength dots */
+/* Signal strength (3 dots) */
 .signal {{ display:inline-flex; align-items:center; gap:3px; margin:0 4px; vertical-align:middle; }}
 .sig-dot {{ width:4px; height:4px; border-radius:50%; }}
-.sig-dot:nth-child(1) {{ background:{risk_color}; box-shadow:0 0 4px {risk_color}; animation:sig-pulse 2.4s ease-in-out infinite 0.0s; }}
-.sig-dot:nth-child(2) {{ background:{risk_color}; animation:sig-pulse 2.4s ease-in-out infinite 0.6s; opacity:.65; }}
-.sig-dot:nth-child(3) {{ background:{risk_color}; animation:sig-pulse 2.4s ease-in-out infinite 1.2s; opacity:.35; }}
+.sig-dot:nth-child(1) {{ background:rgba(0,200,240,.90); box-shadow:0 0 4px rgba(0,200,240,.50); animation:sig-pulse 2.4s ease-in-out infinite 0.0s; }}
+.sig-dot:nth-child(2) {{ background:rgba(0,200,240,.65); animation:sig-pulse 2.4s ease-in-out infinite 0.6s; }}
+.sig-dot:nth-child(3) {{ background:rgba(0,200,240,.35); animation:sig-pulse 2.4s ease-in-out infinite 1.2s; }}
 @keyframes sig-pulse {{ 0%,100%{{opacity:.50;}} 50%{{opacity:1;}} }}
 
 .val    {{ color:#4a88c0; }}
@@ -1123,7 +1059,7 @@ body {{
     <span class="sep">|</span>
     <span class="seg">
       <span class="bars"><span class="bar"></span><span class="bar"></span><span class="bar"></span></span>
-      ACTIVITY&nbsp;<span class="activity-val">{activity_label}</span>
+      ACTIVITY
     </span>
     <span class="sep">|</span>
     <span class="seg">BUILDING&nbsp;<span class="val">{building.upper()}</span></span>
@@ -1620,9 +1556,11 @@ def load_employees(conn, q: str = "", building: str = "All") -> list[dict]:
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 def dashboard_page(conn, building: str) -> None:
-    # Placeholders rendered now, filled in after data is loaded below
-    _heading_placeholder = st.empty()
-    _hud_placeholder     = st.empty()
+    page_heading(
+        '<span class="live-dot"></span>Dashboard',
+        "Real-time overview of attendance activity, thresholds, and upcoming actions.",
+    )
+    render_tech_hud(building)
 
     today = date.today()
     in_30_days = today + timedelta(days=30)
@@ -1704,14 +1642,6 @@ def dashboard_page(conn, building: str) -> None:
         points_7d = _scalar_n(conn, sql_points_since, (*emp_ids, since_7d))
         rolloffs_due_7d = _scalar_n(conn, sql_roll_due_7d, (*emp_ids, today.isoformat(), due_7d))
         perfect_due_7d = _scalar_n(conn, sql_perf_due_7d, (*emp_ids, today.isoformat(), due_7d))
-
-    render_hr_live_monitor(
-        points_24h=points_24h,
-        points_7d=points_7d,
-        rolloffs_due_7d=rolloffs_due_7d,
-        perfect_due_7d=perfect_due_7d,
-        label="At a glance",
-    )
 
     if is_pg(conn):
         sql_emp_detail = f'''
@@ -2088,32 +2018,6 @@ def dashboard_page(conn, building: str) -> None:
         key: sum(1 for r in emp_detail_rows if fn(float(r.get("point_total") or 0)))
         for key, fn in bucket_defs.items()
     }
-
-    # ── Reactive heading + HUD — filled now that we have real data ────────────
-    at_risk_5plus = bucket_counts.get("5-6", 0) + bucket_counts.get("7", 0)
-    total_active  = len(emp_detail_rows)
-    pct_at_risk   = (at_risk_5plus / max(total_active, 1)) * 100.0
-
-    if pct_at_risk < 10.0:
-        accent_color = None          # default cyan gradient
-    elif pct_at_risk < 25.0:
-        accent_color = "#f0a800"     # amber
-    else:
-        accent_color = "#ff3050"     # red
-
-    with _heading_placeholder.container():
-        page_heading(
-            '<span class="live-dot"></span>Dashboard',
-            "Real-time overview of attendance activity, thresholds, and upcoming actions.",
-            accent_override=accent_color,
-        )
-    with _hud_placeholder.container():
-        render_tech_hud(
-            building,
-            rolloffs_due_7d=rolloffs_due_7d,
-            at_risk_5plus=at_risk_5plus,
-            total_employees=total_active,
-        )
 
 
     st.markdown(
@@ -2601,7 +2505,7 @@ def dashboard_page(conn, building: str) -> None:
 
 
 
-# ── PTO Usage Analysis ────────────────────────────────────────────────────────
+# ── PTO Usage Analytics ────────────────────────────────────────────────────────
 _PTO_PALETTE = [
     "#00d4ff", "#7b61ff", "#00e5a0", "#ff6b6b", "#ffa94d",
     "#a9e34b", "#f06595", "#74c0fc", "#e599f7", "#63e6be",
@@ -2639,7 +2543,7 @@ def _pto_metric(label: str, value: str, sub: str = "") -> None:
 
 
 def pto_page(conn, building: str) -> None:
-    page_heading("PTO Usage Analysis", "Upload a CSV export to analyze PTO patterns by type, building, and employee.")
+    page_heading("PTO Usage Analytics", "Upload a CSV export to analyze PTO patterns by type, building, and employee.")
 
     # ── Active employee roster from DB (active_only=True by default) ────────
     active_db = load_employees(conn, building="All")
@@ -2653,6 +2557,32 @@ def pto_page(conn, building: str) -> None:
         active_count_in_scope = sum(1 for e in active_db if (e.get("location") or "") == building)
     else:
         active_count_in_scope = len(active_db)
+
+    # ── Data for At a Glance monitor ─────────────────────────────────────────
+    _pto_emp_ids = [int(e["employee_id"]) for e in active_db]
+    _pto_ph = ",".join(["%s" if is_pg(conn) else "?"] * len(_pto_emp_ids)) if _pto_emp_ids else "NULL"
+    _today   = date.today()
+    _since_24h = (_today - timedelta(days=1)).isoformat()
+    _since_7d  = (_today - timedelta(days=7)).isoformat()
+    _due_7d    = (_today + timedelta(days=7)).isoformat()
+
+    def _pto_scalar(sql: str, params: tuple) -> int:
+        rows = fetchall(conn, sql, params)
+        return int(dict(rows[0]).get("n") or 0) if rows else 0
+
+    if _pto_emp_ids:
+        if is_pg(conn):
+            points_24h      = _pto_scalar(f"SELECT COUNT(*) AS n FROM points_history ph WHERE ph.employee_id IN ({_pto_ph}) AND (ph.point_date::date) >= (%s::date) AND COALESCE(ph.points,0.0)>0.0", (*_pto_emp_ids, _since_24h))
+            points_7d       = _pto_scalar(f"SELECT COUNT(*) AS n FROM points_history ph WHERE ph.employee_id IN ({_pto_ph}) AND (ph.point_date::date) >= (%s::date) AND COALESCE(ph.points,0.0)>0.0", (*_pto_emp_ids, _since_7d))
+            rolloffs_due_7d = _pto_scalar(f"SELECT COUNT(*) AS n FROM employees WHERE employee_id IN ({_pto_ph}) AND rolloff_date IS NOT NULL AND (rolloff_date::date) >= (%s::date) AND (rolloff_date::date) <= (%s::date)", (*_pto_emp_ids, _today.isoformat(), _due_7d))
+            perfect_due_7d  = _pto_scalar(f"SELECT COUNT(*) AS n FROM employees WHERE employee_id IN ({_pto_ph}) AND perfect_attendance IS NOT NULL AND (perfect_attendance::date) >= (%s::date) AND (perfect_attendance::date) <= (%s::date)", (*_pto_emp_ids, _today.isoformat(), _due_7d))
+        else:
+            points_24h      = _pto_scalar(f"SELECT COUNT(*) AS n FROM points_history ph WHERE ph.employee_id IN ({_pto_ph}) AND date(ph.point_date) >= date(?) AND COALESCE(ph.points,0.0)>0.0", (*_pto_emp_ids, _since_24h))
+            points_7d       = _pto_scalar(f"SELECT COUNT(*) AS n FROM points_history ph WHERE ph.employee_id IN ({_pto_ph}) AND date(ph.point_date) >= date(?) AND COALESCE(ph.points,0.0)>0.0", (*_pto_emp_ids, _since_7d))
+            rolloffs_due_7d = _pto_scalar(f"SELECT COUNT(*) AS n FROM employees WHERE employee_id IN ({_pto_ph}) AND rolloff_date IS NOT NULL AND date(rolloff_date) >= date(?) AND date(rolloff_date) <= date(?)", (*_pto_emp_ids, _today.isoformat(), _due_7d))
+            perfect_due_7d  = _pto_scalar(f"SELECT COUNT(*) AS n FROM employees WHERE employee_id IN ({_pto_ph}) AND perfect_attendance IS NOT NULL AND date(perfect_attendance) >= date(?) AND date(perfect_attendance) <= date(?)", (*_pto_emp_ids, _today.isoformat(), _due_7d))
+    else:
+        points_24h = points_7d = rolloffs_due_7d = perfect_due_7d = 0
 
     # ── Load persisted PTO data from DB into session state if not already loaded ──
     if "pto_df" not in st.session_state:
@@ -2802,6 +2732,14 @@ def pto_page(conn, building: str) -> None:
         st.rerun()
 
     df_all: pd.DataFrame = st.session_state["pto_df"].copy()
+
+    render_hr_live_monitor(
+        points_24h=points_24h,
+        points_7d=points_7d,
+        rolloffs_due_7d=rolloffs_due_7d,
+        perfect_due_7d=perfect_due_7d,
+        label="At a glance",
+    )
 
     # ── Filters ─────────────────────────────────────────────────────────────
     import re as _re
@@ -4085,7 +4023,7 @@ def main() -> None:
         st.markdown("<span class='sidebar-nav-label'>Navigation</span>", unsafe_allow_html=True)
         page = st.radio(
             "nav",
-            ["Dashboard", "PTO Usage Analysis", "Employees", "Points Ledger", "Manage Employees", "Exports & Forecasts", "System Updates"],
+            ["Dashboard", "PTO Usage Analytics", "Employees", "Points Ledger", "Manage Employees", "Exports & Forecasts", "System Updates"],
             key="page",
             label_visibility="collapsed",
         )
@@ -4103,7 +4041,7 @@ def main() -> None:
 
     if page == "Dashboard":
         dashboard_page(conn, building)
-    elif page == "PTO Usage Analysis":
+    elif page == "PTO Usage Analytics":
         pto_page(conn, building)
     elif page == "Employees":
         employees_page(conn, building)
