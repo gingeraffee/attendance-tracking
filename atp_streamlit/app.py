@@ -1471,219 +1471,304 @@ def login_page() -> None:
 
 
 def build_point_history_pdf(employee: dict, history: list[dict]) -> bytes:
-    """Generate a polished attendance point history PDF with premium visual styling."""
+    """Generate a premium minimalist attendance point history PDF with company branding."""
+    from reportlab.platypus import Image
+    from reportlab.lib.enums import TA_CENTER
+
     buffer = BytesIO()
+
+    # ── Brand palette ─────────────────────────────────────────────────────────
+    C_NAVY    = colors.HexColor("#0D2461")   # AAP deep navy
+    C_RED     = colors.HexColor("#CC1F2D")   # AAP brand red
+    C_GREEN   = colors.HexColor("#15803D")   # positive (points removed = good)
+    C_AMBER   = colors.HexColor("#B45309")   # monitor
+    C_TEXT    = colors.HexColor("#0D1117")   # near-black body text
+    C_MUTED   = colors.HexColor("#64748B")   # secondary text
+    C_DIVIDER = colors.HexColor("#E2E8F0")   # subtle border
+    C_ROW_ALT = colors.HexColor("#F5F7FF")   # alternating row tint
+    C_STAT_BG = colors.HexColor("#F8F9FF")   # stat box background
+    C_WHITE   = colors.white
+
+    # ── Page geometry ─────────────────────────────────────────────────────────
+    PW, PH = letter
+    LM = RM = 0.5 * inch
+    HEADER_H = 0.82 * inch   # height of drawn header zone
+    TM = HEADER_H + 0.18 * inch
+    BM = 0.48 * inch
+    CW = PW - LM - RM        # 7.5 inch content width
+
+    # ── Employee data ─────────────────────────────────────────────────────────
+    full_name   = f"{employee.get('last_name', '')}, {employee.get('first_name', '')}".strip(", ")
+    emp_id      = str(employee.get("employee_id", "—"))
+    location    = str(employee.get("Location") or employee.get("location") or "—")
+    cur_pts     = float(employee.get("point_total") or 0)
+    gen_on      = datetime.now().strftime("%m/%d/%Y  %I:%M %p")
+
+    if cur_pts >= 8:
+        status_txt = "AT RISK"
+        status_col = C_RED
+    elif cur_pts >= 4:
+        status_txt = "MONITOR"
+        status_col = C_AMBER
+    else:
+        status_txt = "STABLE"
+        status_col = C_GREEN
+
+    # ── Summary stats ─────────────────────────────────────────────────────────
+    total_events = len(history)
+    pts_added    = sum(float(r.get("points") or 0) for r in history if float(r.get("points") or 0) > 0)
+    pts_removed  = sum(float(r.get("points") or 0) for r in history if float(r.get("points") or 0) < 0)
+    net_change   = pts_added + pts_removed
+
+    # ── Styles ────────────────────────────────────────────────────────────────
+    styles = getSampleStyleSheet()
+
+    def S(name, **kw):
+        return ParagraphStyle(name, parent=styles["Normal"], **kw)
+
+    lbl_s    = S("PDFLbl",   fontName="Helvetica-Bold", fontSize=7,   textColor=C_MUTED, spaceAfter=2)
+    val_s    = S("PDFVal",   fontName="Helvetica-Bold", fontSize=12,  textColor=C_TEXT)
+    note_s   = S("PDFNote",  fontName="Helvetica",      fontSize=8,   leading=10,  textColor=C_TEXT)
+    reason_s = S("PDFRsn",   fontName="Helvetica",      fontSize=8.5, leading=10.5, textColor=C_TEXT)
+    date_s   = S("PDFDt",    fontName="Helvetica",      fontSize=8.5, textColor=C_TEXT)
+    hdr_s    = S("PDFHdr",   fontName="Helvetica-Bold", fontSize=8,   textColor=C_WHITE)
+    hdr_r_s  = S("PDFHdrR",  fontName="Helvetica-Bold", fontSize=8,   textColor=C_WHITE, alignment=TA_RIGHT)
+    stat_l_s = S("PDFStLbl", fontName="Helvetica-Bold", fontSize=7,   textColor=C_MUTED, spaceAfter=3, alignment=TA_CENTER)
+    stat_v_s = S("PDFStVal", fontName="Helvetica-Bold", fontSize=17,  textColor=C_TEXT,  alignment=TA_CENTER)
+    empty_s  = S("PDFEmpty", fontName="Helvetica",      fontSize=10,  leading=14, textColor=C_MUTED)
+
+    # ── Logo / asset path ─────────────────────────────────────────────────────
+    LOGO_PATH = Path(__file__).resolve().parent.parent / "assets" / "logo.png"
+
+    # ── Per-page header + footer via canvas callback ───────────────────────────
+    def draw_page(canvas, doc):
+        canvas.saveState()
+
+        # ── Header: two accent stripes at the bottom edge of header zone ──────
+        stripe_y = PH - HEADER_H
+        canvas.setFillColor(C_NAVY)
+        canvas.rect(0, stripe_y - 3.5, PW, 3.5, fill=1, stroke=0)
+        canvas.setFillColor(C_RED)
+        canvas.rect(0, stripe_y - 6.0, PW, 2.5, fill=1, stroke=0)
+
+        # ── Logo ──────────────────────────────────────────────────────────────
+        logo_h = 0.52 * inch
+        logo_y = (PH - HEADER_H) + (HEADER_H - logo_h) / 2
+        if LOGO_PATH.exists():
+            try:
+                canvas.drawImage(
+                    str(LOGO_PATH), LM, logo_y,
+                    height=logo_h, width=2.6 * inch,
+                    preserveAspectRatio=True, mask="auto",
+                )
+            except Exception:
+                pass
+
+        # ── Title block (right-aligned) ────────────────────────────────────────
+        mid_y = PH - HEADER_H / 2
+        canvas.setFillColor(C_MUTED)
+        canvas.setFont("Helvetica", 7.5)
+        canvas.drawRightString(PW - RM, mid_y + 15, "AMERICAN ASSOCIATED PHARMACIES")
+        canvas.setFillColor(C_NAVY)
+        canvas.setFont("Helvetica-Bold", 17)
+        canvas.drawRightString(PW - RM, mid_y - 1, "ATTENDANCE POINT HISTORY")
+        canvas.setFillColor(C_MUTED)
+        canvas.setFont("Helvetica", 7.5)
+        canvas.drawRightString(PW - RM, mid_y - 15, f"Generated  {gen_on}")
+
+        # ── Footer ────────────────────────────────────────────────────────────
+        foot_y = BM - 6
+        canvas.setStrokeColor(C_DIVIDER)
+        canvas.setLineWidth(0.5)
+        canvas.line(LM, foot_y, PW - RM, foot_y)
+        canvas.setFillColor(C_MUTED)
+        canvas.setFont("Helvetica", 7)
+        canvas.drawString(LM, foot_y - 11, "CONFIDENTIAL — FOR INTERNAL USE ONLY")
+        canvas.drawCentredString(PW / 2, foot_y - 11, full_name)
+        canvas.drawRightString(PW - RM, foot_y - 11, f"Page {doc.page}")
+
+        canvas.restoreState()
+
     doc = SimpleDocTemplate(
         buffer,
         pagesize=letter,
-        leftMargin=0.75 * inch,
-        rightMargin=0.75 * inch,
-        topMargin=0.75 * inch,
-        bottomMargin=0.75 * inch,
-    )
-    styles = getSampleStyleSheet()
-    brand_navy = colors.HexColor("#0F172A")
-    brand_royal = colors.HexColor("#2563EB")
-    brand_cyan = colors.HexColor("#22D3EE")
-    slate_200 = colors.HexColor("#CBD5E1")
-    slate_100 = colors.HexColor("#F1F5F9")
-    ink = colors.HexColor("#0B1120")
-
-    title_style = ParagraphStyle(
-        "ReportTitle",
-        parent=styles["Title"],
-        fontName="Helvetica-Bold",
-        fontSize=24,
-        leading=28,
-        textColor=colors.white,
-        alignment=TA_LEFT,
-        spaceAfter=8,
-    )
-    subtitle_style = ParagraphStyle(
-        "ReportSubtitle",
-        parent=styles["Normal"],
-        fontName="Helvetica",
-        fontSize=10,
-        leading=13,
-        textColor=colors.HexColor("#C7D2FE"),
-    )
-    label_style = ParagraphStyle(
-        "MetaLabel",
-        parent=styles["Normal"],
-        fontName="Helvetica-Bold",
-        fontSize=8,
-        textColor=colors.HexColor("#64748B"),
-        spaceAfter=1,
-    )
-    value_style = ParagraphStyle(
-        "MetaValue",
-        parent=styles["Normal"],
-        fontName="Helvetica-Bold",
-        fontSize=13,
-        textColor=ink,
-    )
-    note_style = ParagraphStyle(
-        "TableNote",
-        parent=styles["Normal"],
-        fontName="Helvetica",
-        fontSize=8.5,
-        leading=10.5,
-        textColor=colors.HexColor("#1E293B"),
-    )
-    points_style = ParagraphStyle(
-        "Points",
-        parent=styles["Normal"],
-        fontName="Helvetica-Bold",
-        fontSize=9,
-        alignment=TA_RIGHT,
-    )
-    empty_style = ParagraphStyle(
-        "EmptyState",
-        parent=styles["Normal"],
-        fontName="Helvetica",
-        fontSize=10,
-        leading=14,
-        textColor=colors.HexColor("#475569"),
+        leftMargin=LM,
+        rightMargin=RM,
+        topMargin=TM,
+        bottomMargin=BM,
     )
 
-    full_name = f"{employee.get('last_name', '')}, {employee.get('first_name', '')}".strip(", ")
-    employee_id = employee.get("employee_id", "—")
-    location = employee.get("Location") or employee.get("location") or "—"
-    generated_on = datetime.now().strftime("%m/%d/%Y %I:%M %p")
-    current_points = float(employee.get("point_total") or 0)
+    story = []
 
-    header_card = Table(
+    # ── Employee info card ────────────────────────────────────────────────────
+    # col widths: 2.65 + 1.05 + 1.05 + 1.5 + 1.25 = 7.5
+    emp_col_w = [2.65 * inch, 1.05 * inch, 1.05 * inch, 1.5 * inch, 1.25 * inch]
+    pts_val_s  = S("PDFPtsV", fontName="Helvetica-Bold", fontSize=20, textColor=status_col)
+    stat_val_s = S("PDFStV",  fontName="Helvetica-Bold", fontSize=10, textColor=status_col)
+
+    emp_table = Table(
         [
             [
-                Paragraph("Attendance Point History", title_style),
-                Paragraph(
-                    "<b>Generated:</b><br/>"
-                    f"{generated_on}<br/><br/>"
-                    "<b>Status:</b><br/>"
-                    f"{'At Risk' if current_points >= 8 else 'Monitor' if current_points >= 4 else 'Stable'}",
-                    ParagraphStyle(
-                        "HeaderMeta",
-                        parent=styles["Normal"],
-                        fontName="Helvetica",
-                        fontSize=9,
-                        textColor=colors.white,
-                        leading=13,
-                        alignment=TA_RIGHT,
-                    ),
-                ),
+                Paragraph("EMPLOYEE NAME", lbl_s),
+                Paragraph("EMPLOYEE #", lbl_s),
+                Paragraph("LOCATION", lbl_s),
+                Paragraph("CURRENT POINTS", lbl_s),
+                Paragraph("STATUS", lbl_s),
             ],
-            [Paragraph("Sleek performance summary and detailed event timeline", subtitle_style), ""],
-        ],
-        colWidths=[4.8 * inch, 1.7 * inch],
-    )
-    header_card.setStyle(
-        TableStyle(
             [
-                ("BACKGROUND", (0, 0), (-1, -1), brand_navy),
-                ("SPAN", (0, 1), (1, 1)),
-                ("BOX", (0, 0), (-1, -1), 0, colors.white),
-                ("LINEBELOW", (0, 0), (-1, 0), 1, brand_cyan),
-                ("LEFTPADDING", (0, 0), (-1, -1), 16),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 16),
-                ("TOPPADDING", (0, 0), (-1, -1), 14),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ]
-        )
+                Paragraph(full_name or "—", val_s),
+                Paragraph(emp_id, val_s),
+                Paragraph(location, val_s),
+                Paragraph(f"{cur_pts:.1f}", pts_val_s),
+                Paragraph(status_txt, stat_val_s),
+            ],
+        ],
+        colWidths=emp_col_w,
     )
+    emp_table.setStyle(TableStyle([
+        ("BACKGROUND",   (0, 0), (-1, 0), colors.HexColor("#EEF2FF")),
+        ("BACKGROUND",   (0, 1), (-1, 1), C_WHITE),
+        ("LINEABOVE",    (0, 0), (-1, 0), 3,   C_NAVY),
+        ("LINEBEFORE",   (0, 0), (0, -1), 3,   C_RED),
+        ("LINEBELOW",    (0, 1), (-1, 1), 0.5, C_DIVIDER),
+        ("LINEAFTER",    (-1, 0), (-1, -1), 0.5, C_DIVIDER),
+        ("INNERGRID",    (0, 0), (-1, -1), 0.4, C_DIVIDER),
+        ("LEFTPADDING",  (0, 0), (-1, -1), 10),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+        ("TOPPADDING",   (0, 0), (-1, 0), 6),
+        ("BOTTOMPADDING",(0, 0), (-1, 0), 4),
+        ("TOPPADDING",   (0, 1), (-1, 1), 6),
+        ("BOTTOMPADDING",(0, 1), (-1, 1), 8),
+        ("VALIGN",       (0, 0), (-1, -1), "MIDDLE"),
+    ]))
+    story.append(emp_table)
+    story.append(Spacer(1, 0.1 * inch))
 
-    profile_grid = Table(
+    # ── Summary stats strip ───────────────────────────────────────────────────
+    stat_w = CW / 5
+
+    def stat_val_color(val, pos_bad=True):
+        """Return colored ParagraphStyle for a stat value."""
+        if val == 0:
+            col = C_MUTED
+        elif pos_bad:
+            col = C_RED if val > 0 else C_GREEN
+        else:
+            col = C_GREEN if val > 0 else C_RED
+        return S(f"SV_{id(val)}", fontName="Helvetica-Bold", fontSize=17, textColor=col, alignment=TA_CENTER)
+
+    stats_table = Table(
         [
-            [Paragraph("EMPLOYEE", label_style), Paragraph("EMPLOYEE #", label_style), Paragraph("LOCATION", label_style), Paragraph("CURRENT POINTS", label_style)],
-            [Paragraph(full_name or "—", value_style), Paragraph(str(employee_id), value_style), Paragraph(str(location), value_style), Paragraph(f"{current_points:.1f}", value_style)],
-        ],
-        colWidths=[2.6 * inch, 1.2 * inch, 1.1 * inch, 1.6 * inch],
-    )
-    profile_grid.setStyle(
-        TableStyle(
             [
-                ("BACKGROUND", (0, 0), (-1, 0), slate_100),
-                ("BACKGROUND", (0, 1), (-1, 1), colors.white),
-                ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#64748B")),
-                ("LINEABOVE", (0, 0), (-1, 0), 1, slate_200),
-                ("LINEBELOW", (0, 1), (-1, 1), 1, slate_200),
-                ("LINEBEFORE", (0, 0), (-1, -1), 0.5, slate_200),
-                ("LINEAFTER", (0, 0), (-1, -1), 0.5, slate_200),
-                ("LEFTPADDING", (0, 0), (-1, -1), 10),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 10),
-                ("TOPPADDING", (0, 0), (-1, -1), 8),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ]
-        )
+                Paragraph("TOTAL EVENTS",    stat_l_s),
+                Paragraph("POINTS ADDED",    stat_l_s),
+                Paragraph("POINTS REMOVED",  stat_l_s),
+                Paragraph("NET CHANGE",      stat_l_s),
+                Paragraph("CURRENT BALANCE", stat_l_s),
+            ],
+            [
+                Paragraph(str(total_events), stat_v_s),
+                Paragraph(f"+{pts_added:.1f}",   S("SV1", fontName="Helvetica-Bold", fontSize=17, textColor=C_RED  if pts_added  > 0 else C_MUTED, alignment=TA_CENTER)),
+                Paragraph(f"{pts_removed:.1f}",  S("SV2", fontName="Helvetica-Bold", fontSize=17, textColor=C_GREEN if pts_removed < 0 else C_MUTED, alignment=TA_CENTER)),
+                Paragraph(f"{net_change:+.1f}",  S("SV3", fontName="Helvetica-Bold", fontSize=17, textColor=C_RED  if net_change > 0 else C_GREEN if net_change < 0 else C_MUTED, alignment=TA_CENTER)),
+                Paragraph(f"{cur_pts:.1f}",      S("SV4", fontName="Helvetica-Bold", fontSize=17, textColor=status_col, alignment=TA_CENTER)),
+            ],
+        ],
+        colWidths=[stat_w] * 5,
     )
+    stats_table.setStyle(TableStyle([
+        ("BACKGROUND",   (0, 0), (-1, -1), C_STAT_BG),
+        ("BOX",          (0, 0), (-1, -1), 0.5, C_DIVIDER),
+        ("INNERGRID",    (0, 0), (-1, -1), 0.4, C_DIVIDER),
+        ("LINEABOVE",    (0, 0), (-1, 0),  1.5, C_NAVY),
+        ("LEFTPADDING",  (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING",   (0, 0), (-1, 0),  6),
+        ("BOTTOMPADDING",(0, 0), (-1, 0),  2),
+        ("TOPPADDING",   (0, 1), (-1, 1),  4),
+        ("BOTTOMPADDING",(0, 1), (-1, 1),  8),
+        ("VALIGN",       (0, 0), (-1, -1), "MIDDLE"),
+    ]))
+    story.append(stats_table)
+    story.append(Spacer(1, 0.11 * inch))
 
-    story = [
-        header_card,
-        Spacer(1, 0.16 * inch),
-        profile_grid,
-        Spacer(1, 0.18 * inch),
-    ]
+    # ── Section label ─────────────────────────────────────────────────────────
+    sec_lbl = Table(
+        [[Paragraph("POINT HISTORY", S("SecLbl", fontName="Helvetica-Bold", fontSize=7.5, textColor=C_NAVY))]],
+        colWidths=[CW],
+    )
+    sec_lbl.setStyle(TableStyle([
+        ("LINEABOVE",    (0, 0), (-1, -1), 2,   C_NAVY),
+        ("LINEBELOW",    (0, 0), (-1, -1), 0.5, C_DIVIDER),
+        ("LEFTPADDING",  (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING",   (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING",(0, 0), (-1, -1), 5),
+    ]))
+    story.append(sec_lbl)
+
+    # ── History table ─────────────────────────────────────────────────────────
+    # col widths: 0.88 + 0.62 + 1.6 + 3.52 + 0.88 = 7.5 inch
+    col_w = [0.88 * inch, 0.62 * inch, 1.6 * inch, 3.52 * inch, 0.88 * inch]
 
     if history:
-        table_rows = [["Date", "Points", "Reason", "Note", "Running Total"]]
-        point_cell_styles: list[tuple[int, colors.Color]] = []
-        for row in history:
-            point_value = float(row.get("points") or 0)
-            running_total = float(row.get("point_total") or 0)
-            table_rows.append(
-                [
-                    fmt_date(row.get("point_date")),
-                    Paragraph(f"{point_value:+.1f}", points_style),
-                    str(row.get("reason") or "—"),
-                    Paragraph(str(row.get("note") or "—"), note_style),
-                    Paragraph(f"{running_total:.1f}", points_style),
-                ]
-            )
-            color = colors.HexColor("#16A34A") if point_value < 0 else colors.HexColor("#DC2626") if point_value > 0 else colors.HexColor("#475569")
-            point_cell_styles.append((len(table_rows) - 1, color))
-
-        table = Table(table_rows, colWidths=[1.0 * inch, 0.75 * inch, 1.5 * inch, 3.0 * inch, 0.95 * inch], repeatRows=1)
-        table_style_commands = [
-            ("BACKGROUND", (0, 0), (-1, 0), brand_royal),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, -1), 9),
-            ("GRID", (0, 0), (-1, -1), 0.5, slate_200),
-            ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, slate_100]),
-            ("ALIGN", (1, 0), (1, -1), "RIGHT"),
-            ("ALIGN", (4, 0), (4, -1), "RIGHT"),
-            ("LEFTPADDING", (0, 0), (-1, -1), 8),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-            ("TOPPADDING", (0, 0), (-1, -1), 7),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+        table_rows = [[
+            Paragraph("DATE",    hdr_s),
+            Paragraph("PTS",     hdr_r_s),
+            Paragraph("REASON",  hdr_s),
+            Paragraph("NOTE",    hdr_s),
+            Paragraph("BALANCE", hdr_r_s),
+        ]]
+        ts_cmds = [
+            ("BACKGROUND",   (0, 0), (-1, 0),  C_NAVY),
+            ("LINEBELOW",    (0, 0), (-1, 0),  2,   C_RED),
+            ("ROWBACKGROUNDS",(0, 1), (-1, -1), [C_WHITE, C_ROW_ALT]),
+            ("INNERGRID",    (0, 0), (-1, -1), 0.35, C_DIVIDER),
+            ("BOX",          (0, 0), (-1, -1), 0.5,  C_DIVIDER),
+            ("FONTSIZE",     (0, 0), (-1, -1), 8.5),
+            ("LEFTPADDING",  (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("TOPPADDING",   (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING",(0, 0), (-1, -1), 5),
+            ("TOPPADDING",   (0, 0), (-1, 0),  6),
+            ("BOTTOMPADDING",(0, 0), (-1, 0),  6),
+            ("VALIGN",       (0, 0), (-1, -1), "TOP"),
         ]
-        for row_index, point_color in point_cell_styles:
-            table_style_commands.append(("TEXTCOLOR", (1, row_index), (1, row_index), point_color))
-        table.setStyle(TableStyle(table_style_commands))
-        story.append(table)
-    else:
-        empty_card = Table(
-            [[Paragraph("No point history entries were found for this employee.", empty_style)]],
-            colWidths=[6.5 * inch],
-        )
-        empty_card.setStyle(
-            TableStyle(
-                [
-                    ("BACKGROUND", (0, 0), (-1, -1), slate_100),
-                    ("TEXTCOLOR", (0, 0), (-1, -1), colors.HexColor("#334155")),
-                    ("BOX", (0, 0), (-1, -1), 1, slate_200),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 12),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 12),
-                    ("TOPPADDING", (0, 0), (-1, -1), 12),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
-                ]
-            )
-        )
-        story.append(empty_card)
 
-    doc.build(story)
+        for i, row in enumerate(history):
+            pt  = float(row.get("points")      or 0)
+            tot = float(row.get("point_total") or 0)
+
+            pt_col  = C_GREEN if pt < 0 else C_RED if pt > 0 else C_MUTED
+            tot_col = C_RED if tot >= 8 else C_AMBER if tot >= 4 else C_GREEN
+
+            ri = i + 1
+            table_rows.append([
+                Paragraph(fmt_date(row.get("point_date")), date_s),
+                Paragraph(f"{pt:+.1f}",  S(f"pt{ri}",  fontName="Helvetica-Bold", fontSize=8.5, alignment=TA_RIGHT, textColor=pt_col)),
+                Paragraph(str(row.get("reason") or "—"), reason_s),
+                Paragraph(str(row.get("note")   or "—"), note_s),
+                Paragraph(f"{tot:.1f}",  S(f"tot{ri}", fontName="Helvetica-Bold", fontSize=8.5, alignment=TA_RIGHT, textColor=tot_col)),
+            ])
+
+        tbl = Table(table_rows, colWidths=col_w, repeatRows=1)
+        tbl.setStyle(TableStyle(ts_cmds))
+        story.append(tbl)
+    else:
+        empty_tbl = Table(
+            [[Paragraph("No point history entries were found for this employee.", empty_s)]],
+            colWidths=[CW],
+        )
+        empty_tbl.setStyle(TableStyle([
+            ("BACKGROUND",   (0, 0), (-1, -1), C_STAT_BG),
+            ("BOX",          (0, 0), (-1, -1), 0.5, C_DIVIDER),
+            ("LEFTPADDING",  (0, 0), (-1, -1), 16),
+            ("TOPPADDING",   (0, 0), (-1, -1), 16),
+            ("BOTTOMPADDING",(0, 0), (-1, -1), 16),
+        ]))
+        story.append(empty_tbl)
+
+    doc.build(story, onFirstPage=draw_page, onLaterPages=draw_page)
     return buffer.getvalue()
 
 
