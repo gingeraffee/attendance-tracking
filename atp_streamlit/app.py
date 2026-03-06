@@ -1424,7 +1424,7 @@ def login_page() -> None:
         st.markdown(
             f"<div class='login-card'>"
             f"  <div class='login-card-header'>"
-            f"    <div class='login-system-tag'>HR Analysis Tool</div>"
+            f"    <div class='login-system-tag'>Status | Online</div>"
             f"    {logo_tag}"
             f"    <div class='login-title'>Attendance Tracking</div>"
             f"  </div>"
