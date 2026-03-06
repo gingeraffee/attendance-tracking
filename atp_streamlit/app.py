@@ -611,9 +611,18 @@ div[data-testid="stMetric"]:nth-child(6) { animation-delay: 3.5s; }
 }
 .page-heading { animation: heading-in .45s ease-out both; }
 
-/* DataFrame table lines: temporarily static (no animated glow) */
-.stDataFrame {
+/* DataFrame/table visuals: fully static (remove moving line effects) */
+.stDataFrame,
+[data-testid="stDataFrame"],
+[data-testid="stTable"] {
     animation: none !important;
+    transition: none !important;
+}
+.stDataFrame *,
+[data-testid="stDataFrame"] *,
+[data-testid="stTable"] * {
+    animation: none !important;
+    transition: none !important;
 }
 
 /* Keep chart pulse animation */
