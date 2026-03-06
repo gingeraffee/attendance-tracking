@@ -1479,14 +1479,11 @@ def build_point_history_pdf(employee: dict, history: list[dict]) -> bytes:
 
     # ── Brand palette ─────────────────────────────────────────────────────────
     C_NAVY    = colors.HexColor("#0D2461")   # AAP deep navy
-    C_RED     = colors.HexColor("#CC1F2D")   # AAP brand red
-    C_GREEN   = colors.HexColor("#15803D")   # positive (points removed = good)
-    C_AMBER   = colors.HexColor("#B45309")   # monitor
+    C_RED     = colors.HexColor("#CC1F2D")   # AAP brand red (borders/accents only)
     C_TEXT    = colors.HexColor("#0D1117")   # near-black body text
     C_MUTED   = colors.HexColor("#64748B")   # secondary text
     C_DIVIDER = colors.HexColor("#E2E8F0")   # subtle border
     C_ROW_ALT = colors.HexColor("#F5F7FF")   # alternating row tint
-    C_STAT_BG = colors.HexColor("#F8F9FF")   # stat box background
     C_WHITE   = colors.white
 
     # ── Page geometry ─────────────────────────────────────────────────────────
@@ -1504,22 +1501,6 @@ def build_point_history_pdf(employee: dict, history: list[dict]) -> bytes:
     cur_pts     = float(employee.get("point_total") or 0)
     gen_on      = datetime.now().strftime("%m/%d/%Y  %I:%M %p")
 
-    if cur_pts >= 8:
-        status_txt = "AT RISK"
-        status_col = C_RED
-    elif cur_pts >= 4:
-        status_txt = "MONITOR"
-        status_col = C_AMBER
-    else:
-        status_txt = "STABLE"
-        status_col = C_GREEN
-
-    # ── Summary stats ─────────────────────────────────────────────────────────
-    total_events = len(history)
-    pts_added    = sum(float(r.get("points") or 0) for r in history if float(r.get("points") or 0) > 0)
-    pts_removed  = sum(float(r.get("points") or 0) for r in history if float(r.get("points") or 0) < 0)
-    net_change   = pts_added + pts_removed
-
     # ── Styles ────────────────────────────────────────────────────────────────
     styles = getSampleStyleSheet()
 
@@ -1533,8 +1514,7 @@ def build_point_history_pdf(employee: dict, history: list[dict]) -> bytes:
     date_s   = S("PDFDt",    fontName="Helvetica",      fontSize=8.5, textColor=C_TEXT)
     hdr_s    = S("PDFHdr",   fontName="Helvetica-Bold", fontSize=8,   textColor=C_WHITE)
     hdr_r_s  = S("PDFHdrR",  fontName="Helvetica-Bold", fontSize=8,   textColor=C_WHITE, alignment=TA_RIGHT)
-    stat_l_s = S("PDFStLbl", fontName="Helvetica-Bold", fontSize=7,   textColor=C_MUTED, spaceAfter=3, alignment=TA_CENTER)
-    stat_v_s = S("PDFStVal", fontName="Helvetica-Bold", fontSize=17,  textColor=C_TEXT,  alignment=TA_CENTER)
+    pts_r_s  = S("PDFPtsR",  fontName="Helvetica-Bold", fontSize=8.5, textColor=C_TEXT,  alignment=TA_RIGHT)
     empty_s  = S("PDFEmpty", fontName="Helvetica",      fontSize=10,  leading=14, textColor=C_MUTED)
 
     # ── Logo / asset path ─────────────────────────────────────────────────────
@@ -1601,10 +1581,9 @@ def build_point_history_pdf(employee: dict, history: list[dict]) -> bytes:
     story = []
 
     # ── Employee info card ────────────────────────────────────────────────────
-    # col widths: 2.65 + 1.05 + 1.05 + 1.5 + 1.25 = 7.5
-    emp_col_w = [2.65 * inch, 1.05 * inch, 1.05 * inch, 1.5 * inch, 1.25 * inch]
-    pts_val_s  = S("PDFPtsV", fontName="Helvetica-Bold", fontSize=20, textColor=status_col)
-    stat_val_s = S("PDFStV",  fontName="Helvetica-Bold", fontSize=10, textColor=status_col)
+    # col widths: 3.0 + 1.3 + 1.3 + 1.9 = 7.5
+    emp_col_w = [3.0 * inch, 1.3 * inch, 1.3 * inch, 1.9 * inch]
+    pts_val_s = S("PDFPtsV", fontName="Helvetica-Bold", fontSize=18, textColor=C_TEXT)
 
     emp_table = Table(
         [
@@ -1613,14 +1592,12 @@ def build_point_history_pdf(employee: dict, history: list[dict]) -> bytes:
                 Paragraph("EMPLOYEE #", lbl_s),
                 Paragraph("LOCATION", lbl_s),
                 Paragraph("CURRENT POINTS", lbl_s),
-                Paragraph("STATUS", lbl_s),
             ],
             [
                 Paragraph(full_name or "—", val_s),
                 Paragraph(emp_id, val_s),
                 Paragraph(location, val_s),
                 Paragraph(f"{cur_pts:.1f}", pts_val_s),
-                Paragraph(status_txt, stat_val_s),
             ],
         ],
         colWidths=emp_col_w,
@@ -1642,54 +1619,6 @@ def build_point_history_pdf(employee: dict, history: list[dict]) -> bytes:
         ("VALIGN",       (0, 0), (-1, -1), "MIDDLE"),
     ]))
     story.append(emp_table)
-    story.append(Spacer(1, 0.1 * inch))
-
-    # ── Summary stats strip ───────────────────────────────────────────────────
-    stat_w = CW / 5
-
-    def stat_val_color(val, pos_bad=True):
-        """Return colored ParagraphStyle for a stat value."""
-        if val == 0:
-            col = C_MUTED
-        elif pos_bad:
-            col = C_RED if val > 0 else C_GREEN
-        else:
-            col = C_GREEN if val > 0 else C_RED
-        return S(f"SV_{id(val)}", fontName="Helvetica-Bold", fontSize=17, textColor=col, alignment=TA_CENTER)
-
-    stats_table = Table(
-        [
-            [
-                Paragraph("TOTAL EVENTS",    stat_l_s),
-                Paragraph("POINTS ADDED",    stat_l_s),
-                Paragraph("POINTS REMOVED",  stat_l_s),
-                Paragraph("NET CHANGE",      stat_l_s),
-                Paragraph("CURRENT BALANCE", stat_l_s),
-            ],
-            [
-                Paragraph(str(total_events), stat_v_s),
-                Paragraph(f"+{pts_added:.1f}",   S("SV1", fontName="Helvetica-Bold", fontSize=17, textColor=C_RED  if pts_added  > 0 else C_MUTED, alignment=TA_CENTER)),
-                Paragraph(f"{pts_removed:.1f}",  S("SV2", fontName="Helvetica-Bold", fontSize=17, textColor=C_GREEN if pts_removed < 0 else C_MUTED, alignment=TA_CENTER)),
-                Paragraph(f"{net_change:+.1f}",  S("SV3", fontName="Helvetica-Bold", fontSize=17, textColor=C_RED  if net_change > 0 else C_GREEN if net_change < 0 else C_MUTED, alignment=TA_CENTER)),
-                Paragraph(f"{cur_pts:.1f}",      S("SV4", fontName="Helvetica-Bold", fontSize=17, textColor=status_col, alignment=TA_CENTER)),
-            ],
-        ],
-        colWidths=[stat_w] * 5,
-    )
-    stats_table.setStyle(TableStyle([
-        ("BACKGROUND",   (0, 0), (-1, -1), C_STAT_BG),
-        ("BOX",          (0, 0), (-1, -1), 0.5, C_DIVIDER),
-        ("INNERGRID",    (0, 0), (-1, -1), 0.4, C_DIVIDER),
-        ("LINEABOVE",    (0, 0), (-1, 0),  1.5, C_NAVY),
-        ("LEFTPADDING",  (0, 0), (-1, -1), 6),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-        ("TOPPADDING",   (0, 0), (-1, 0),  6),
-        ("BOTTOMPADDING",(0, 0), (-1, 0),  2),
-        ("TOPPADDING",   (0, 1), (-1, 1),  4),
-        ("BOTTOMPADDING",(0, 1), (-1, 1),  8),
-        ("VALIGN",       (0, 0), (-1, -1), "MIDDLE"),
-    ]))
-    story.append(stats_table)
     story.append(Spacer(1, 0.11 * inch))
 
     # ── Section label ─────────────────────────────────────────────────────────
@@ -1738,17 +1667,12 @@ def build_point_history_pdf(employee: dict, history: list[dict]) -> bytes:
         for i, row in enumerate(history):
             pt  = float(row.get("points")      or 0)
             tot = float(row.get("point_total") or 0)
-
-            pt_col  = C_GREEN if pt < 0 else C_RED if pt > 0 else C_MUTED
-            tot_col = C_RED if tot >= 8 else C_AMBER if tot >= 4 else C_GREEN
-
-            ri = i + 1
             table_rows.append([
                 Paragraph(fmt_date(row.get("point_date")), date_s),
-                Paragraph(f"{pt:+.1f}",  S(f"pt{ri}",  fontName="Helvetica-Bold", fontSize=8.5, alignment=TA_RIGHT, textColor=pt_col)),
+                Paragraph(f"{pt:+.1f}",  pts_r_s),
                 Paragraph(str(row.get("reason") or "—"), reason_s),
                 Paragraph(str(row.get("note")   or "—"), note_s),
-                Paragraph(f"{tot:.1f}",  S(f"tot{ri}", fontName="Helvetica-Bold", fontSize=8.5, alignment=TA_RIGHT, textColor=tot_col)),
+                Paragraph(f"{tot:.1f}",  pts_r_s),
             ])
 
         tbl = Table(table_rows, colWidths=col_w, repeatRows=1)
