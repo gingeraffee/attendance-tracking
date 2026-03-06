@@ -3251,8 +3251,7 @@ def pto_page(conn, building: str) -> None:
         _pto_metric("Lowest 10% Avg", f"{low_avg_days:.1f} days", "potential burnout flag")
 
     brl, brr = st.columns(2)
-    divider()
-    section_label("0% PTO Usage")
+
     with brl:
         section_label("No PTO — Burnout / Safety Risk")
         if no_pto:
@@ -3268,7 +3267,8 @@ def pto_page(conn, building: str) -> None:
             st.dataframe(low_users[["Employee", "Hours", "Days"]], use_container_width=True, hide_index=True)
         else:
             info_box("Not enough data for bottom 10% analysis.")
-
+    divider()
+    section_label("Employees Not Using PTO")
     # ── Module 4: Pace & Seasonality ────────────────────────────────────────
     divider()
     section_label("PTO Pace & Seasonality")
