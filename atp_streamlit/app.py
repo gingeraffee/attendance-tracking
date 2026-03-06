@@ -358,9 +358,11 @@ div[data-testid="stMetric"] [data-testid="stMetricDelta"] {
    DATA FRAMES & CHARTS
 ══════════════════════════════════════════════════════════════ */
 .stDataFrame {
-    border: 1px solid rgba(0,120,255,.15) !important;
-    border-radius: 10px !important; overflow: hidden;
-    background: rgba(2,8,18,.85) !important;
+    border: none !important;
+    border-radius: 10px !important;
+    overflow: hidden;
+    box-shadow: none !important;
+    background: transparent !important;
 }
 [data-testid="stArrowVegaLiteChart"] {
     border-radius: 12px !important; overflow: hidden;
@@ -664,17 +666,7 @@ div[data-testid="stMetric"]:nth-child(6) { animation-delay: 3.5s; }
 </style>""",
         unsafe_allow_html=True,
     )
-    # Inject fixed-position atmospheric overlays
-    st.markdown(
-        '<div class="aurora-bg"></div>'
-        '<div class="tech-grid-overlay"></div>'
-        '<div class="scanlines"></div>'
-        '<div class="hud-corner hud-corner-tl"></div>'
-        '<div class="hud-corner hud-corner-tr"></div>'
-        '<div class="hud-corner hud-corner-bl"></div>'
-        '<div class="hud-corner hud-corner-br"></div>',
-        unsafe_allow_html=True,
-    )
+    # Atmospheric overlays disabled to keep table views clean and static.
 
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
