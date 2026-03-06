@@ -665,6 +665,18 @@ div[data-testid="stMetric"]:nth-child(6) { animation-delay: 3.5s; }
 def get_conn():
     conn = db.connect()
     ensure_schema(conn)
+    # ── Additive migration: point_warning_date column ─────────────────────────
+    try:
+        if is_pg(conn):
+            exec_sql(conn, "ALTER TABLE employees ADD COLUMN IF NOT EXISTS point_warning_date DATE")
+            conn.commit()
+        else:
+            cols = [r[1] for r in fetchall(conn, "PRAGMA table_info(employees)")]
+            if "point_warning_date" not in cols:
+                exec_sql(conn, "ALTER TABLE employees ADD COLUMN point_warning_date DATE")
+                conn.commit()
+    except Exception:
+        pass
     return conn
 
 
@@ -835,14 +847,89 @@ def render_hr_live_monitor(
     rolloffs_due_7d: int,
     perfect_due_7d: int,
     label: str = "At a glance",
+    pto_utilization_pct: float | None = None,
 ):
     """
-    Data-driven 'live monitor' animation.
-    - Speed increases with points activity
-    - Glow increases with upcoming deadlines (rolloffs/perfect due soon)
-    """
+    Data-driven 'live monitor' animation bar.
 
-    # --- Activity score (0..1): how "busy" things are ---
+    Normal mode (pto_utilization_pct is None):
+      - Speed driven by recent points activity
+      - Glow driven by upcoming rolloff/perfect-attendance deadlines
+      - Color always cyan
+
+    PTO mode (pto_utilization_pct provided):
+      - Cyan  : utilization <= 50 %
+      - Amber : 51–80 %
+      - Red   : 81 %+  (pulsing)
+    """
+    # ── PTO color override ────────────────────────────────────────────────────
+    if pto_utilization_pct is not None:
+        p = pto_utilization_pct
+        if p <= 50.0:
+            r, g, b = 0, 200, 240          # cyan
+            pulse = False
+            status = f"PTO Utilization {p:.0f}% — Normal"
+        elif p <= 80.0:
+            r, g, b = 240, 168, 0          # amber
+            pulse = False
+            status = f"PTO Utilization {p:.0f}% — Elevated"
+        else:
+            r, g, b = 255, 48, 80          # red
+            pulse = True
+            status = f"PTO Utilization {p:.0f}% — High"
+
+        sweep_s   = 1.4
+        glow      = 0.72
+        baseline  = 0.35
+        pulse_css = """
+  animation: hr_pulse 0.9s ease-in-out infinite;
+}
+@keyframes hr_pulse {
+  0%,100% { opacity: 0.65; }
+  50%      { opacity: 1.0;  }
+""" if pulse else ""
+
+        st.markdown(
+            f"""<style>
+.hr-monitor-wrap {{ margin: 6px 0 10px 0; }}
+.hr-monitor-top  {{ display:flex; justify-content:space-between; align-items:baseline; gap:10px; margin-bottom:6px; }}
+.hr-monitor-label  {{ font-size:0.92rem; opacity:0.92; }}
+.hr-monitor-status {{ font-size:0.86rem; opacity:0.75; white-space:nowrap; color:rgb({r},{g},{b}); font-weight:600; }}
+.hr-live-monitor {{
+  position:relative; width:100%; height:14px; border-radius:999px;
+  background:rgba(255,255,255,0.10); overflow:hidden;
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,0.12);
+  {pulse_css}
+}}
+.hr-live-monitor::before {{
+  content:""; position:absolute; left:0; top:50%; transform:translateY(-50%);
+  width:100%; height:2px; background:rgba({r},{g},{b},{baseline});
+}}
+.hr-live-monitor::after {{
+  content:""; position:absolute; top:0; left:-30%; width:30%; height:100%;
+  background:linear-gradient(90deg,
+    rgba(0,0,0,0),
+    rgba({r},{g},{b},{glow}),
+    rgba({r},{g},{b},{min(glow+0.12,0.90):.2f}),
+    rgba({r},{g},{b},{glow}),
+    rgba(0,0,0,0)
+  );
+  animation:hr_sweep {sweep_s:.2f}s linear infinite;
+}}
+@keyframes hr_sweep {{ 0% {{ left:-30%; }} 100% {{ left:100%; }} }}
+</style>
+<div class="hr-monitor-wrap">
+  <div class="hr-monitor-top">
+    <div class="hr-monitor-label">{label}</div>
+    <div class="hr-monitor-status">{status}</div>
+  </div>
+  <div class="hr-live-monitor"></div>
+</div>""",
+            unsafe_allow_html=True,
+        )
+        return
+
+    # ── Standard attendance mode ───────────────────────────────────────────────
     # Weighted: last 24h matters most, then 7d.
     activity_raw = (points_24h * 2.5) + (points_7d * 0.6)
     # Log scale so it doesn't go ridiculous on big weeks:
@@ -958,8 +1045,43 @@ def render_hr_live_monitor(
     )
 
 
-def render_tech_hud(building: str) -> None:
-    """Live HUD status bar — ticking clock, building, uptime, and animated indicators."""
+def render_tech_hud(
+    building: str,
+    *,
+    at_risk_5plus: int = 0,
+    total_employees: int = 1,
+) -> None:
+    """Live HUD status bar with reactive colors based on employees at 5+ points.
+
+    ACTIVITY label + bar/border color:
+      Cyan  (< 10 % at 5+ pts)  — Normal
+      Amber (10–24 %)            — Elevated
+      Red   (25 %+)              — Critical
+    """
+    pct = (at_risk_5plus / max(total_employees, 1)) * 100.0
+
+    if pct < 10.0:
+        act_label   = "NORMAL"
+        act_rgb     = "0,200,240"      # cyan
+        bar_speed   = "1.4s"
+        border_rgba = "rgba(0,120,255,.22)"
+        sweep_rgba  = "rgba(0,200,240,.04)"
+        top_rgba    = "rgba(0,200,240,.30)"
+    elif pct < 25.0:
+        act_label   = "ELEVATED"
+        act_rgb     = "240,168,0"      # amber
+        bar_speed   = "0.9s"
+        border_rgba = "rgba(240,168,0,.45)"
+        sweep_rgba  = "rgba(240,168,0,.06)"
+        top_rgba    = "rgba(240,168,0,.50)"
+    else:
+        act_label   = "CRITICAL"
+        act_rgb     = "255,48,80"      # red
+        bar_speed   = "0.55s"
+        border_rgba = "rgba(255,48,80,.55)"
+        sweep_rgba  = "rgba(255,48,80,.07)"
+        top_rgba    = "rgba(255,48,80,.60)"
+
     components.html(
         f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
@@ -969,109 +1091,82 @@ body {{
   font-family: 'Space Mono','SF Mono','Fira Code',ui-monospace,'Cascadia Code','Courier New',monospace;
   overflow: hidden;
 }}
-
 #hud {{
   display: flex; justify-content: space-between; align-items: center;
   padding: 7px 14px;
   background: rgba(2,8,22,0.94);
-  border: 1px solid rgba(0,120,255,.22);
+  border: 1px solid {border_rgba};
   border-radius: 10px;
   font-size: 10.5px; letter-spacing: .08em; color: #2d4860;
   box-shadow: 0 0 0 1px rgba(0,200,240,.04), 0 4px 24px rgba(0,0,0,.60),
               inset 0 1px 0 rgba(255,255,255,.025);
   position: relative; overflow: hidden;
 }}
-
-/* Horizontal scan sweep across the whole HUD */
 #hud::after {{
   content: '';
   position: absolute; top: 0; left: -80%; width: 40%; height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(0,200,240,.04), transparent);
+  background: linear-gradient(90deg, transparent, {sweep_rgba}, transparent);
   animation: hud-sweep 7s linear infinite;
   pointer-events: none;
 }}
-@keyframes hud-sweep {{
-  0%   {{ left: -80%; }}
-  100% {{ left: 160%; }}
-}}
-
-/* Top border accent */
+@keyframes hud-sweep {{ 0% {{ left:-80%; }} 100% {{ left:160%; }} }}
 #hud::before {{
   content: '';
   position: absolute; top: 0; left: 0; right: 0; height: 1px;
-  background: linear-gradient(90deg, transparent 5%, rgba(0,200,240,.30) 50%, transparent 95%);
+  background: linear-gradient(90deg, transparent 5%, {top_rgba} 50%, transparent 95%);
   animation: hud-top 5s ease-in-out infinite;
 }}
-@keyframes hud-top {{
-  0%,100% {{ opacity:.40; }}
-  50%      {{ opacity:.90; }}
-}}
-
+@keyframes hud-top {{ 0%,100% {{ opacity:.40; }} 50% {{ opacity:.90; }} }}
 .hud-left  {{ display:flex; align-items:center; gap:0; flex-wrap:nowrap; }}
 .hud-right {{ display:flex; align-items:center; gap:0; flex-wrap:nowrap; }}
-
 .seg {{ white-space:nowrap; }}
-
-/* Online status dot */
 .dot {{
-  display: inline-block; width: 6px; height: 6px; border-radius: 50%;
-  background: #00e896; margin-right: 6px; vertical-align: middle;
-  box-shadow: 0 0 6px rgba(0,232,150,.70);
-  animation: dot-blink 1.8s ease-in-out infinite;
+  display:inline-block; width:6px; height:6px; border-radius:50%;
+  background:#00e896; margin-right:6px; vertical-align:middle;
+  box-shadow:0 0 6px rgba(0,232,150,.70);
+  animation:dot-blink 1.8s ease-in-out infinite;
 }}
 @keyframes dot-blink {{
   0%,100% {{ opacity:1;   box-shadow:0 0 4px  rgba(0,232,150,.65); }}
   50%      {{ opacity:.45; box-shadow:0 0 12px rgba(0,232,150,.95); }}
 }}
-
-/* Activity bars (3 mini bars) */
-.bars {{ display:inline-flex; align-items:flex-end; gap:2px; height:12px; margin:0 5px; vertical-align:middle; }}
-.bar  {{ width:3px; background:rgba(0,200,240,.35); border-radius:1px; }}
-.bar:nth-child(1) {{ animation:bar-bounce 1.4s ease-in-out infinite 0.0s; }}
-.bar:nth-child(2) {{ animation:bar-bounce 1.4s ease-in-out infinite 0.3s; }}
-.bar:nth-child(3) {{ animation:bar-bounce 1.4s ease-in-out infinite 0.6s; }}
+.bars {{ display:inline-flex; align-items:flex-end; gap:2px; height:12px; margin:0 4px; vertical-align:middle; }}
+.bar  {{ width:3px; border-radius:1px; }}
+.bar:nth-child(1) {{ animation:bar-bounce {bar_speed} ease-in-out infinite 0.00s; }}
+.bar:nth-child(2) {{ animation:bar-bounce {bar_speed} ease-in-out infinite 0.15s; }}
+.bar:nth-child(3) {{ animation:bar-bounce {bar_speed} ease-in-out infinite 0.30s; }}
 @keyframes bar-bounce {{
-  0%,100% {{ height:3px;  background:rgba(0,200,240,.25); }}
-  50%      {{ height:11px; background:rgba(0,200,240,.75); box-shadow:0 0 5px rgba(0,200,240,.40); }}
+  0%,100% {{ height:3px;  background:rgba({act_rgb},.30); }}
+  50%      {{ height:11px; background:rgba({act_rgb},.90); box-shadow:0 0 6px rgba({act_rgb},.50); }}
 }}
-
-/* Signal strength (3 dots) */
+.act-val {{ color:rgba({act_rgb},1); font-weight:700; }}
 .signal {{ display:inline-flex; align-items:center; gap:3px; margin:0 4px; vertical-align:middle; }}
 .sig-dot {{ width:4px; height:4px; border-radius:50%; }}
-.sig-dot:nth-child(1) {{ background:rgba(0,200,240,.90); box-shadow:0 0 4px rgba(0,200,240,.50); animation:sig-pulse 2.4s ease-in-out infinite 0.0s; }}
-.sig-dot:nth-child(2) {{ background:rgba(0,200,240,.65); animation:sig-pulse 2.4s ease-in-out infinite 0.6s; }}
-.sig-dot:nth-child(3) {{ background:rgba(0,200,240,.35); animation:sig-pulse 2.4s ease-in-out infinite 1.2s; }}
+.sig-dot:nth-child(1) {{ background:rgba({act_rgb},.90); box-shadow:0 0 4px rgba({act_rgb},.50); animation:sig-pulse 2.4s ease-in-out infinite 0.0s; }}
+.sig-dot:nth-child(2) {{ background:rgba({act_rgb},.65); animation:sig-pulse 2.4s ease-in-out infinite 0.6s; }}
+.sig-dot:nth-child(3) {{ background:rgba({act_rgb},.35); animation:sig-pulse 2.4s ease-in-out infinite 1.2s; }}
 @keyframes sig-pulse {{ 0%,100%{{opacity:.50;}} 50%{{opacity:1;}} }}
-
-.val    {{ color:#4a88c0; }}
-.hi     {{ color:#00c8f0; font-weight:700; }}
-.green  {{ color:#00e896; font-weight:700; }}
-.sep    {{ color:rgba(0,120,255,.22); padding:0 10px; }}
+.val  {{ color:#4a88c0; }}
+.hi   {{ color:#00c8f0; font-weight:700; }}
+.green{{ color:#00e896; font-weight:700; }}
+.sep  {{ color:rgba(0,120,255,.22); padding:0 10px; }}
 #hud-time {{ color:#00c8f0; font-weight:700; letter-spacing:.14em; min-width:72px; text-align:right; }}
 #hud-date {{ color:#2d4860; }}
 </style></head><body>
 <div id="hud">
   <div class="hud-left">
-    <span class="seg">
-      <span class="dot"></span>
-      SYS&nbsp;<span class="green">ONLINE</span>
-    </span>
+    <span class="seg"><span class="dot"></span>SYS&nbsp;<span class="green">ONLINE</span></span>
     <span class="sep">|</span>
     <span class="seg">
       <span class="bars"><span class="bar"></span><span class="bar"></span><span class="bar"></span></span>
-      ACTIVITY
+      ACTIVITY&nbsp;<span class="act-val">{act_label}</span>
     </span>
     <span class="sep">|</span>
     <span class="seg">BUILDING&nbsp;<span class="val">{building.upper()}</span></span>
     <span class="sep">|</span>
     <span class="seg">SESSION&nbsp;<span class="hi" id="uptime">00:00:00</span></span>
     <span class="sep">|</span>
-    <span class="seg">
-      SIGNAL
-      <span class="signal">
-        <span class="sig-dot"></span><span class="sig-dot"></span><span class="sig-dot"></span>
-      </span>
-    </span>
+    <span class="seg">SIGNAL<span class="signal"><span class="sig-dot"></span><span class="sig-dot"></span><span class="sig-dot"></span></span></span>
   </div>
   <div class="hud-right">
     <span class="seg" id="hud-date"></span>
@@ -1081,22 +1176,20 @@ body {{
 </div>
 <script>
 (function(){{
-  var s = Date.now();
-  var D = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
-  var M = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
-  function p(n){{ return n < 10 ? '0'+n : ''+n; }}
+  var s=Date.now();
+  var D=['SUN','MON','TUE','WED','THU','FRI','SAT'];
+  var M=['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+  function p(n){{return n<10?'0'+n:''+n;}}
   function tick(){{
-    var d   = new Date();
-    var ht  = document.getElementById('hud-time');
-    var hd  = document.getElementById('hud-date');
-    var up  = document.getElementById('uptime');
-    if (!ht) return;
-    ht.textContent = p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());
-    hd.textContent = D[d.getDay()]+' '+p(d.getDate())+' '+M[d.getMonth()]+' '+d.getFullYear();
-    var e = Math.floor((Date.now() - s) / 1000);
-    up.textContent = p(Math.floor(e/3600))+':'+p(Math.floor(e%3600/60))+':'+p(e%60);
+    var d=new Date(),ht=document.getElementById('hud-time'),
+        hd=document.getElementById('hud-date'),up=document.getElementById('uptime');
+    if(!ht)return;
+    ht.textContent=p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());
+    hd.textContent=D[d.getDay()]+' '+p(d.getDate())+' '+M[d.getMonth()]+' '+d.getFullYear();
+    var e=Math.floor((Date.now()-s)/1000);
+    up.textContent=p(Math.floor(e/3600))+':'+p(Math.floor(e%3600/60))+':'+p(e%60);
   }}
-  tick(); setInterval(tick, 1000);
+  tick();setInterval(tick,1000);
 }})();
 </script>
 </body></html>""",
@@ -1560,7 +1653,6 @@ def dashboard_page(conn, building: str) -> None:
         '<span class="live-dot"></span>Dashboard',
         "Real-time overview of attendance activity, thresholds, and upcoming actions.",
     )
-    render_tech_hud(building)
 
     today = date.today()
     in_30_days = today + timedelta(days=30)
@@ -1568,18 +1660,19 @@ def dashboard_page(conn, building: str) -> None:
     emp_ids = [int(e["employee_id"]) for e in employees]
 
     if not emp_ids:
+        render_tech_hud(building)
         info_box("No employees found for this building filter.")
         return
-    ph = ",".join(["?" if not is_pg(conn) else "%s"] * len(emp_ids))   
-    
+    ph = ",".join(["?" if not is_pg(conn) else "%s"] * len(emp_ids))
+
     def _scalar_n(conn, sql: str, params: tuple) -> int:
         rows = fetchall(conn, sql, params)
         if not rows:
             return 0
         r0 = dict(rows[0])
         return int(r0.get("n") or 0)
-    
-    # ── HR Live Monitor (data-driven animation) ───────────────────────────────
+
+    # ── HR Live Monitor data ──────────────────────────────────────────────────
     since_24h = (today - timedelta(days=1)).isoformat()
     since_7d = (today - timedelta(days=7)).isoformat()
     due_7d = (today + timedelta(days=7)).isoformat()
@@ -2018,6 +2111,23 @@ def dashboard_page(conn, building: str) -> None:
         key: sum(1 for r in emp_detail_rows if fn(float(r.get("point_total") or 0)))
         for key, fn in bucket_defs.items()
     }
+
+    # ── Now that we have real data, fill the top-of-page widgets ─────────────
+    at_risk_5plus = bucket_counts.get("5-6", 0) + bucket_counts.get("7", 0)
+    total_active  = len(emp_detail_rows)
+
+    render_tech_hud(
+        building,
+        at_risk_5plus=at_risk_5plus,
+        total_employees=total_active,
+    )
+    render_hr_live_monitor(
+        points_24h=points_24h,
+        points_7d=points_7d,
+        rolloffs_due_7d=rolloffs_due_7d,
+        perfect_due_7d=perfect_due_7d,
+        label="At a glance",
+    )
 
 
     st.markdown(
@@ -2558,32 +2668,6 @@ def pto_page(conn, building: str) -> None:
     else:
         active_count_in_scope = len(active_db)
 
-    # ── Data for At a Glance monitor ─────────────────────────────────────────
-    _pto_emp_ids = [int(e["employee_id"]) for e in active_db]
-    _pto_ph = ",".join(["%s" if is_pg(conn) else "?"] * len(_pto_emp_ids)) if _pto_emp_ids else "NULL"
-    _today   = date.today()
-    _since_24h = (_today - timedelta(days=1)).isoformat()
-    _since_7d  = (_today - timedelta(days=7)).isoformat()
-    _due_7d    = (_today + timedelta(days=7)).isoformat()
-
-    def _pto_scalar(sql: str, params: tuple) -> int:
-        rows = fetchall(conn, sql, params)
-        return int(dict(rows[0]).get("n") or 0) if rows else 0
-
-    if _pto_emp_ids:
-        if is_pg(conn):
-            points_24h      = _pto_scalar(f"SELECT COUNT(*) AS n FROM points_history ph WHERE ph.employee_id IN ({_pto_ph}) AND (ph.point_date::date) >= (%s::date) AND COALESCE(ph.points,0.0)>0.0", (*_pto_emp_ids, _since_24h))
-            points_7d       = _pto_scalar(f"SELECT COUNT(*) AS n FROM points_history ph WHERE ph.employee_id IN ({_pto_ph}) AND (ph.point_date::date) >= (%s::date) AND COALESCE(ph.points,0.0)>0.0", (*_pto_emp_ids, _since_7d))
-            rolloffs_due_7d = _pto_scalar(f"SELECT COUNT(*) AS n FROM employees WHERE employee_id IN ({_pto_ph}) AND rolloff_date IS NOT NULL AND (rolloff_date::date) >= (%s::date) AND (rolloff_date::date) <= (%s::date)", (*_pto_emp_ids, _today.isoformat(), _due_7d))
-            perfect_due_7d  = _pto_scalar(f"SELECT COUNT(*) AS n FROM employees WHERE employee_id IN ({_pto_ph}) AND perfect_attendance IS NOT NULL AND (perfect_attendance::date) >= (%s::date) AND (perfect_attendance::date) <= (%s::date)", (*_pto_emp_ids, _today.isoformat(), _due_7d))
-        else:
-            points_24h      = _pto_scalar(f"SELECT COUNT(*) AS n FROM points_history ph WHERE ph.employee_id IN ({_pto_ph}) AND date(ph.point_date) >= date(?) AND COALESCE(ph.points,0.0)>0.0", (*_pto_emp_ids, _since_24h))
-            points_7d       = _pto_scalar(f"SELECT COUNT(*) AS n FROM points_history ph WHERE ph.employee_id IN ({_pto_ph}) AND date(ph.point_date) >= date(?) AND COALESCE(ph.points,0.0)>0.0", (*_pto_emp_ids, _since_7d))
-            rolloffs_due_7d = _pto_scalar(f"SELECT COUNT(*) AS n FROM employees WHERE employee_id IN ({_pto_ph}) AND rolloff_date IS NOT NULL AND date(rolloff_date) >= date(?) AND date(rolloff_date) <= date(?)", (*_pto_emp_ids, _today.isoformat(), _due_7d))
-            perfect_due_7d  = _pto_scalar(f"SELECT COUNT(*) AS n FROM employees WHERE employee_id IN ({_pto_ph}) AND perfect_attendance IS NOT NULL AND date(perfect_attendance) >= date(?) AND date(perfect_attendance) <= date(?)", (*_pto_emp_ids, _today.isoformat(), _due_7d))
-    else:
-        points_24h = points_7d = rolloffs_due_7d = perfect_due_7d = 0
-
     # ── Load persisted PTO data from DB into session state if not already loaded ──
     if "pto_df" not in st.session_state:
         try:
@@ -2733,12 +2817,27 @@ def pto_page(conn, building: str) -> None:
 
     df_all: pd.DataFrame = st.session_state["pto_df"].copy()
 
+    # ── 30-day PTO utilization for the At a Glance bar ───────────────────────
+    _now = date.today()
+    _since_30 = pd.Timestamp(_now - timedelta(days=30))
+    _df_30 = df_all[
+        (df_all["start_date"] >= _since_30) | (df_all["end_date"] >= _since_30)
+    ]
+    if building != "All":
+        _scope_count = sum(1 for e in active_db if (e.get("location") or e.get("Location") or "") == building)
+        _df_30 = _df_30[_df_30["building"] == building] if "building" in _df_30.columns else _df_30
+    else:
+        _scope_count = len(active_db)
+    _emps_30 = _df_30["employee"].nunique() if not _df_30.empty else 0
+    _util_30 = (_emps_30 / max(_scope_count, 1)) * 100.0
+
     render_hr_live_monitor(
-        points_24h=points_24h,
-        points_7d=points_7d,
-        rolloffs_due_7d=rolloffs_due_7d,
-        perfect_due_7d=perfect_due_7d,
-        label="At a glance",
+        points_24h=0,
+        points_7d=0,
+        rolloffs_due_7d=0,
+        perfect_due_7d=0,
+        label="At a glance — PTO (Last 30 Days)",
+        pto_utilization_pct=_util_30,
     )
 
     # ── Filters ─────────────────────────────────────────────────────────────
@@ -3994,6 +4093,221 @@ def system_updates_page(conn) -> None:
             )
 
 
+# ── Corrective Action ─────────────────────────────────────────────────────────
+def corrective_action_page(conn, building: str) -> None:
+    page_heading(
+        "Corrective Action",
+        "Employees at disciplinary point thresholds. Edit Point Warning Date to log when action was issued.",
+    )
+
+    today = date.today()
+    employees = load_employees(conn, building=building)
+    emp_ids = [int(e["employee_id"]) for e in employees]
+    if not emp_ids:
+        info_box("No employees found for this building filter.")
+        return
+
+    ph = ",".join(["%s" if is_pg(conn) else "?"] * len(emp_ids))
+
+    if is_pg(conn):
+        sql_ca = f"""
+            SELECT e.employee_id,
+                   e.last_name,
+                   e.first_name,
+                   COALESCE(e."Location", '') AS building,
+                   GREATEST(0.0, ROUND(COALESCE(SUM(ph2.points), 0.0)::numeric, 1)::float8) AS point_total,
+                   MAX(ph2.point_date::date)::text AS last_point_date,
+                   e.point_warning_date::text AS point_warning_date
+              FROM employees e
+              LEFT JOIN points_history ph2 ON ph2.employee_id = e.employee_id
+             WHERE e.employee_id IN ({ph})
+               AND COALESCE(e.is_active, 1) = 1
+             GROUP BY e.employee_id, e.last_name, e.first_name, e."Location", e.point_warning_date
+            HAVING GREATEST(0.0, ROUND(COALESCE(SUM(ph2.points), 0.0)::numeric, 1)::float8) >= 5.0
+             ORDER BY GREATEST(0.0, ROUND(COALESCE(SUM(ph2.points), 0.0)::numeric, 1)::float8) DESC,
+                      lower(e.last_name), lower(e.first_name)
+        """
+    else:
+        sql_ca = f"""
+            SELECT employee_id, last_name, first_name, building, point_total,
+                   last_point_date, point_warning_date
+              FROM (
+                SELECT e.employee_id,
+                       e.last_name,
+                       e.first_name,
+                       COALESCE(e."Location", '') AS building,
+                       MAX(0.0, ROUND(COALESCE((
+                           SELECT SUM(ph2.points) FROM points_history ph2
+                            WHERE ph2.employee_id = e.employee_id
+                       ), 0.0), 1)) AS point_total,
+                       (SELECT MAX(date(ph3.point_date)) FROM points_history ph3
+                         WHERE ph3.employee_id = e.employee_id
+                           AND COALESCE(ph3.points,0.0) > 0.0
+                       ) AS last_point_date,
+                       e.point_warning_date
+                  FROM employees e
+                 WHERE e.employee_id IN ({ph})
+                   AND COALESCE(e.is_active, 1) = 1
+              ) sub
+             WHERE point_total >= 5.0
+             ORDER BY point_total DESC, lower(last_name), lower(first_name)
+        """
+
+    ca_rows = [dict(r) for r in fetchall(conn, sql_ca, tuple(emp_ids))]
+
+    # ── Threshold tier definitions ────────────────────────────────────────────
+    tiers = [
+        ("termination",     "Termination",     lambda p: p > 7.5,          "#ff3050", "rgba(255,48,80,.10)",   "rgba(255,48,80,.35)"),
+        ("written_warning", "Written Warning",  lambda p: 7.0 <= p <= 7.5, "#f0a800", "rgba(240,168,0,.10)",   "rgba(240,168,0,.35)"),
+        ("verbal_warning",  "Verbal Warning",   lambda p: 6.0 <= p <= 6.5, "#e06c00", "rgba(224,108,0,.10)",   "rgba(224,108,0,.35)"),
+        ("verbal_coaching", "Verbal Coaching",  lambda p: 5.0 <= p <= 5.5, "#4a9ee8", "rgba(74,158,232,.10)",  "rgba(74,158,232,.35)"),
+    ]
+
+    if not ca_rows:
+        info_box("No active employees are currently at or above the 5.0 point threshold. 🎉")
+        return
+
+    # ── Summary counts ────────────────────────────────────────────────────────
+    tier_counts = {key: sum(1 for r in ca_rows if fn(float(r.get("point_total") or 0)))
+                   for key, label, fn, color, bg, border in tiers}
+    c1, c2, c3, c4 = st.columns(4)
+    for col, (key, label, fn, color, bg, border) in zip([c4, c3, c2, c1], tiers):
+        n = tier_counts[key]
+        col.markdown(
+            f"<div style='background:{bg};border:1px solid {border};border-radius:10px;"
+            f"padding:.7rem 1rem;text-align:center'>"
+            f"<div style='font-size:.65rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;"
+            f"color:{color};font-family:Space Mono,monospace'>{label}</div>"
+            f"<div style='font-size:2rem;font-weight:800;color:{color};line-height:1.1;"
+            f"text-shadow:0 0 16px {color}55'>{n}</div>"
+            f"<div style='font-size:.72rem;color:#4a7090;margin-top:.1rem'>employee{'s' if n != 1 else ''}</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+    divider()
+
+    # ── Edit modal state ──────────────────────────────────────────────────────
+    if "ca_edit_id" not in st.session_state:
+        st.session_state["ca_edit_id"] = None
+
+    editing_id = st.session_state.get("ca_edit_id")
+
+    if editing_id is not None:
+        edit_row = next((r for r in ca_rows if int(r["employee_id"]) == editing_id), None)
+        if edit_row:
+            with st.container():
+                st.markdown(
+                    f"<div class='info-box' style='margin-bottom:.8rem'>"
+                    f"<b>Editing Point Warning Date for:</b> "
+                    f"{edit_row['last_name']}, {edit_row['first_name']} "
+                    f"&nbsp;|&nbsp; Emp # {edit_row['employee_id']} "
+                    f"&nbsp;|&nbsp; {float(edit_row.get('point_total') or 0):.1f} pts"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+                existing = edit_row.get("point_warning_date")
+                try:
+                    default_val = date.fromisoformat(str(existing)[:10]) if existing else today
+                except Exception:
+                    default_val = today
+
+                ec1, ec2, ec3 = st.columns([2, 1, 1])
+                with ec1:
+                    new_date = st.date_input(
+                        "Point Warning Date",
+                        value=default_val,
+                        key=f"ca_date_input_{editing_id}",
+                    )
+                with ec2:
+                    st.markdown("<div style='height:1.7rem'></div>", unsafe_allow_html=True)
+                    if st.button("Save", key="ca_save_btn", use_container_width=True):
+                        try:
+                            if is_pg(conn):
+                                exec_sql(conn, "UPDATE employees SET point_warning_date = %s WHERE employee_id = %s", (new_date.isoformat(), editing_id))
+                                conn.commit()
+                            else:
+                                exec_sql(conn, "UPDATE employees SET point_warning_date = ? WHERE employee_id = ?", (new_date.isoformat(), editing_id))
+                                conn.commit()
+                            st.success("Saved.")
+                            st.session_state["ca_edit_id"] = None
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Could not save: {exc}")
+                with ec3:
+                    st.markdown("<div style='height:1.7rem'></div>", unsafe_allow_html=True)
+                    if st.button("Cancel", key="ca_cancel_btn", use_container_width=True):
+                        st.session_state["ca_edit_id"] = None
+                        st.rerun()
+
+    # ── Tier tables ───────────────────────────────────────────────────────────
+    for key, label, fn, color, bg, border in tiers:
+        tier_rows = [r for r in ca_rows if fn(float(r.get("point_total") or 0))]
+        if not tier_rows:
+            continue
+
+        st.markdown(
+            f"<div style='background:{bg};border-left:3px solid {color};border-radius:0 8px 8px 0;"
+            f"padding:.45rem .9rem;margin:.9rem 0 .5rem 0;"
+            f"font-size:.78rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;"
+            f"color:{color};font-family:Space Mono,monospace'>"
+            f"⚠ {label} — {len(tier_rows)} employee{'s' if len(tier_rows) != 1 else ''}"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+        for r in tier_rows:
+            eid       = int(r["employee_id"])
+            pts       = float(r.get("point_total") or 0)
+            name      = f"{r['last_name']}, {r['first_name']}"
+            bldg      = r.get("building") or "—"
+            lpd       = fmt_date(r.get("last_point_date"))
+            pwd       = fmt_date(r.get("point_warning_date"))
+            is_editing = (editing_id == eid)
+
+            row_border = f"1px solid {border}" if not is_editing else f"2px solid {color}"
+            st.markdown(
+                f"<div class='list-row' style='border:{row_border};display:grid;"
+                f"grid-template-columns:70px 1fr 80px 70px 120px 120px 90px;align-items:center;gap:.5rem'>"
+                f"<span style='font-size:.78rem;color:#4a7090'>#{eid}</span>"
+                f"<span style='font-size:.88rem;font-weight:600;color:#c8ddf0'>{name}</span>"
+                f"<span style='font-size:.78rem;color:#4a88c0'>{bldg}</span>"
+                f"<span style='font-size:.88rem;font-weight:700;color:{color}'>{pts:.1f}</span>"
+                f"<span style='font-size:.78rem;color:#4a7090'>Last:&nbsp;{lpd}</span>"
+                f"<span style='font-size:.78rem;color:#4a7090'>Warning:&nbsp;{pwd}</span>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+            if st.button("✎ Edit Warning Date", key=f"ca_edit_{eid}", use_container_width=False):
+                st.session_state["ca_edit_id"] = eid
+                st.rerun()
+
+    divider()
+    # ── Download ──────────────────────────────────────────────────────────────
+    df_ca = pd.DataFrame([
+        {
+            "Employee #": str(int(r["employee_id"])),
+            "Name": f"{r['last_name']}, {r['first_name']}",
+            "Building": r.get("building") or "—",
+            "Point Total": f"{float(r.get('point_total') or 0):.1f}",
+            "Last Point Date": fmt_date(r.get("last_point_date")),
+            "Point Warning Date": fmt_date(r.get("point_warning_date")),
+            "Tier": next(
+                (lbl for _, lbl, fn, *_ in tiers if fn(float(r.get("point_total") or 0))),
+                "—"
+            ),
+        }
+        for r in ca_rows
+    ])
+    st.download_button(
+        "⬇ Download Corrective Action List",
+        data=to_csv(df_ca),
+        file_name=f"corrective_action_{today}.csv",
+        mime="text/csv",
+        key="dl_ca",
+    )
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main() -> None:
     apply_theme()
@@ -4023,7 +4337,7 @@ def main() -> None:
         st.markdown("<span class='sidebar-nav-label'>Navigation</span>", unsafe_allow_html=True)
         page = st.radio(
             "nav",
-            ["Dashboard", "PTO Usage Analytics", "Employees", "Points Ledger", "Manage Employees", "Exports & Forecasts", "System Updates"],
+            ["Dashboard", "PTO Usage Analytics", "Employees", "Points Ledger", "Corrective Action", "Manage Employees", "Exports & Forecasts", "System Updates"],
             key="page",
             label_visibility="collapsed",
         )
@@ -4047,6 +4361,8 @@ def main() -> None:
         employees_page(conn, building)
     elif page == "Points Ledger":
         points_ledger_page(conn, building)
+    elif page == "Corrective Action":
+        corrective_action_page(conn, building)
     elif page == "Manage Employees":
         manage_employees_page(conn)
     elif page == "Exports & Forecasts":
