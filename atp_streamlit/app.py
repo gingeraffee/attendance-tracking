@@ -2266,6 +2266,127 @@ def dashboard_page(conn, building: str) -> None:
     st.dataframe(pd.DataFrame(snap_rows), use_container_width=True, hide_index=True)
 
     divider()
+    section_label("Perfect Attendance Tracker — 0.0 Positive Points YTD")
+
+    ytd_start = date(today.year, 1, 1).isoformat()
+
+    # SQL: active employees who have had NO positive-point entries YTD.
+    # Roll-off entries (points <= 0) are completely excluded from the sum so they
+    # don't inflate or inflate anything — only positive point events disqualify.
+    if is_pg(conn):
+        sql_zero_ytd = """
+            SELECT e.employee_id,
+                   e.last_name,
+                   e.first_name,
+                   COALESCE(e."Location", '') AS building,
+                   e.hire_date
+              FROM employees e
+             WHERE COALESCE(e.is_active, 1) = 1
+               AND NOT EXISTS (
+                   SELECT 1
+                     FROM points_history ph
+                    WHERE ph.employee_id = e.employee_id
+                      AND (ph.point_date::date) >= %s::date
+                      AND COALESCE(ph.points, 0.0) > 0.0
+               )
+             ORDER BY COALESCE(e."Location", ''), lower(e.last_name), lower(e.first_name)
+        """
+    else:
+        sql_zero_ytd = """
+            SELECT e.employee_id,
+                   e.last_name,
+                   e.first_name,
+                   COALESCE(e."Location", '') AS building,
+                   e.hire_date
+              FROM employees e
+             WHERE COALESCE(e.is_active, 1) = 1
+               AND NOT EXISTS (
+                   SELECT 1
+                     FROM points_history ph
+                    WHERE ph.employee_id = e.employee_id
+                      AND date(ph.point_date) >= date(?)
+                      AND COALESCE(ph.points, 0.0) > 0.0
+               )
+             ORDER BY COALESCE(e."Location", ''), lower(e.last_name), lower(e.first_name)
+        """
+
+    zero_ytd_rows = [dict(r) for r in fetchall(conn, sql_zero_ytd, (ytd_start,))]
+
+    # Apply building filter if one is active
+    if building and building != "All":
+        zero_ytd_rows = [r for r in zero_ytd_rows if r.get("building") == building]
+
+    total_zero = len(zero_ytd_rows)
+    days_left_in_year = (date(today.year, 12, 31) - today).days
+
+    col_z1, col_z2, col_z3 = st.columns([2.5, 1, 1])
+    with col_z1:
+        st.markdown(
+            f"<div style='font-size:.83rem;color:#4dd8f0;padding:.38rem 0 .28rem 0'>"
+            f"Employees on this list have received <b>zero positive attendance points</b> since "
+            f"<b>January 1, {today.year}</b>. Roll-off credits do not count against this list. "
+            f"Only employees who remain here through <b>December 31, {today.year}</b> will have "
+            f"achieved perfect attendance for the year.</div>",
+            unsafe_allow_html=True,
+        )
+    with col_z2:
+        st.metric("On List Now", total_zero, help="Active employees with 0.0 positive points YTD")
+    with col_z3:
+        st.metric("Days Left in Year", days_left_in_year)
+
+    if zero_ytd_rows:
+        # Build per-building breakdown for the expander header
+        by_building = {}
+        for r in zero_ytd_rows:
+            b = r.get("building") or "—"
+            by_building[b] = by_building.get(b, 0) + 1
+
+        build_summary = "  |  ".join(
+            f"<span style='color:#00e896;font-weight:700'>{b}</span>: {n}"
+            for b, n in sorted(by_building.items())
+        )
+        st.markdown(
+            f"<div style='font-size:.80rem;color:#6a8ab8;margin:.3rem 0 .6rem 0'>{build_summary}</div>",
+            unsafe_allow_html=True,
+        )
+
+        df_zero = pd.DataFrame(
+            [
+                {
+                    "Employee #": str(r["employee_id"]),
+                    "Name": f"{r['last_name']}, {r['first_name']}",
+                    "Building": r.get("building") or "—",
+                    "Hire Date": fmt_date(r.get("hire_date")),
+                }
+                for r in zero_ytd_rows
+            ]
+        )
+
+        THRESHOLD = 20
+        if total_zero <= THRESHOLD:
+            st.dataframe(df_zero, use_container_width=True, hide_index=True)
+        else:
+            st.dataframe(df_zero.head(THRESHOLD), use_container_width=True, hide_index=True)
+            with st.expander(f"Show all {total_zero} employees on perfect attendance list"):
+                st.dataframe(df_zero, use_container_width=True, hide_index=True)
+
+        st.download_button(
+            "⬇ Download Perfect Attendance List",
+            data=to_csv(df_zero),
+            file_name=f"perfect_attendance_ytd_{today}.csv",
+            mime="text/csv",
+            key="dl_zero_ytd",
+        )
+    else:
+        if today > date(today.year, 1, 1):
+            info_box(
+                f"No active employees have 0.0 positive points YTD "
+                f"({'all have received at least one point this year' if total_zero == 0 else ''})."
+            )
+        else:
+            info_box("No data yet for the current year.")
+
+    divider()
     section_label("Forecasting")
 
     st.markdown("#### Employees > 1.0 Point (Last 30 Days)")
