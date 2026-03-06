@@ -1107,11 +1107,10 @@ def login_page() -> None:
         @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
 
         section[data-testid="stSidebar"] {{ display: none !important; }}
-        .block-container {{ padding-top: 0 !important; max-width: 100% !important; }}
         footer, #MainMenu {{ visibility: hidden; }}
 
         /* ── Full-screen dark canvas ── */
-        .stApp, [data-testid="stAppViewContainer"] > .main {{
+        .stApp {{
             background: #02060e !important;
             font-family: 'Space Grotesk', system-ui, sans-serif !important;
         }}
@@ -1138,12 +1137,27 @@ def login_page() -> None:
             pointer-events: none; z-index: 0;
         }}
 
-        /* ── Outer wrapper (full-height centering) ── */
-        .login-outer {{
-            position: relative; z-index: 10;
-            display: flex; flex-direction: column;
-            align-items: center; justify-content: center;
-            min-height: 95vh; padding: 2rem;
+        /* ── TRUE full-viewport centering ── */
+        /* Make Streamlit's own containers flex so we can center within them */
+        [data-testid="stMain"] {{
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            min-height: 100vh !important;
+        }}
+        [data-testid="stMainBlockContainer"] {{
+            display: flex !important;
+            flex-direction: column !important;
+            align-items: center !important;
+            justify-content: center !important;
+            width: 100% !important;
+            padding: 2rem 1rem !important;
+        }}
+        /* Cap the content width so it looks like a card, not a full-width block */
+        .block-container {{
+            padding: 0 !important;
+            max-width: 460px !important;
+            width: 100% !important;
         }}
 
         /* ── Status bar (top-of-card) ── */
@@ -1296,63 +1310,61 @@ def login_page() -> None:
         unsafe_allow_html=True,
     )
 
-    _, col, _ = st.columns([1, 1.4, 1])
-    with col:
-        # Status bar above card
+    # Status bar above card
+    st.markdown(
+        "<div class='login-status-bar'>"
+        "<span class='login-status-dot'></span>"
+        "SYSTEM ONLINE &nbsp;·&nbsp; AWAITING AUTHORIZATION"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    # Card header (pure HTML — logo, system tag, title)
+    st.markdown(
+        f"<div class='login-card'>"
+        f"  <div class='login-card-header'>"
+        f"    <div class='login-system-tag'>HR Command Interface</div>"
+        f"    {logo_tag}"
+        f"    <div class='login-title'>Attendance Tracking</div>"
+        f"  </div>"
+        f"  <div class='login-card-body'>",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("<span class='login-field-label'>Access Code</span>", unsafe_allow_html=True)
+    access_code = st.text_input(
+        "Access Code",
+        type="password",
+        placeholder="Enter authorization code",
+        label_visibility="collapsed",
+    )
+    start_clicked = st.button("Authorize Access", use_container_width=True)
+
+    if start_clicked:
+        expected = os.environ.get("ACCESS_CODE", "attendance2024")
+        if access_code == expected:
+            token = secrets.token_urlsafe(16)
+            st.session_state["authenticated"] = True
+            st.session_state["_auth_token"] = token
+            st.session_state["_auth_redirect_pending"] = True
+            st.session_state["login_error"] = False
+            st.query_params["_s"] = token
+            st.rerun()
+        else:
+            st.session_state["login_error"] = True
+
+    if st.session_state.get("login_error"):
         st.markdown(
-            "<div class='login-status-bar'>"
-            "<span class='login-status-dot'></span>"
-            "SYSTEM ONLINE &nbsp;·&nbsp; AWAITING AUTHORIZATION"
-            "</div>",
+            "<div class='login-error'>ACCESS DENIED — Incorrect authorization code.</div>",
             unsafe_allow_html=True,
         )
 
-        # Main card (header)
-        st.markdown(
-            f"<div class='login-card'>"
-            f"  <div class='login-card-header'>"
-            f"    <div class='login-system-tag'>HR Command Interface</div>"
-            f"    {logo_tag}"
-            f"    <div class='login-title'>Attendance Tracking</div>"
-            f"  </div>"
-            f"  <div class='login-card-body'>",
-            unsafe_allow_html=True,
-        )
+    st.markdown("</div></div>", unsafe_allow_html=True)
 
-        st.markdown("<span class='login-field-label'>Access Code</span>", unsafe_allow_html=True)
-        access_code = st.text_input(
-            "Access Code",
-            type="password",
-            placeholder="Enter authorization code",
-            label_visibility="collapsed",
-        )
-        start_clicked = st.button("Authorize Access", use_container_width=True)
-
-        if start_clicked:
-            expected = os.environ.get("ACCESS_CODE", "attendance2024")
-            if access_code == expected:
-                token = secrets.token_urlsafe(16)
-                st.session_state["authenticated"] = True
-                st.session_state["_auth_token"] = token
-                st.session_state["_auth_redirect_pending"] = True
-                st.session_state["login_error"] = False
-                st.query_params["_s"] = token
-                st.rerun()
-            else:
-                st.session_state["login_error"] = True
-
-        if st.session_state.get("login_error"):
-            st.markdown(
-                "<div class='login-error'>ACCESS DENIED — Incorrect authorization code.</div>",
-                unsafe_allow_html=True,
-            )
-
-        st.markdown("</div></div>", unsafe_allow_html=True)
-
-        st.markdown(
-            "<div class='login-footer'>CLASSIFIED · AUTHORIZED PERSONNEL ONLY</div>",
-            unsafe_allow_html=True,
-        )
+    st.markdown(
+        "<div class='login-footer'>CLASSIFIED · AUTHORIZED PERSONNEL ONLY</div>",
+        unsafe_allow_html=True,
+    )
 
 
 def build_point_history_pdf(employee: dict, history: list[dict]) -> bytes:
@@ -2734,7 +2746,11 @@ def pto_page(conn, building: str) -> None:
     section_label("Summary")
     k1, k2, k3, k4 = st.columns(4)
     total_hours = df["hours"].sum()
-    total_days = total_hours / 8
+    # Count actual calendar dates impacted: each record spans start_date..end_date
+    # (for single-day entries start=end so date_count=1; partial days still count as 1 date)
+    total_dates_impacted = int(
+        ((df["end_date"] - df["start_date"]).dt.days + 1).sum()
+    )
     unique_emps = df["employee"].nunique()
     # Denominator is active DB headcount for the selected building — not the CSV
     denom = active_count_in_scope if sel_building == building else (
@@ -2746,7 +2762,7 @@ def pto_page(conn, building: str) -> None:
     avg_hours = total_hours / unique_emps if unique_emps else 0
 
     with k1:
-        _pto_metric("Total PTO Days", f"{total_days:,.1f}", f"{total_hours:,.0f} hours")
+        _pto_metric("Days Impacted", f"{total_dates_impacted:,}", f"{total_hours:,.0f} total hours")
     with k2:
         _pto_metric("Employees Used PTO", str(unique_emps), f"{utilization_pct:.0f}% utilization")
     with k3:
@@ -2789,6 +2805,8 @@ def pto_page(conn, building: str) -> None:
             showlegend=False,
             margin=dict(t=10, b=10, l=10, r=10),
             font=dict(color="#c8dff0", family="SF Mono, Fira Code, monospace"),
+            # Required: makes single clicks on pie slices fire selection events
+            clickmode="event+select",
         )
         donut_event = st.plotly_chart(
             donut_fig,
