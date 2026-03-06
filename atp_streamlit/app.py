@@ -174,7 +174,7 @@ section[data-testid="stSidebar"] {
     width: 272px !important;
     box-shadow: 6px 0 48px rgba(0,0,0,.80), inset -1px 0 0 rgba(0,200,240,.04);
 }
-section[data-testid="stSidebar"] * { color: #3d5a7a !important; }
+section[data-testid="stSidebar"] * { color: #7ab8d4 !important; }
 
 /* Top edge glow on sidebar */
 section[data-testid="stSidebar"]::before {
@@ -410,22 +410,22 @@ p, label { color: var(--muted) !important; }
 /* ── Section label ── */
 .section-label {
     font-size: .66rem; font-weight: 700; letter-spacing: .16em;
-    text-transform: uppercase; color: var(--cyan); margin: 0 0 .5rem 0;
+    text-transform: uppercase; color: #4dd8f0; margin: 0 0 .5rem 0;
     font-family: 'Space Mono', monospace;
-    text-shadow: 0 0 16px rgba(0,200,240,.38);
+    text-shadow: 0 0 16px rgba(0,200,240,.70);
 }
 
 /* ── Section header (prominent section titles) ── */
 .section-header {
     font-size: .82rem; font-weight: 700; letter-spacing: .13em;
-    text-transform: uppercase; color: var(--cyan);
+    text-transform: uppercase; color: #4dd8f0;
     margin: 0 0 .85rem 0;
     font-family: 'Space Mono', monospace;
     padding: .45rem .8rem;
-    border-left: 3px solid var(--cyan);
-    background: rgba(0,200,240,.05);
+    border-left: 3px solid #4dd8f0;
+    background: rgba(0,200,240,.09);
     border-radius: 0 6px 6px 0;
-    text-shadow: 0 0 22px rgba(0,200,240,.50);
+    text-shadow: 0 0 22px rgba(0,200,240,.80);
 }
 
 /* ── Divider ── */
