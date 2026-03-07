@@ -3333,7 +3333,7 @@ def pto_page(conn, building: str) -> None:
     _pu_trace_cats: list[str] = []
     with pv_l:
         if not mcat.empty:
-            _CAT_CLR = {"Planned": "#14b8a6", "Unplanned": "#fa8072"}
+            _CAT_CLR = {"Planned": "#2684F0", "Unplanned": "#26F0DA"}
             pu_fig = go.Figure()
             for cat in ["Planned", "Unplanned"]:
                 sub = mcat[mcat["category"] == cat]
