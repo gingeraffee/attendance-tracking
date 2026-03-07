@@ -459,6 +459,90 @@ p, label { color: var(--muted) !important; }
     transition: border-color .18s ease;
 }
 .list-row:hover { border-color: rgba(0,120,255,.26); }
+/* Dashboard hero + filter chips */
+.dashboard-hero {
+    background: linear-gradient(120deg, rgba(10, 26, 60, .78), rgba(8, 20, 45, .68));
+    border: 1px solid rgba(0, 200, 240, .24);
+    border-radius: 14px;
+    padding: .95rem 1.05rem;
+    margin: .25rem 0 .75rem 0;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, .38), inset 0 1px 0 rgba(255,255,255,.04);
+}
+.dashboard-hero-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: .6rem;
+}
+.dashboard-hero-stat {
+    background: rgba(4, 14, 34, .72);
+    border: 1px solid rgba(0, 120, 255, .20);
+    border-radius: 11px;
+    padding: .62rem .72rem;
+}
+.dashboard-hero-stat .k {
+    font-size: .62rem;
+    text-transform: uppercase;
+    letter-spacing: .14em;
+    color: #66ddf5;
+    font-family: 'Space Mono', monospace;
+}
+.dashboard-hero-stat .v {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #e6f1ff;
+    margin-top: .22rem;
+}
+.dashboard-filter-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: .35rem;
+    margin-top: .65rem;
+    font-size: .72rem;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: #77d8ee;
+    border: 1px solid rgba(0, 200, 240, .32);
+    border-radius: 999px;
+    padding: .28rem .62rem;
+    background: rgba(0, 200, 240, .08);
+    font-family: 'Space Mono', monospace;
+}
+
+/* Dashboard threshold tiles */
+.dashboard-threshold-card {
+    margin-bottom: .45rem;
+    padding: .74rem .92rem;
+    border-radius: 12px;
+    border: 1px solid rgba(20, 40, 80, .28);
+    background: linear-gradient(145deg, rgba(10,20,52,.76), rgba(7,17,39,.72));
+    backdrop-filter: blur(12px);
+    box-shadow: 0 4px 14px rgba(15,32,68,.10);
+    pointer-events: none;
+}
+.dashboard-threshold-card .title {
+    font-size: .65rem;
+    letter-spacing: .10em;
+    text-transform: uppercase;
+    font-weight: 700;
+}
+.dashboard-threshold-card .meta {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-top: .18rem;
+}
+.dashboard-threshold-card .count {
+    font-size: 1.95rem;
+    font-weight: 800;
+    color: #e8f1ff;
+    line-height: 1;
+}
+.dashboard-threshold-card .hint {
+    font-size: .67rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .07em;
+}
 
 /* ── Sidebar brand ── */
 .sidebar-brand {
@@ -820,22 +904,23 @@ def is_authenticated() -> bool:
     """Auth requires the in-session auth flag plus token validation.
 
     During login submit, query params can lag one rerun behind session_state.
-    To avoid a flash of the login screen, allow a one-rerun grace period while
-    the URL token is being written.
+    To avoid a flash of the login screen, trust the in-session auth state while
+    the URL token handoff is still in progress.
     """
     session_token = st.session_state.get("_auth_token")
     url_token = st.query_params.get("_s")
     if not st.session_state.get("authenticated", False) or session_token is None:
         return False
 
-    if session_token == url_token:
-        st.session_state["_auth_redirect_pending"] = False
+    if st.session_state.get("_auth_redirect_pending"):
+        # Keep login transition seamless even when a stale URL token is present.
+        if session_token != url_token:
+            st.query_params["_s"] = session_token
+        else:
+            st.session_state["_auth_redirect_pending"] = False
         return True
 
-    if st.session_state.get("_auth_redirect_pending") and not url_token:
-        return True
-
-    return False
+    return session_token == url_token
 
 def _clamp(x: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, x))
@@ -1650,8 +1735,8 @@ def load_employees(conn, q: str = "", building: str = "All") -> list[dict]:
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 def dashboard_page(conn, building: str) -> None:
     page_heading(
-        '<span class="live-dot"></span>Dashboard',
-        "Real-time overview of attendance activity, thresholds, and upcoming actions.",
+        '<span class="live-dot"></span>Onboarding Command Deck',
+        "Track attendance momentum, risk thresholds, and next actions in one polished workspace.",
     )
 
     today = date.today()
@@ -2129,6 +2214,28 @@ def dashboard_page(conn, building: str) -> None:
         label="At a glance",
     )
 
+    active_bucket_label = "All Employees"
+    _bucket_label_map = {
+        "0": "0 Points",
+        "1-4": "1-4.5 Points",
+        "5-6": "5-6.5 Points",
+        "7": "7+ Points",
+    }
+    if st.session_state.get("dashboard_bucket") in _bucket_label_map:
+        active_bucket_label = _bucket_label_map[st.session_state["dashboard_bucket"]]
+
+    st.markdown(
+        f"""<div class='dashboard-hero'>
+                <div class='dashboard-hero-grid'>
+                    <div class='dashboard-hero-stat'><div class='k'>Active Employees</div><div class='v'>{total_active}</div></div>
+                    <div class='dashboard-hero-stat'><div class='k'>At Risk (5+)</div><div class='v'>{at_risk_5plus}</div></div>
+                    <div class='dashboard-hero-stat'><div class='k'>Rolloffs Due 7d</div><div class='v'>{rolloffs_due_7d}</div></div>
+                    <div class='dashboard-hero-stat'><div class='k'>Perfect Due 7d</div><div class='v'>{perfect_due_7d}</div></div>
+                </div>
+                <div class='dashboard-filter-pill'>Active threshold view: {active_bucket_label}</div>
+            </div>""",
+        unsafe_allow_html=True,
+    )
 
     st.markdown(
         """<style>
@@ -2178,25 +2285,24 @@ def dashboard_page(conn, building: str) -> None:
     for col, (key, label) in zip(tile_cols, tile_specs):
         selected = (active_bucket == key) if key != "all" else (active_bucket not in bucket_defs)
         accent, glow = {
-            "all": ("#5c6f8c", "rgba(92,111,140,.22)"),
-            "0": ("#00a87a", "rgba(0,168,122,.25)"),
-            "1-4": ("#4f8ef7", "rgba(79,142,247,.25)"),
-            "5-6": ("#e6960a", "rgba(230,150,10,.28)"),
-            "7": ("#e0394a", "rgba(224,57,74,.32)"),
-        }.get(key, ("#5c6f8c", "rgba(92,111,140,.22)"))
-        # Keep style vars local and explicit to avoid NameError in f-string interpolation.
-        card_border = "rgba(26,39,68,.16)" if not selected else accent
-        card_shadow = f"0 0 0 2px {glow}, 0 8px 18px rgba(15,32,68,.12)" if selected else "0 4px 14px rgba(15,32,68,.08)"
+            "all": ("#87a4c6", "rgba(135,164,198,.22)"),
+            "0": ("#00d4ff", "rgba(0,212,255,.24)"),
+            "1-4": ("#2da8e8", "rgba(45,168,232,.24)"),
+            "5-6": ("#ff6a7f", "rgba(255,106,127,.30)"),
+            "7": ("#ff304f", "rgba(255,48,79,.34)"),
+        }.get(key, ("#87a4c6", "rgba(135,164,198,.22)"))
+        card_border = "rgba(24,49,92,.22)" if not selected else accent
+        card_shadow = f"0 0 0 2px {glow}, 0 10px 20px rgba(8,22,52,.22)" if selected else "0 6px 14px rgba(8,22,52,.18)"
         employees_count = len(emp_detail_rows) if key == "all" else bucket_counts[key]
+        hint = "selected" if selected else "tap to filter"
 
         col.markdown(
-            f"<div class='card-sm' style='margin-bottom:.45rem;padding:.72rem .9rem;"
-            f"background:rgba(10,20,52,0.65);border:1px solid {card_border};box-shadow:{card_shadow};cursor:pointer;pointer-events:none;backdrop-filter:blur(12px);'>"
-            f"<div style='height:4px;border-radius:999px;background:{accent};margin:-.2rem 0 .6rem 0'></div>"
-            f"<div style='font-size:.68rem;letter-spacing:.09em;text-transform:uppercase;color:{accent};font-weight:700'>{label}</div>"
-            f"<div style='display:flex;align-items:baseline;justify-content:space-between;margin-top:.18rem'>"
-            f"<span style='font-size:1.95rem;font-weight:800;color:#e8f1ff;line-height:1;text-shadow:0 0 18px rgba(79,142,247,.3)'>{employees_count}</span>"
-            f"<span style='font-size:.72rem;font-weight:700;color:{accent};text-transform:uppercase;letter-spacing:.05em'>&nbsp;employees</span>"
+            f"<div class='dashboard-threshold-card' style='border-color:{card_border};box-shadow:{card_shadow};'>"
+            f"<div style='height:4px;border-radius:999px;background:{accent};margin:-.2rem 0 .55rem 0;'></div>"
+            f"<div class='title' style='color:{accent}'>{label}</div>"
+            f"<div class='meta'>"
+            f"<span class='count'>{employees_count}</span>"
+            f"<span class='hint' style='color:{accent};'>{hint}</span>"
             f"</div></div>",
             unsafe_allow_html=True,
         )
@@ -2257,7 +2363,7 @@ def dashboard_page(conn, building: str) -> None:
                     st.session_state["selected_employee_id"] = int(df_emps.iloc[idx]["employee_id"])
 
         else:
-            info_box("None 🎉")
+            info_box("No employees match the selected threshold.")
 
 
     with col_right:
@@ -4531,3 +4637,4 @@ if not is_authenticated():
     login_page()
 else:
     main()
+
