@@ -3472,17 +3472,56 @@ def pto_page(conn, building: str) -> None:
             _group = emp_hrs.head(10) if bar_label == "Top 10 Users" else emp_hrs.iloc[10:]
             _grp_names = set(_group["employee"])
             _grp_df = df[df["employee"].isin(_grp_names)]
-            _grp_agg = (
-                _grp_df.groupby("pto_type")["hours"].sum()
-                .reset_index()
-                .rename(columns={"pto_type": "PTO Type", "hours": "Hours"})
-                .sort_values("Hours", ascending=False)
+
+            if {"first_name", "last_name"}.issubset(_grp_df.columns):
+                _grp_df = _grp_df.copy()
+                _grp_df["First Name"] = _grp_df["first_name"].astype(str).str.strip()
+                _grp_df["Last Name"] = _grp_df["last_name"].astype(str).str.strip()
+            else:
+                _grp_df = _grp_df.copy()
+                _name_split = _grp_df["employee"].astype(str).str.split(",", n=1, expand=True)
+                _grp_df["Last Name"] = _name_split[0].fillna("").str.strip()
+                _grp_df["First Name"] = _name_split[1].fillna("").str.strip()
+
+            _hours_agg = (
+                _grp_df.groupby(["First Name", "Last Name", "pto_type"], as_index=False)["hours"]
+                .sum()
+                .rename(columns={"pto_type": "PTO Type", "hours": "Total Hours"})
             )
-            _grp_agg["Hours"] = _grp_agg["Hours"].round(1)
-            _grp_agg["Days"] = (_grp_agg["Hours"] / 8).round(1)
+
+            _days_df = _grp_df[["First Name", "Last Name", "pto_type", "start_date", "end_date"]].copy()
+            _days_df["impact_date"] = _days_df.apply(
+                lambda r: pd.date_range(r["start_date"], r["end_date"])
+                if pd.notna(r["start_date"]) and pd.notna(r["end_date"])
+                else [],
+                axis=1,
+            )
+            _days_df = _days_df.explode("impact_date")
+            _days_agg = (
+                _days_df.groupby(["First Name", "Last Name", "pto_type"])["impact_date"]
+                .nunique()
+                .reset_index(name="Days Impacted")
+                .rename(columns={"pto_type": "PTO Type"})
+            )
+
+            _grp_agg = _hours_agg.merge(
+                _days_agg,
+                on=["First Name", "Last Name", "PTO Type"],
+                how="left",
+            )
+            _grp_agg["Total Hours"] = _grp_agg["Total Hours"].round(1)
+            _grp_agg["Days Impacted"] = _grp_agg["Days Impacted"].fillna(0).astype(int)
+            _grp_agg = _grp_agg.sort_values(
+                ["Total Hours", "Last Name", "First Name", "PTO Type"],
+                ascending=[False, True, True, True],
+            )
             divider()
-            section_label(f"PTO Breakdown — {bar_label}")
-            st.dataframe(_grp_agg, use_container_width=True, hide_index=True)
+            section_label(f"PTO Breakdown - {bar_label}")
+            st.dataframe(
+                _grp_agg[["First Name", "Last Name", "PTO Type", "Total Hours", "Days Impacted"]],
+                use_container_width=True,
+                hide_index=True,
+            )
 
     hist_pts = hist_event.selection.get("points", []) if (hist_event and hist_event.selection) else []
     if hist_pts:
