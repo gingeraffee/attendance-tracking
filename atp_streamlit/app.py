@@ -2194,10 +2194,10 @@ def dashboard_page(conn, building: str) -> None:
     perf_due_rows = [dict(r) for r in fetchall(conn, sql_perf_due, (*emp_ids, today.isoformat(), in_30_days.isoformat()))]
 
     bucket_defs = {
-        "0": lambda pts: pts == 0,
-        "1-4": lambda pts: 1 <= pts <= 4.5,
-        "5-6": lambda pts: 5 <= pts <= 6.5,
-        "7": lambda pts: pts >= 7,
+        "gt1": lambda pts: pts > 1.0,
+        "1-4": lambda pts: 1.0 <= pts <= 4.5,
+        "5-6": lambda pts: 5.0 <= pts <= 6.5,
+        "7": lambda pts: pts >= 7.0,
     }
     bucket_counts = {
         key: sum(1 for r in emp_detail_rows if fn(float(r.get("point_total") or 0)))
@@ -2223,10 +2223,10 @@ def dashboard_page(conn, building: str) -> None:
 
     active_bucket_label = "All Employees"
     _bucket_label_map = {
-        "0": "0 Points",
-        "1-4": "1-4.5 Points",
-        "5-6": "5-6.5 Points",
-        "7": "7+ Points",
+        "gt1": ">1.0 Point",
+        "1-4": "1.0-4.5 Pts",
+        "5-6": "5.0-6.5 Pts",
+        "7": "7.0+ Pts",
     }
     if st.session_state.get("dashboard_bucket") in _bucket_label_map:
         active_bucket_label = _bucket_label_map[st.session_state["dashboard_bucket"]]
@@ -2247,7 +2247,7 @@ def dashboard_page(conn, building: str) -> None:
     st.markdown(
         """<style>
         .st-key-dashboard_bucket_all div[data-testid="stButton"],
-        .st-key-dashboard_bucket_0 div[data-testid="stButton"],
+        .st-key-dashboard_bucket_gt1 div[data-testid="stButton"],
         .st-key-dashboard_bucket_1-4 div[data-testid="stButton"],
         .st-key-dashboard_bucket_5-6 div[data-testid="stButton"],
         .st-key-dashboard_bucket_7 div[data-testid="stButton"] {
@@ -2256,7 +2256,7 @@ def dashboard_page(conn, building: str) -> None:
             z-index: 30;
         }
         .st-key-dashboard_bucket_all div[data-testid="stButton"] > button,
-        .st-key-dashboard_bucket_0 div[data-testid="stButton"] > button,
+        .st-key-dashboard_bucket_gt1 div[data-testid="stButton"] > button,
         .st-key-dashboard_bucket_1-4 div[data-testid="stButton"] > button,
         .st-key-dashboard_bucket_5-6 div[data-testid="stButton"] > button,
         .st-key-dashboard_bucket_7 div[data-testid="stButton"] > button {
@@ -2268,7 +2268,7 @@ def dashboard_page(conn, building: str) -> None:
             padding: 0 !important;
         }
         .st-key-dashboard_bucket_all div[data-testid="stButton"] > button p,
-        .st-key-dashboard_bucket_0 div[data-testid="stButton"] > button p,
+        .st-key-dashboard_bucket_gt1 div[data-testid="stButton"] > button p,
         .st-key-dashboard_bucket_1-4 div[data-testid="stButton"] > button p,
         .st-key-dashboard_bucket_5-6 div[data-testid="stButton"] > button p,
         .st-key-dashboard_bucket_7 div[data-testid="stButton"] > button p {
@@ -2282,10 +2282,10 @@ def dashboard_page(conn, building: str) -> None:
     tile_cols = st.columns(5)
     tile_specs = [
         ("all", "All Employees"),
-        ("0", "0 Points"),
-        ("1-4", "1–4.5 Pts"),
-        ("5-6", "5–6.5 Pts"),
-        ("7", "7+ Pts"),
+        ("gt1", ">1.0 Point"),
+        ("1-4", "1.0-4.5 Pts"),
+        ("5-6", "5.0-6.5 Pts"),
+        ("7", "7.0+ Pts"),
     ]
     active_bucket = st.session_state.get("dashboard_bucket")
 
@@ -2293,7 +2293,7 @@ def dashboard_page(conn, building: str) -> None:
         selected = (active_bucket == key) if key != "all" else (active_bucket not in bucket_defs)
         accent, glow = {
             "all": ("#87a4c6", "rgba(135,164,198,.22)"),
-            "0": ("#00d4ff", "rgba(0,212,255,.24)"),
+            "gt1": ("#00d4ff", "rgba(0,212,255,.24)"),
             "1-4": ("#2da8e8", "rgba(45,168,232,.24)"),
             "5-6": ("#ff6a7f", "rgba(255,106,127,.30)"),
             "7": ("#ff304f", "rgba(255,48,79,.34)"),
