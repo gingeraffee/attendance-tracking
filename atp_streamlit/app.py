@@ -2329,8 +2329,6 @@ def dashboard_page(conn, building: str) -> None:
         source_rows = list(emp_detail_rows)
         if bucket_key in bucket_defs:
             source_rows = [r for r in emp_detail_rows if bucket_defs[bucket_key](float(r.get("point_total") or 0))]
-            bucket_label_map = dict(tile_specs)
-            st.caption(f"Filtered by threshold tile: {bucket_label_map.get(bucket_key, bucket_key)}")
 
         source_rows = sorted(
             source_rows,
