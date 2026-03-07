@@ -169,23 +169,48 @@ footer, #MainMenu { visibility: hidden; }
    SIDEBAR
 ══════════════════════════════════════════════════════════════ */
 section[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #010407 0%, #02060e 55%, #030a18 100%) !important;
-    border-right: 1px solid rgba(0,120,255,.10) !important;
+    background: linear-gradient(180deg, rgba(8,18,42,.84) 0%, rgba(5,13,31,.78) 55%, rgba(4,10,24,.80) 100%) !important;
+    border-right: 1px solid rgba(0,200,240,.20) !important;
     width: 272px !important;
-    box-shadow: 6px 0 48px rgba(0,0,0,.80), inset -1px 0 0 rgba(0,200,240,.04);
+    box-shadow: 0 0 0 1px rgba(0,200,240,.06), 6px 0 42px rgba(0,0,0,.62), inset -1px 0 0 rgba(0,200,240,.12), inset 0 1px 0 rgba(255,255,255,.08);
+    backdrop-filter: blur(14px) saturate(1.08);
+    -webkit-backdrop-filter: blur(14px) saturate(1.08);
+    position: relative;
+    overflow: hidden;
 }
-section[data-testid="stSidebar"] * { color: #7ab8d4 !important; }
-
-/* Top edge glow on sidebar */
+section[data-testid="stSidebar"] > div {
+    position: relative;
+    z-index: 1;
+}
 section[data-testid="stSidebar"]::before {
     content: '';
-    display: block; height: 2px;
-    background: linear-gradient(90deg, transparent 10%, var(--cyan) 50%, transparent 90%);
+    position: absolute;
+    top: 0;
+    left: 10%;
+    right: 10%;
+    height: 2px;
+    background: linear-gradient(90deg, transparent 0%, var(--cyan) 52%, transparent 100%);
     animation: sidebar-top-glow 5s ease-in-out infinite;
+    pointer-events: none;
+    z-index: 2;
 }
+section[data-testid="stSidebar"]::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+        radial-gradient(80% 36% at 14% 0%, rgba(0,200,240,.10) 0%, transparent 70%),
+        radial-gradient(72% 42% at 88% 100%, rgba(255,48,80,.08) 0%, transparent 72%),
+        linear-gradient(135deg, rgba(255,255,255,.05) 0%, rgba(255,255,255,0) 45%);
+    opacity: .88;
+    pointer-events: none;
+}
+section[data-testid="stSidebar"] * { color: #8bc2dd !important; }
+
+/* Top edge glow on sidebar */
 @keyframes sidebar-top-glow {
     0%,100% { opacity: .35; }
-    50%      { opacity: .85; box-shadow: 0 0 14px var(--cyan); }
+    50%      { opacity: .92; box-shadow: 0 0 16px rgba(0,200,240,.55); }
 }
 
 /* Sidebar selectbox */
