@@ -3832,9 +3832,18 @@ def points_ledger_page(conn, building: str) -> None:
     emp_id = int(selected[0])
     st.session_state["ledger_emp_id"] = emp_id
 
-    # When the employee changes, nudge keyboard focus to the Date field (best-effort).
+    # When the employee changes, reset the entry form and nudge focus to Date.
+    ledger_form_defaults = {
+        "ledger_date_str": date.today().strftime("%m/%d/%Y"),
+        "ledger_points": 0.5,
+        "ledger_reason": "Tardy/Early Leave",
+        "ledger_note": "",
+        "ledger_flag": "",
+    }
     prev_focus_emp = st.session_state.get("_focus_emp_id")
     if prev_focus_emp != emp_id:
+        for key, val in ledger_form_defaults.items():
+            st.session_state[key] = val
         st.session_state["_focus_emp_id"] = emp_id
         components.html(
             """<script>
