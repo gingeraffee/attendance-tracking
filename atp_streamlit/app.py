@@ -2765,6 +2765,17 @@ def _pto_metric(label: str, value: str, sub: str = "") -> None:
     )
 
 
+def _weekday_date_range(start_val, end_val):
+    """Inclusive weekday-only date range (Mon-Fri) for a PTO interval."""
+    if pd.isna(start_val) or pd.isna(end_val):
+        return []
+    start_ts = pd.Timestamp(start_val).normalize()
+    end_ts = pd.Timestamp(end_val).normalize()
+    if end_ts < start_ts:
+        start_ts, end_ts = end_ts, start_ts
+    return pd.bdate_range(start=start_ts, end=end_ts)
+
+
 def pto_page(conn, building: str) -> None:
     page_heading("PTO Usage Analytics", "Upload a CSV export to analyze PTO patterns by type, building, and employee.")
 
@@ -3024,17 +3035,13 @@ def pto_page(conn, building: str) -> None:
     section_header("Summary")
     k1, k2, k3, k4 = st.columns(4)
     total_hours = df["hours"].sum()
-    # Count distinct calendar dates where ANY employee had PTO.
-    # Expand every record's start_date..end_date into individual dates,
+    # Count distinct weekday dates (Mon-Fri) where ANY employee had PTO.
+    # Expand every record's start_date..end_date into business days,
     # union across all employees, then count unique dates.
-    # Result is bounded by the filter range — 50 people on the same Monday = 1 day.
     _pto_date_set: set = set()
     for _sd, _ed in zip(df["start_date"], df["end_date"]):
-        if _sd == _ed:
-            _pto_date_set.add(_sd)
-        else:
-            for _d in pd.date_range(_sd, _ed):
-                _pto_date_set.add(_d)
+        for _d in _weekday_date_range(_sd, _ed):
+            _pto_date_set.add(pd.Timestamp(_d).normalize())
     total_dates_impacted = len(_pto_date_set)
     unique_emps = df["employee"].nunique()
     # Denominator is active DB headcount for the selected building — not the CSV
@@ -3140,14 +3147,27 @@ def pto_page(conn, building: str) -> None:
 
             # Aggregate per employee + PTO type:
             #   Hours Used   = sum of all hours for that employee+type
-            #   Days Impacted = count of individual PTO records (separate usage events)
+            #   Days Impacted = unique weekdays touched by PTO ranges (Mon-Fri only)
+            hours_agg = (
+                drill_src.groupby(["employee", "pto_type", "building"])["hours"]
+                .sum()
+                .reset_index(name="hours_used")
+            )
+            days_src = drill_src[["employee", "pto_type", "building", "start_date", "end_date"]].copy()
+            days_src["impact_date"] = days_src.apply(
+                lambda r: _weekday_date_range(r["start_date"], r["end_date"]),
+                axis=1,
+            )
+            days_src = days_src.explode("impact_date")
+            days_agg = (
+                days_src.groupby(["employee", "pto_type", "building"])["impact_date"]
+                .nunique()
+                .reset_index(name="days_impacted")
+            )
+
             drill = (
-                drill_src.groupby(["employee", "pto_type", "building"])
-                .agg(
-                    hours_used=("hours", "sum"),
-                    days_impacted=("hours", "count"),
-                )
-                .reset_index()
+                hours_agg.merge(days_agg, on=["employee", "pto_type", "building"], how="left")
+                .fillna({"days_impacted": 0})
                 .sort_values("hours_used", ascending=False)
                 .rename(columns={
                     "employee":      "Employee",
@@ -3158,6 +3178,7 @@ def pto_page(conn, building: str) -> None:
                 })
             )
             drill["Hours Used"] = drill["Hours Used"].round(1)
+            drill["Days Impacted"] = drill["Days Impacted"].astype(int)
 
             col_order = ["Employee", "PTO Type", "Hours Used", "Days Impacted", "Building"]
             st.dataframe(drill[col_order], use_container_width=True, hide_index=True)
@@ -3486,9 +3507,7 @@ def pto_page(conn, building: str) -> None:
 
             _days_df = _grp_df[["First Name", "Last Name", "pto_type", "start_date", "end_date"]].copy()
             _days_df["impact_date"] = _days_df.apply(
-                lambda r: pd.date_range(r["start_date"], r["end_date"])
-                if pd.notna(r["start_date"]) and pd.notna(r["end_date"])
-                else [],
+                lambda r: _weekday_date_range(r["start_date"], r["end_date"]),
                 axis=1,
             )
             _days_df = _days_df.explode("impact_date")
