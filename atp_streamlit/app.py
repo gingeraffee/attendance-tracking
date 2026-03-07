@@ -3832,29 +3832,52 @@ def points_ledger_page(conn, building: str) -> None:
     emp_id = int(selected[0])
     st.session_state["ledger_emp_id"] = emp_id
 
-    # When the employee changes, reset the entry form and nudge focus to Date.
-    ledger_form_defaults = {
-        "ledger_date_str": date.today().strftime("%m/%d/%Y"),
-        "ledger_points": 0.5,
-        "ledger_reason": "Tardy/Early Leave",
-        "ledger_note": "",
-        "ledger_flag": "",
-    }
-    prev_focus_emp = st.session_state.get("_focus_emp_id")
-    if prev_focus_emp != emp_id:
-        for key, val in ledger_form_defaults.items():
-            st.session_state[key] = val
-        st.session_state["_focus_emp_id"] = emp_id
+    # Employee-scoped widget keys avoid state/default collisions and reset per employee.
+    ledger_date_key = f"ledger_date_str_{emp_id}"
+    ledger_points_key = f"ledger_points_{emp_id}"
+    ledger_reason_key = f"ledger_reason_{emp_id}"
+    ledger_note_key = f"ledger_note_{emp_id}"
+    ledger_flag_key = f"ledger_flag_{emp_id}"
+
+    def focus_ledger_date_field() -> None:
         components.html(
             """<script>
-            // best-effort focus: Streamlit renders inputs with aria-labels
-            const sel = () => document.querySelector('input[aria-label="Date (MM/DD/YYYY)"]');
-            const tryFocus = () => { const el = sel(); if (el) { el.focus(); el.select?.(); return true; } return false; };
+            // Focus date field in the parent Streamlit document.
+            const rootDoc = (window.parent && window.parent.document) ? window.parent.document : document;
+            const selectors = [
+              'input[aria-label="Date (MM/DD/YYYY)"]',
+              'input[placeholder="MM/DD/YYYY"]',
+              'div[data-testid="stTextInput"] input'
+            ];
+            const sel = () => {
+              for (const s of selectors) {
+                const el = rootDoc.querySelector(s);
+                if (el && !el.disabled) return el;
+              }
+              return null;
+            };
+            const tryFocus = () => {
+              const el = sel();
+              if (!el) return false;
+              el.focus({ preventScroll: true });
+              if (typeof el.select === "function") el.select();
+              return true;
+            };
             let tries = 0;
-            const t = setInterval(() => { tries++; if (tryFocus() || tries > 20) clearInterval(t); }, 100);
+            if (!tryFocus()) {
+              const t = setInterval(() => {
+                tries += 1;
+                if (tryFocus() || tries > 40) clearInterval(t);
+              }, 75);
+            }
             </script>""",
             height=0,
         )
+
+    prev_focus_emp = st.session_state.get("_focus_emp_id")
+    if prev_focus_emp != emp_id:
+        st.session_state["_focus_emp_id"] = emp_id
+        focus_ledger_date_field()
     emp = dict(repo.get_employee(conn, emp_id))
     pts = float(emp.get("point_total") or 0)
 
@@ -3891,25 +3914,25 @@ def points_ledger_page(conn, building: str) -> None:
                 "Date (MM/DD/YYYY)",
                 value=date.today().strftime("%m/%d/%Y"),
                 placeholder="MM/DD/YYYY",
-                key="ledger_date_str",
+                key=ledger_date_key,
             )
 
             points = st.selectbox(
                 "Points",
                 [0.5, 1.0, 1.5],
                 index=0,
-                key="ledger_points",
+                key=ledger_points_key,
             )
 
             reason = st.selectbox(
                 "Reason",
                 ["Tardy/Early Leave", "Absence", "No Call/No Show"],
                 index=0,
-                key="ledger_reason",
+                key=ledger_reason_key,
             )
 
-            note = st.text_input("Note (optional)", key="ledger_note")
-            flag_code = st.text_input("Flag code (optional)", key="ledger_flag")
+            note = st.text_input("Note (optional)", key=ledger_note_key)
+            flag_code = st.text_input("Flag code (optional)", key=ledger_flag_key)
 
             submit = st.form_submit_button("Add Point", use_container_width=True)
 
@@ -3927,7 +3950,7 @@ def points_ledger_page(conn, building: str) -> None:
                         preview = services.preview_add_point(emp_id, p_date, float(points), reason, note)
                         services.add_point(conn, preview, flag_code=(flag_code or "").strip() or None)
                         st.success(f"Added {float(points):.1f} pts on {fmt_date(p_date)}.")
-                        st.rerun()
+                        focus_ledger_date_field()
                     except Exception as exc:
                         st.error(str(exc))
 
@@ -4073,15 +4096,67 @@ def run_export_query(conn, export_type: str, building: str, start_date: date, en
 
     if export_type == "30-day point history":
         if pg:
-            sql = """SELECT e.employee_id, e.last_name, e.first_name, COALESCE(e."Location",'') AS location,
-                            p.point_date, p.points, p.reason, COALESCE(p.note,'') AS note
-                       FROM points_history p JOIN employees e ON e.employee_id=p.employee_id
-                      WHERE (p.point_date::date) BETWEEN (%s::date) AND (%s::date)"""
+            sql = """
+                WITH ph_running AS (
+                    SELECT ph.employee_id,
+                           ph.point_date,
+                           ph.points,
+                           ph.reason,
+                           ph.note,
+                           ROUND(
+                               SUM(COALESCE(ph.points, 0.0)) OVER (
+                                   PARTITION BY ph.employee_id
+                                   ORDER BY (ph.point_date::date), ph.id
+                                   ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                               )::numeric,
+                               1
+                           )::float8 AS point_total
+                      FROM points_history ph
+                )
+                SELECT e.employee_id AS "Employee #",
+                       e.last_name AS "Last Name",
+                       e.first_name AS "First Name",
+                       COALESCE(e."Location", '') AS "Location",
+                       p.point_date AS "Point Date",
+                       p.points AS "Point",
+                       p.reason AS "Reason",
+                       COALESCE(p.note, '') AS "Note",
+                       p.point_total AS "Point Total"
+                  FROM ph_running p
+                  JOIN employees e ON e.employee_id = p.employee_id
+                 WHERE (p.point_date::date) BETWEEN (%s::date) AND (%s::date)
+            """
         else:
-            sql = """SELECT e.employee_id, e.last_name, e.first_name, COALESCE(e."Location",'') AS location,
-                            p.point_date, p.points, p.reason, COALESCE(p.note,'') AS note
-                       FROM points_history p JOIN employees e ON e.employee_id=p.employee_id
-                      WHERE date(p.point_date) BETWEEN date(?) AND date(?)"""
+            sql = """
+                WITH ph_running AS (
+                    SELECT ph.employee_id,
+                           ph.point_date,
+                           ph.points,
+                           ph.reason,
+                           ph.note,
+                           ROUND(
+                               SUM(COALESCE(ph.points, 0.0)) OVER (
+                                   PARTITION BY ph.employee_id
+                                   ORDER BY date(ph.point_date), ph.id
+                                   ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                               ),
+                               1
+                           ) AS point_total
+                      FROM points_history ph
+                )
+                SELECT e.employee_id AS "Employee #",
+                       e.last_name AS "Last Name",
+                       e.first_name AS "First Name",
+                       COALESCE(e."Location", '') AS "Location",
+                       p.point_date AS "Point Date",
+                       p.points AS "Point",
+                       p.reason AS "Reason",
+                       COALESCE(p.note, '') AS "Note",
+                       p.point_total AS "Point Total"
+                  FROM ph_running p
+                  JOIN employees e ON e.employee_id = p.employee_id
+                 WHERE date(p.point_date) BETWEEN date(?) AND date(?)
+            """
         params = [start_date.isoformat(), end_date.isoformat()]
 
     elif export_type == "upcoming 2-month roll-offs":
