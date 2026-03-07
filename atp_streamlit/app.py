@@ -4207,7 +4207,14 @@ def run_export_query(conn, export_type: str, building: str, start_date: date, en
         params.append(building)
 
     sql += " ORDER BY last_name, first_name"
-    return pd.DataFrame([dict(r) for r in fetchall(conn, sql, tuple(params))])
+    df = pd.DataFrame([dict(r) for r in fetchall(conn, sql, tuple(params))])
+
+    if export_type == "30-day point history" and not df.empty and "Point Total" in df.columns:
+        df["Point Total"] = pd.to_numeric(df["Point Total"], errors="coerce").map(
+            lambda v: f"{v:.1f}" if pd.notna(v) else ""
+        )
+
+    return df
 
 
 def exports_page(conn, building: str) -> None:
