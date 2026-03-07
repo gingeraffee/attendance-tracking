@@ -1742,7 +1742,7 @@ def load_employees(conn, q: str = "", building: str = "All") -> list[dict]:
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 def dashboard_page(conn, building: str) -> None:
     page_heading(
-        '<span class="live-dot"></span>Live',
+        '<span class="live-dot"></span>Active',
         "Track attendance momentum, risk thresholds, and next actions in one polished workspace.",
     )
 
