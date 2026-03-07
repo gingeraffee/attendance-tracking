@@ -2916,18 +2916,6 @@ def pto_page(conn, building: str) -> None:
     if "pto_df" not in st.session_state:
         st.info("Upload a PTO CSV above to begin analysis.")
         return
-
-    # ── Clear PTO data button ────────────────────────────────────────────────
-    if st.button("Clear PTO Data", key="pto_clear_btn"):
-        st.session_state.pop("pto_df", None)
-        st.session_state.pop("pto_type_toggles", None)
-        try:
-            with db.tx(conn):
-                repo.clear_pto_data(conn)
-        except Exception:
-            pass
-        st.rerun()
-
     df_all: pd.DataFrame = st.session_state["pto_df"].copy()
 
     # ── 30-day PTO utilization for the At a Glance bar ───────────────────────
@@ -3670,6 +3658,15 @@ def pto_page(conn, building: str) -> None:
         file_name=f"pto_export_{date_start}_{date_end}.csv",
         mime="text/csv",
     )
+    if st.button("Clear PTO Data", key="pto_clear_btn"):
+        st.session_state.pop("pto_df", None)
+        st.session_state.pop("pto_type_toggles", None)
+        try:
+            with db.tx(conn):
+                repo.clear_pto_data(conn)
+        except Exception:
+            pass
+        st.rerun()
 
     # ── Clear data ──────────────────────────────────────────────────────────
     divider()

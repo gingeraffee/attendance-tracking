@@ -1,0 +1,1807 @@
+"""Attendance Point Tracker — Streamlit Web App
+Full remodel: clean layout, status badges, live countdown, improved workflows.
+"""
+from __future__ import annotations
+
+import base64
+from io import BytesIO
+from datetime import date, datetime, timedelta
+import math
+import os
+from pathlib import Path
+import secrets
+import sys
+import pandas as pd
+import plotly.graph_objects as go
+import streamlit as st
+import streamlit.components.v1 as components
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.units import inch
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+st.set_page_config(
+    page_title="Attendance Point Tracker",
+    page_icon="⏰",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+APP_DIR = Path(__file__).resolve().parent
+REPO_ROOT = APP_DIR.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+import atp_core.db as db
+from atp_core.schema import ensure_schema
+from atp_core import repo, services
+from atp_core.rules import REASON_OPTIONS
+
+BUILDINGS = ["APIM", "APIS", "AAP"]
+
+    df_all: pd.DataFrame = st.session_state["pto_df"].copy()
+
+    # ── 30-day PTO utilization for the At a Glance bar ───────────────────────
+    _now = date.today()
+    _since_30 = pd.Timestamp(_now - timedelta(days=30))
+    _df_30 = df_all[
+        (df_all["start_date"] >= _since_30) | (df_all["end_date"] >= _since_30)
+    ]
+    if building != "All":
+        _scope_count = sum(1 for e in active_db if (e.get("location") or e.get("Location") or "") == building)
+        _df_30 = _df_30[_df_30["building"] == building] if "building" in _df_30.columns else _df_30
+    else:
+        _scope_count = len(active_db)
+    _emps_30 = _df_30["employee"].nunique() if not _df_30.empty else 0
+    _util_30 = (_emps_30 / max(_scope_count, 1)) * 100.0
+
+    render_hr_live_monitor(
+        points_24h=0,
+        points_7d=0,
+        rolloffs_due_7d=0,
+        perfect_due_7d=0,
+        label="At a glance — PTO (Last 30 Days)",
+        pto_utilization_pct=_util_30,
+    )
+
+    # ── Filters ─────────────────────────────────────────────────────────────
+    import re as _re
+    divider()
+    section_label("Filters")
+    fc1, fc2, fc3 = st.columns(3)
+
+    date_min = df_all["start_date"].min().date()
+    date_max = df_all["end_date"].max().date()
+    with fc1:
+        date_start = st.date_input("From", value=date_min, min_value=date_min, max_value=date_max, key="pto_from")
+    with fc2:
+        date_end = st.date_input("To", value=date_max, min_value=date_min, max_value=date_max, key="pto_to")
+
+    all_buildings = sorted(df_all["building"].dropna().unique())
+    bldg_opts = ["All"] + all_buildings
+    default_bldg = building if building in all_buildings else "All"
+    with fc3:
+        sel_building = st.selectbox("Building", bldg_opts, index=bldg_opts.index(default_bldg), key="pto_bldg")
+
+    all_types = sorted(df_all["pto_type"].dropna().unique())
+
+    # ── PTO type toggle chips ────────────────────────────────────────────────
+    def _tkey(t: str) -> str:
+        return "pto_toggle_" + _re.sub(r"[^a-z0-9]", "_", t.lower())
+
+    # Reset toggle state if the type list has changed (new CSV loaded)
+    if set(st.session_state.get("pto_type_toggles", {}).keys()) != set(all_types):
+        st.session_state["pto_type_toggles"] = {t: True for t in all_types}
+    toggles: dict = st.session_state["pto_type_toggles"]
+
+    active_sel   = [f".st-key-{_tkey(t)} button" for t in all_types if     toggles.get(t, True)]
+    inactive_sel = [f".st-key-{_tkey(t)} button" for t in all_types if not toggles.get(t, True)]
+
+    # Inject pill CSS globally (applies in sidebar too)
+    st.markdown(
+        f"""<style>
+        div[class*="st-key-pto_toggle_"] button {{
+            padding: 0.12rem 0.5rem !important;
+            font-size: 0.6rem !important;
+            border-radius: 999px !important;
+            font-family: 'SF Mono','Fira Code',monospace !important;
+            letter-spacing: 0.04em !important;
+            text-transform: uppercase !important;
+            min-height: 26px !important;
+            line-height: 1.15 !important;
+            font-weight: 600 !important;
+            transition: all 0.15s ease !important;
+        }}
+        {(', '.join(active_sel) or '.pto-na') + ' { background: rgba(0,212,255,.1) !important; border: 1px solid rgba(0,212,255,.7) !important; color: #00d4ff !important; box-shadow: 0 0 10px rgba(0,212,255,.2), inset 0 0 6px rgba(0,212,255,.05) !important; }'}
+        {(', '.join(inactive_sel) or '.pto-na') + ' { background: rgba(6,13,31,.6) !important; border: 1px solid #1a3050 !important; color: #2d4a6a !important; box-shadow: none !important; }'}
+        </style>""",
+        unsafe_allow_html=True,
+    )
+
+    # Render type filter pills in the sidebar
+    with st.sidebar:
+        st.markdown("<span class='sidebar-nav-label'>PTO Type Filter</span>", unsafe_allow_html=True)
+        for _pt in all_types:
+            if st.button(_pt, key=_tkey(_pt), use_container_width=True):
+                st.session_state["pto_type_toggles"][_pt] = not toggles.get(_pt, True)
+                st.rerun()
+
+    sel_types = [t for t in all_types if st.session_state["pto_type_toggles"].get(t, True)]
+
+    # Apply filters — include any PTO event that overlaps the selected date range
+    df = df_all[
+        (df_all["start_date"].dt.date <= date_end)
+        & (df_all["end_date"].dt.date >= date_start)
+    ]
+    if sel_building != "All":
+        df = df[df["building"] == sel_building]
+    if sel_types:
+        df = df[df["pto_type"].isin(sel_types)]
+
+    if df.empty:
+        info_box("No PTO records match the current filters.")
+        return
+
+    # ── KPI tiles ───────────────────────────────────────────────────────────
+    divider()
+    section_header("Summary")
+    k1, k2, k3, k4 = st.columns(4)
+    total_hours = df["hours"].sum()
+    # Count distinct calendar dates where ANY employee had PTO.
+    # Expand every record's start_date..end_date into individual dates,
+    # union across all employees, then count unique dates.
+    # Result is bounded by the filter range — 50 people on the same Monday = 1 day.
+    _pto_date_set: set = set()
+    for _sd, _ed in zip(df["start_date"], df["end_date"]):
+        if _sd == _ed:
+            _pto_date_set.add(_sd)
+        else:
+            for _d in pd.date_range(_sd, _ed):
+                _pto_date_set.add(_d)
+    total_dates_impacted = len(_pto_date_set)
+    unique_emps = df["employee"].nunique()
+    # Denominator is active DB headcount for the selected building — not the CSV
+    denom = active_count_in_scope if sel_building == building else (
+        sum(1 for e in active_db if (e.get("location") or "") == sel_building)
+        if sel_building != "All" else len(active_db)
+    )
+    utilization_pct = (unique_emps / denom * 100) if denom else 0
+    top_type = df.groupby("pto_type")["hours"].sum().idxmax() if not df.empty else "—"
+    avg_hours = total_hours / unique_emps if unique_emps else 0
+
+    with k1:
+        _pto_metric("Days Impacted", f"{total_dates_impacted:,}", f"{total_hours:,.0f} total hours")
+    with k2:
+        _pto_metric("Employees Used PTO", str(unique_emps), f"{utilization_pct:.0f}% utilization")
+    with k3:
+        _pto_metric("Top PTO Type", top_type)
+    with k4:
+        _pto_metric("Avg Days / Employee", f"{avg_hours / 8:.1f}", f"{avg_hours:.0f} hrs avg")
+
+    # ── Donut chart + Monthly trend ─────────────────────────────────────────
+    divider()
+    chart_col, trend_col = st.columns(2)
+
+    type_totals = df.groupby("pto_type")["hours"].sum().sort_values(ascending=False)
+    type_colors = {t: _PTO_TYPE_COLORS.get(t, _PTO_PALETTE[i % len(_PTO_PALETTE)]) for i, t in enumerate(type_totals.index)}
+
+    # Top-5 + "Other" for the donut
+    _top5 = type_totals.head(5)
+    _other_sum = type_totals.iloc[5:].sum()
+    if _other_sum > 0:
+        import pandas as _pd
+        donut_totals = _pd.concat([_top5, _pd.Series({"Other": _other_sum})])
+        _top5_types = set(_top5.index)
+    else:
+        donut_totals = _top5
+        _top5_types = set(_top5.index)
+    donut_colors = [type_colors.get(t, "#4a5568") for t in donut_totals.index]
+
+    with chart_col:
+        section_header("PTO by Type")
+        donut_fig = go.Figure(go.Pie(
+            labels=donut_totals.index.tolist(),
+            values=donut_totals.values.tolist(),
+            hole=0.52,
+            marker=dict(colors=donut_colors, line=dict(color="#060d1f", width=2)),
+            textinfo="label+percent",
+            hovertemplate="<b>%{label}</b><br>%{value:.0f} hrs (%{percent})<extra></extra>",
+        ))
+        donut_fig.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            showlegend=False,
+            margin=dict(t=10, b=10, l=10, r=10),
+            font=dict(color="#c8dff0", family="SF Mono, Fira Code, monospace"),
+            # Required: makes single clicks on pie slices fire selection events
+            clickmode="event+select",
+        )
+        donut_event = st.plotly_chart(
+            donut_fig,
+            use_container_width=True,
+            on_select="rerun",
+            key="pto_donut",
+        )
+
+    with trend_col:
+        section_header("Monthly PTO Trend (hours)")
+        df_trend = df.copy()
+        df_trend["month"] = df_trend["start_date"].dt.to_period("M").dt.to_timestamp()
+        monthly = df_trend.groupby(["month", "pto_type"])["hours"].sum().reset_index()
+        trend_fig = go.Figure()
+        for pto_type in monthly["pto_type"].unique():
+            sub = monthly[monthly["pto_type"] == pto_type]
+            trend_fig.add_trace(go.Scatter(
+                x=sub["month"], y=sub["hours"], name=pto_type, mode="lines+markers",
+                line=dict(color=type_colors.get(pto_type, "#00d4ff"), width=2),
+                marker=dict(size=5),
+                hovertemplate=f"<b>{pto_type}</b><br>%{{x|%b %Y}}: %{{y:.0f}} hrs<extra></extra>",
+            ))
+        trend_fig.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#c8dff0", family="SF Mono, Fira Code, monospace"),
+            xaxis=dict(showgrid=False, color="#4a7fa5"),
+            yaxis=dict(showgrid=True, gridcolor="#0d1b2e", color="#4a7fa5"),
+            legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(size=11, color="#4a7fa5")),
+            margin=dict(t=10, b=10, l=10, r=10),
+            hovermode="x unified",
+        )
+        st.plotly_chart(trend_fig, use_container_width=True, key="pto_trend")
+
+    # ── Donut drill-down ────────────────────────────────────────────────────
+    selected_points = donut_event.selection.get("points", []) if donut_event.selection else []
+    if selected_points:
+        sel_type = selected_points[0].get("label")
+        if sel_type:
+            divider()
+            section_label(f"Employees — {sel_type}")
+            if sel_type == "Other":
+                drill_src = df[~df["pto_type"].isin(_top5_types)].copy()
+            else:
+                drill_src = df[df["pto_type"] == sel_type].copy()
+
+            # Aggregate per employee + PTO type:
+            #   Hours Used   = sum of all hours for that employee+type
+            #   Days Impacted = count of individual PTO records (separate usage events)
+            drill = (
+                drill_src.groupby(["employee", "pto_type", "building"])
+                .agg(
+                    hours_used=("hours", "sum"),
+                    days_impacted=("hours", "count"),
+                )
+                .reset_index()
+                .sort_values("hours_used", ascending=False)
+                .rename(columns={
+                    "employee":      "Employee",
+                    "pto_type":      "PTO Type",
+                    "building":      "Building",
+                    "hours_used":    "Hours Used",
+                    "days_impacted": "Days Impacted",
+                })
+            )
+            drill["Hours Used"] = drill["Hours Used"].round(1)
+
+            col_order = ["Employee", "PTO Type", "Hours Used", "Days Impacted", "Building"]
+            st.dataframe(drill[col_order], use_container_width=True, hide_index=True)
+
+    # ── Building comparison ─────────────────────────────────────────────────
+    divider()
+    bc1, bc2 = st.columns(2)
+
+    with bc1:
+        section_header("PTO Hours by Location")
+        bldg_totals = df.groupby("building")["hours"].sum().sort_values(ascending=False).reset_index()
+        bar_fig = go.Figure(go.Bar(
+            x=bldg_totals["building"],
+            y=bldg_totals["hours"],
+            marker=dict(color=_PTO_PALETTE[:len(bldg_totals)], line=dict(color="#060d1f", width=1)),
+            hovertemplate="<b>%{x}</b>: %{y:.0f} hrs<extra></extra>",
+            text=(bldg_totals["hours"] / 8).round(1).astype(str) + "d",
+            textposition="outside",
+        ))
+        bar_fig.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#c8dff0", family="SF Mono, Fira Code, monospace"),
+            xaxis=dict(showgrid=False, color="#4a7fa5"),
+            yaxis=dict(showgrid=True, gridcolor="#0d1b2e", color="#4a7fa5", title="Hours"),
+            margin=dict(t=10, b=10, l=10, r=10),
+        )
+        st.plotly_chart(bar_fig, use_container_width=True, key="pto_bldg_bar")
+
+    with bc2:
+        section_header("Day of the Week PTO Trends")
+        dow_map = {0: "Mon", 1: "Tue", 2: "Wed", 3: "Thu", 4: "Fri", 5: "Sat", 6: "Sun"}
+        df_dow = df.copy()
+        df_dow["dow"] = df_dow["start_date"].dt.dayofweek
+        df_dow["dow_label"] = df_dow["dow"].map(dow_map)
+        dow_order = ["Mon", "Tue", "Wed", "Thu", "Fri"]
+        _DOW_FOCUS = {"Personal", "Vacation", "Absence"}
+        _DOW_COLORS = {"Vacation": "#00d4ff", "Personal": "#7b61ff", "Absence": "#ff6b6b", "Other": "#6b7280"}
+        df_dow_filtered = df_dow[df_dow["dow_label"].isin(dow_order)].copy()
+        df_dow_filtered["dow_category"] = df_dow_filtered["pto_type"].apply(
+            lambda t: t if t in _DOW_FOCUS else "Other"
+        )
+        dow_pivot = (
+            df_dow_filtered
+            .groupby(["dow_label", "dow_category"])["hours"]
+            .sum()
+            .reset_index()
+        )
+        dow_cat_order = ["Vacation", "Personal", "Absence", "Other"]
+        dow_cat_order = [c for c in dow_cat_order if c in dow_pivot["dow_category"].unique()]
+        dow_traces = []
+        for pt in dow_cat_order:
+            subset = (
+                dow_pivot[dow_pivot["dow_category"] == pt]
+                .set_index("dow_label")
+                .reindex(dow_order)["hours"]
+                .fillna(0)
+            )
+            dow_traces.append(go.Bar(
+                name=pt,
+                x=dow_order,
+                y=subset.values,
+                marker=dict(color=_DOW_COLORS.get(pt, "#7b61ff"), line=dict(color="#060d1f", width=1)),
+                hovertemplate=f"<b>%{{x}}</b> — {pt}: %{{y:.0f}} hrs<extra></extra>",
+            ))
+        dow_fig = go.Figure(data=dow_traces)
+        dow_fig.update_layout(
+            barmode="stack",
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#c8dff0", family="SF Mono, Fira Code, monospace"),
+            xaxis=dict(showgrid=False, color="#4a7fa5"),
+            yaxis=dict(showgrid=True, gridcolor="#0d1b2e", color="#4a7fa5", title="Hours"),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=10, color="#4a7fa5")),
+            margin=dict(t=30, b=10, l=10, r=10),
+        )
+        st.plotly_chart(dow_fig, use_container_width=True, key="pto_dow_bar")
+
+    # ── Top PTO users ───────────────────────────────────────────────────────
+    divider()
+    tu1, tu2 = st.columns([3, 2])
+
+    with tu1:
+        section_header("Top PTO Users")
+        top_users = (
+            df.groupby(["employee", "building"])["hours"]
+            .sum()
+            .reset_index()
+            .sort_values("hours", ascending=False)
+            .head(15)
+        )
+        top_users["Days"] = (top_users["hours"] / 8).round(1)
+        top_users = top_users.rename(columns={"employee": "Employee", "building": "Building", "hours": "Hours"})
+        top_users["Hours"] = top_users["Hours"].round(1)
+        st.dataframe(top_users[["Employee", "Building", "Days", "Hours"]], use_container_width=True, hide_index=True)
+
+    with tu2:
+        section_header("Zero PTO — No Usage Recorded")
+        emps_with_pto = set(df["employee"].unique())
+        # Use the DB roster as the reference — not the CSV
+        scoped_active = [
+            e for e in active_db
+            if sel_building == "All" or (e.get("location") or "") == sel_building
+        ]
+        all_active_names = {
+            f"{e['last_name'].strip()}, {e['first_name'].strip()}"
+            for e in scoped_active
+        }
+        no_pto = sorted(all_active_names - emps_with_pto)
+        if no_pto:
+            no_pto_df = pd.DataFrame({"Employee": no_pto})
+            st.dataframe(no_pto_df, use_container_width=True, hide_index=True)
+        else:
+            info_box("All active employees have PTO recorded in this period.")
+
+    # ── Module 1: Planned vs Unplanned ──────────────────────────────────────
+    divider()
+    section_header("Planned vs Unplanned PTO")
+
+    _PLANNED_TYPES   = {"vacation", "floating holiday", "reward pto"}
+    _UNPLANNED_TYPES = {"personal", "absence", "absence (sick)", "absence (covid)", "long term sick leave"}
+    _PROTECTED_TYPES = {"jury duty", "bereavement", "fmla"}
+
+    def _classify_pto(t: str) -> str:
+        tl = t.strip().lower()
+        if tl in _PLANNED_TYPES:   return "Planned"
+        if tl in _UNPLANNED_TYPES: return "Unplanned"
+        if tl in _PROTECTED_TYPES: return "Protected / Neutral"
+        return "Other"
+
+    def _drill_table(source_df: pd.DataFrame, label: str) -> None:
+        section_label(f"Employees — {label}")
+        d = source_df.copy()
+        d["start_date"] = d["start_date"].dt.strftime("%Y-%m-%d")
+        d["end_date"]   = d["end_date"].dt.strftime("%Y-%m-%d")
+        d["Hours"] = d["hours"].round(1)
+        d["Days"]  = (d["hours"] / 8).round(1)
+        d = (
+            d.rename(columns={"employee": "Employee", "building": "Building",
+                               "pto_type": "PTO Type", "start_date": "Start", "end_date": "End"})
+            [["Employee", "Building", "PTO Type", "Start", "End", "Hours", "Days"]]
+            .sort_values(["Employee", "Start"])
+        )
+        st.dataframe(d, use_container_width=True, hide_index=True)
+
+    df_cls = df.copy()
+    df_cls["category"] = df_cls["pto_type"].apply(_classify_pto)
+    cat_hrs = df_cls.groupby("category")["hours"].sum()
+    total_cls_h = cat_hrs.sum()
+    plan_h = cat_hrs.get("Planned", 0)
+    unpl_h = cat_hrs.get("Unplanned", 0)
+    prot_h = cat_hrs.get("Protected / Neutral", 0)
+
+    pv1, pv2, pv3, pv4 = st.columns(4)
+    _pct = lambda h: f"{h / total_cls_h * 100:.0f}%" if total_cls_h else "—"
+    with pv1:
+        _pto_metric("Planned", _pct(plan_h), f"{plan_h / 8:.1f} days")
+    with pv2:
+        _pto_metric("Unplanned", _pct(unpl_h), f"{unpl_h / 8:.1f} days")
+    with pv3:
+        _pto_metric("Protected / Neutral", _pct(prot_h), f"{prot_h / 8:.1f} days")
+    with pv4:
+        ratio_str = f"{plan_h / unpl_h:.1f}×" if unpl_h else "N/A"
+        _pto_metric("Plan : Unplan Ratio", ratio_str, "higher = more predictable")
+
+    df_cls["month"] = df_cls["start_date"].dt.to_period("M").dt.to_timestamp()
+    mcat = (
+        df_cls[df_cls["category"].isin(["Planned", "Unplanned"])]
+        .groupby(["month", "category"])["hours"].sum().reset_index()
+    )
+    pv_l, pv_r = st.columns([2, 1])
+    pu_event = None
+    _pu_trace_cats: list[str] = []
+    with pv_l:
+        if not mcat.empty:
+            _CAT_CLR = {"Planned": "#00e5a0", "Unplanned": "#ff6b6b"}
+            pu_fig = go.Figure()
+            for cat in ["Planned", "Unplanned"]:
+                sub = mcat[mcat["category"] == cat]
+                if not sub.empty:
+                    _pu_trace_cats.append(cat)
+                    pu_fig.add_trace(go.Bar(
+                        x=sub["month"], y=sub["hours"], name=cat,
+                        marker=dict(color=_CAT_CLR[cat], line=dict(color="#060d1f", width=1)),
+                        hovertemplate=f"<b>{cat}</b><br>%{{x|%b %Y}}: %{{y:.0f}} hrs<extra></extra>",
+                    ))
+            pu_fig.update_layout(
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#c8dff0", family="SF Mono, Fira Code, monospace"),
+                xaxis=dict(showgrid=False, color="#4a7fa5"),
+                yaxis=dict(showgrid=True, gridcolor="#0d1b2e", color="#4a7fa5", title="Hours"),
+                legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(size=11, color="#4a7fa5")),
+                margin=dict(t=10, b=10, l=10, r=10),
+                barmode="group",
+            )
+            pu_event = st.plotly_chart(pu_fig, use_container_width=True, on_select="rerun", key="pto_pu_trend")
+        else:
+            info_box("Not enough monthly data for trend.")
+    with pv_r:
+        section_label("Type \u2192 Category Map")
+        cls_tbl = (
+            df_cls.groupby(["pto_type", "category"])["hours"].sum()
+            .reset_index()
+            .rename(columns={"pto_type": "Type", "category": "Category", "hours": "Hours"})
+            .sort_values("Hours", ascending=False)
+        )
+        cls_tbl["Hours"] = cls_tbl["Hours"].round(1)
+        st.dataframe(cls_tbl, use_container_width=True, hide_index=True, height=300)
+
+    # Trend drilldown — rendered outside columns at full width
+    pu_pts = pu_event.selection.get("points", []) if (pu_event and pu_event.selection) else []
+    if pu_pts:
+        pt = pu_pts[0]
+        cn = pt.get("curve_number", 0)
+        sel_cat = _pu_trace_cats[cn] if cn < len(_pu_trace_cats) else None
+        x_raw = pt.get("x") or pt.get("label") or ""
+        if sel_cat and x_raw:
+            try:
+                sel_period = pd.to_datetime(x_raw).to_period("M")
+                drill_pu = df_cls[
+                    (df_cls["category"] == sel_cat) &
+                    (df_cls["start_date"].dt.to_period("M") == sel_period)
+                ]
+                if not drill_pu.empty:
+                    divider()
+                    _drill_table(drill_pu, f"{sel_cat} \u2014 {sel_period.strftime('%b %Y')}")
+            except Exception:
+                pass
+
+    # ── Module 2: Concentration ──────────────────────────────────────
+    divider()
+    section_header("PTO Concentration \u2014 Who's Driving Usage?")
+
+    emp_hrs = df.groupby("employee")["hours"].sum().sort_values(ascending=False).reset_index()
+    n_total_emp = len(emp_hrs)
+    top10_n = max(1, round(n_total_emp * 0.10))
+    total_emp_hrs = emp_hrs["hours"].sum()
+    top10_pct_hrs = emp_hrs.head(top10_n)["hours"].sum() / total_emp_hrs * 100 if total_emp_hrs else 0
+    concentration_label = "High" if top10_pct_hrs > 50 else ("Moderate" if top10_pct_hrs > 33 else "Even")
+
+    cn1, cn2, cn3 = st.columns(3)
+    with cn1:
+        _pto_metric("Employees using PTO", str(n_total_emp), "in selected period")
+    with cn2:
+        _pto_metric(f"Top 10% ({top10_n} people)", f"{top10_pct_hrs:.0f}% of hours", "concentration signal")
+    with cn3:
+        _pto_metric("Distribution", concentration_label, "of PTO across team")
+
+    # Pre-compute histogram bins before column block so they're accessible for drilldown
+    import numpy as _np
+    _max_h = max(float(emp_hrs["hours"].max()), 1.0)
+    _bin_edges = list(_np.linspace(0, _max_h, 11))
+    _bin_labels = [f"{int(_bin_edges[i])}\u2013{int(_bin_edges[i+1])}h" for i in range(10)]
+    _emp_hrs_b = emp_hrs.copy()
+    _emp_hrs_b["bin"] = pd.cut(_emp_hrs_b["hours"], bins=_bin_edges, labels=_bin_labels, include_lowest=True)
+    _bin_counts = _emp_hrs_b.groupby("bin", observed=False)["hours"].count().reindex(_bin_labels).fillna(0)
+
+    top10_hrs_sum = emp_hrs.head(10)["hours"].sum()
+    rest_hrs_sum = emp_hrs.iloc[10:]["hours"].sum() if n_total_emp > 10 else 0
+
+    conc_event = None
+    hist_event = None
+    cc1, cc2 = st.columns(2)
+    with cc1:
+        conc_fig = go.Figure(go.Bar(
+            y=["Top 10 Users", "Rest of Team"],
+            x=[top10_hrs_sum, rest_hrs_sum],
+            orientation="h",
+            marker=dict(color=["#00d4ff", "#1a3a5c"], line=dict(color="#060d1f", width=1)),
+            text=[f"{top10_hrs_sum / 8:.0f}d", f"{rest_hrs_sum / 8:.0f}d"],
+            textposition="inside",
+            textfont=dict(color="#e8f4fd"),
+            hovertemplate="<b>%{y}</b>: %{x:.0f} hrs<extra></extra>",
+        ))
+        conc_fig.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#c8dff0", family="SF Mono, Fira Code, monospace"),
+            xaxis=dict(showgrid=True, gridcolor="#0d1b2e", color="#4a7fa5", title="Hours"),
+            yaxis=dict(showgrid=False, color="#4a7fa5"),
+            margin=dict(t=10, b=10, l=10, r=10),
+            height=180,
+        )
+        conc_event = st.plotly_chart(conc_fig, use_container_width=True, on_select="rerun", key="pto_conc_bar")
+    with cc2:
+        hist_fig = go.Figure(go.Bar(
+            x=_bin_labels,
+            y=_bin_counts.values,
+            marker=dict(color="#7b61ff", line=dict(color="#060d1f", width=1)),
+            hovertemplate="<b>%{x}</b>: %{y} employees<extra></extra>",
+        ))
+        hist_fig.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#c8dff0", family="SF Mono, Fira Code, monospace"),
+            xaxis=dict(showgrid=False, color="#4a7fa5", title="Total Hours Used", tickangle=-30),
+            yaxis=dict(showgrid=True, gridcolor="#0d1b2e", color="#4a7fa5", title="# Employees"),
+            margin=dict(t=10, b=10, l=10, r=10),
+            height=180,
+            bargap=0.05,
+        )
+        hist_event = st.plotly_chart(hist_fig, use_container_width=True, on_select="rerun", key="pto_dist_hist")
+
+    # Concentration drilldowns — rendered outside columns at full width
+    conc_pts = conc_event.selection.get("points", []) if (conc_event and conc_event.selection) else []
+    if conc_pts:
+        bar_label = conc_pts[0].get("y") or conc_pts[0].get("label") or ""
+        if bar_label in ("Top 10 Users", "Rest of Team"):
+            _group = emp_hrs.head(10) if bar_label == "Top 10 Users" else emp_hrs.iloc[10:]
+            _grp_names = set(_group["employee"])
+            _grp_df = df[df["employee"].isin(_grp_names)]
+
+            if {"first_name", "last_name"}.issubset(_grp_df.columns):
+                _grp_df = _grp_df.copy()
+                _grp_df["First Name"] = _grp_df["first_name"].astype(str).str.strip()
+                _grp_df["Last Name"] = _grp_df["last_name"].astype(str).str.strip()
+            else:
+                _grp_df = _grp_df.copy()
+                _name_split = _grp_df["employee"].astype(str).str.split(",", n=1, expand=True)
+                _grp_df["Last Name"] = _name_split[0].fillna("").str.strip()
+                _grp_df["First Name"] = _name_split[1].fillna("").str.strip()
+
+            _hours_agg = (
+                _grp_df.groupby(["First Name", "Last Name", "pto_type"], as_index=False)["hours"]
+                .sum()
+                .rename(columns={"pto_type": "PTO Type", "hours": "Total Hours"})
+            )
+
+            _days_df = _grp_df[["First Name", "Last Name", "pto_type", "start_date", "end_date"]].copy()
+            _days_df["impact_date"] = _days_df.apply(
+                lambda r: pd.date_range(r["start_date"], r["end_date"])
+                if pd.notna(r["start_date"]) and pd.notna(r["end_date"])
+                else [],
+                axis=1,
+            )
+            _days_df = _days_df.explode("impact_date")
+            _days_agg = (
+                _days_df.groupby(["First Name", "Last Name", "pto_type"])["impact_date"]
+                .nunique()
+                .reset_index(name="Days Impacted")
+                .rename(columns={"pto_type": "PTO Type"})
+            )
+
+            _grp_agg = _hours_agg.merge(
+                _days_agg,
+                on=["First Name", "Last Name", "PTO Type"],
+                how="left",
+            )
+            _grp_agg["Total Hours"] = _grp_agg["Total Hours"].round(1)
+            _grp_agg["Days Impacted"] = _grp_agg["Days Impacted"].fillna(0).astype(int)
+            _grp_agg = _grp_agg.sort_values(
+                ["Total Hours", "Last Name", "First Name", "PTO Type"],
+                ascending=[False, True, True, True],
+            )
+            divider()
+            section_label(f"PTO Breakdown - {bar_label}")
+            st.dataframe(
+                _grp_agg[["First Name", "Last Name", "PTO Type", "Total Hours", "Days Impacted"]],
+                use_container_width=True,
+                hide_index=True,
+            )
+
+    hist_pts = hist_event.selection.get("points", []) if (hist_event and hist_event.selection) else []
+    if hist_pts:
+        bin_sel = hist_pts[0].get("x") or hist_pts[0].get("label") or ""
+        if bin_sel in _bin_labels:
+            bi = _bin_labels.index(bin_sel)
+            lo, hi = _bin_edges[bi], _bin_edges[bi + 1]
+            names_in_bin = set(_emp_hrs_b[(_emp_hrs_b["hours"] >= lo) & (_emp_hrs_b["hours"] <= hi)]["employee"])
+            if names_in_bin:
+                _hist_df = df[df["employee"].isin(names_in_bin)]
+                _hist_agg = (
+                    _hist_df.groupby(["employee", "building", "pto_type"])["hours"].sum()
+                    .reset_index()
+                    .rename(columns={"employee": "Employee", "building": "Building",
+                                     "pto_type": "PTO Type", "hours": "Hours"})
+                    .sort_values(["Employee", "Hours"], ascending=[True, False])
+                )
+                _hist_agg["Hours"] = _hist_agg["Hours"].round(1)
+                _hist_agg["Days"] = (_hist_agg["Hours"] / 8).round(1)
+                divider()
+                section_label(f"Employees Using {bin_sel} — by PTO Type")
+                st.dataframe(_hist_agg, use_container_width=True, hide_index=True)
+
+    # ── Module 3: Burnout & Retention Risk ──────────────────────────────────
+    divider()
+    section_header("Burnout & Retention Risk")
+
+    low10_n = max(1, round(n_total_emp * 0.10))
+    low_users = emp_hrs.tail(low10_n).copy() if n_total_emp >= 5 else pd.DataFrame()
+    low_avg_days = low_users["hours"].mean() / 8 if not low_users.empty else 0
+    no_pto_count = len(no_pto)
+    no_pto_rate = no_pto_count / max(1, len(all_active_names)) * 100
+
+    br1, br2, br3 = st.columns(3)
+    with br1:
+        _pto_metric("No PTO Recorded", str(no_pto_count), "employees — 0 hrs")
+    with br2:
+        _pto_metric("Zero-PTO Rate", f"{no_pto_rate:.0f}%", "of active headcount")
+    with br3:
+        _pto_metric("Lowest 10% Avg", f"{low_avg_days:.1f} days", "potential burnout flag")
+
+    brl, brr = st.columns(2)
+
+    with brl:
+        section_label("No PTO Usage — Burnout Risk")
+        if no_pto:
+            st.dataframe(pd.DataFrame({"Employee": no_pto}), use_container_width=True, hide_index=True)
+        else:
+            info_box("All active employees have PTO recorded. ✓")
+    with brr:
+        section_label(f"Bottom 10% of Users({low10_n} employees)")
+        if not low_users.empty:
+            low_users["Days"] = (low_users["hours"] / 8).round(1)
+            low_users = low_users.rename(columns={"employee": "Employee", "hours": "Hours"})
+            low_users["Hours"] = low_users["Hours"].round(1)
+            st.dataframe(low_users[["Employee", "Hours", "Days"]], use_container_width=True, hide_index=True)
+        else:
+            info_box("Not enough data for bottom 10% analysis.")
+
+    # ── Module 4: Pace & Seasonality ────────────────────────────────────────
+    divider()
+    section_header("PTO Pace & Seasonality")
+
+    from datetime import timedelta as _td
+    period_days = max(1, (date_end - date_start).days + 1)
+    total_days = total_hours / 8
+    annualized_total = total_days / period_days * 365
+    annualized_per_emp = avg_hours / 8 / period_days * 365 if unique_emps else 0
+
+    mid = date_start + _td(days=period_days // 2)
+    fh_hrs = df[df["start_date"].dt.date < mid]["hours"].sum()
+    sh_hrs = df[df["start_date"].dt.date >= mid]["hours"].sum()
+    fh_rate = fh_hrs / max(1, period_days // 2)
+    sh_rate = sh_hrs / max(1, period_days - period_days // 2)
+    delta_pct = (sh_rate - fh_rate) / fh_rate * 100 if fh_rate else 0
+    trend_arrow = "▲" if delta_pct > 5 else ("▼" if delta_pct < -5 else "→")
+
+    ps1, ps2, ps3 = st.columns(3)
+    with ps1:
+        _pto_metric("Annualized PTO Days", f"{annualized_total:,.0f}", "at current pace — total")
+    with ps2:
+        _pto_metric("Days / Employee (ann.)", f"{annualized_per_emp:.1f}", "per active employee")
+    with ps3:
+        _pto_metric("Usage Trend", f"{trend_arrow} {abs(delta_pct):.0f}%", "2nd vs 1st half of period")
+
+    _MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    df_season = df_all.copy()
+    if sel_building != "All":
+        df_season = df_season[df_season["building"] == sel_building]
+    df_season["cal_month"] = df_season["start_date"].dt.month
+    season = (
+        df_season.groupby("cal_month")["hours"].sum()
+        .reindex(range(1, 13)).fillna(0).reset_index()
+    )
+    season["label"] = [_MONTH_LABELS[m - 1] for m in season["cal_month"]]
+    season_fig = go.Figure(go.Bar(
+        x=season["label"],
+        y=season["hours"],
+        marker=dict(
+            color=season["hours"],
+            colorscale=[[0, "#0d1b2e"], [0.5, "#7b61ff"], [1, "#00d4ff"]],
+            line=dict(color="#060d1f", width=1),
+        ),
+        text=(season["hours"] / 8).round(0).astype(int).astype(str) + "d",
+        textposition="outside",
+        hovertemplate="<b>%{x}</b>: %{y:.0f} total hrs<extra></extra>",
+    ))
+    season_fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="#c8dff0", family="SF Mono, Fira Code, monospace"),
+        xaxis=dict(showgrid=False, color="#4a7fa5"),
+        yaxis=dict(showgrid=True, gridcolor="#0d1b2e", color="#4a7fa5", title="Total Hours"),
+        margin=dict(t=30, b=10, l=10, r=10),
+    )
+    season_event = st.plotly_chart(season_fig, use_container_width=True, on_select="rerun", key="pto_seasonality")
+    season_pts = season_event.selection.get("points", []) if (season_event and season_event.selection) else []
+    if season_pts:
+        sel_mon_label = season_pts[0].get("x") or season_pts[0].get("label") or ""
+        if sel_mon_label in _MONTH_LABELS:
+            sel_mon_num = _MONTH_LABELS.index(sel_mon_label) + 1
+            df_mon = df.copy()
+            df_mon["cal_month"] = df_mon["start_date"].dt.month
+            drill_mon = df_mon[df_mon["cal_month"] == sel_mon_num]
+            if not drill_mon.empty:
+                divider()
+                _drill_table(drill_mon, f"PTO in {sel_mon_label}")
+
+    # ── Export ──────────────────────────────────────────────────────────────
+    divider()
+    section_label("Export Filtered Data")
+    exp_cols = ["employee_id", "employee", "building", "pto_type", "start_date", "end_date", "hours", "days"]
+    exp_df = df[[c for c in exp_cols if c in df.columns]].copy()
+    exp_df["start_date"] = exp_df["start_date"].dt.strftime("%Y-%m-%d")
+    exp_df["end_date"] = exp_df["end_date"].dt.strftime("%Y-%m-%d")
+    st.download_button(
+        "Download filtered PTO as CSV",
+        data=to_csv(exp_df),
+        file_name=f"pto_export_{date_start}_{date_end}.csv",
+        mime="text/csv",
+    )
+    if st.button("Clear PTO Data", key="pto_clear_btn"):
+        st.session_state.pop("pto_df", None)
+        st.session_state.pop("pto_type_toggles", None)
+        try:
+            with db.tx(conn):
+                repo.clear_pto_data(conn)
+        except Exception:
+            pass
+        st.rerun()
+
+    # ── Clear data ──────────────────────────────────────────────────────────
+    divider()
+    st.markdown(
+        "<p style='color:#6a8ab8;font-size:.8rem;margin-bottom:.4rem'>"
+        "Clear the loaded CSV data to start over with a new file.</p>",
+        unsafe_allow_html=True,
+    )
+
+# ── Employees ─────────────────────────────────────────────────────────────────
+def employees_page(conn, building: str) -> None:
+    page_heading("Employees", "Look up employees and review current attendance status.")
+
+    rows = load_employees(conn, building=building)
+
+    if not rows:
+        info_box("No matching employees found.")
+        return
+
+    # Detail view
+    opts = [
+        (int(r["employee_id"]), f"#{r['employee_id']} — {r['last_name']}, {r['first_name']}")
+        for r in rows
+    ]
+    selected = st.selectbox("View details for", opts, format_func=lambda x: x[1], label_visibility="collapsed")
+    emp_id = selected[0]
+    emp = dict(repo.get_employee(conn, emp_id))
+
+    pts = float(emp.get("point_total") or 0)
+    loc = emp.get("Location") or emp.get("location") or "—"
+    active_flag = emp.get("is_active", 1)
+
+    active_badge = (
+        "<span style='display:inline-block;padding:2px 9px;border-radius:99px;font-size:.78rem;font-weight:700;"
+        "color:#00a87a;background:rgba(0,168,122,.10);border:1px solid rgba(0,168,122,.25)'>Active</span>"
+        if active_flag else
+        "<span style='display:inline-block;padding:2px 9px;border-radius:99px;font-size:.78rem;font-weight:700;"
+        "color:#6a8ab8;background:rgba(79,142,247,.08);border:1px solid rgba(79,142,247,.22)'>Inactive</span>"
+    )
+    st.markdown(
+        f"<div class='card'>"
+        f"<div style='display:flex;justify-content:space-between;align-items:flex-start'>"
+        f"<div><h2 style='margin:0;font-size:1.3rem;font-weight:800;color:#d4e1f7'>"
+        f"{emp.get('last_name')}, {emp.get('first_name')}</h2>"
+        f"<div style='color:#6a8ab8;font-size:.85rem;margin-top:.2rem'>"
+        f"Employee #{emp_id} &nbsp;·&nbsp; {loc}</div></div>"
+        f"<div style='display:flex;gap:.4rem;align-items:center'>{pt_badge(pts)} {active_badge}</div>"
+        f"</div></div>",
+        unsafe_allow_html=True,
+    )
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Point Total", f"{pts:.1f}")
+    c2.metric("Next Roll-off", fmt_date(emp.get("rolloff_date")))
+    c3.metric("Perfect Attendance", fmt_date(emp.get("perfect_attendance")))
+    c4.metric("Last Point Entry", fmt_date(emp.get("last_point_date")))
+
+    divider()
+    section_label("Point History (all events)")
+    hist = [dict(r) for r in repo.get_points_history(conn, emp_id, limit=5000)]
+
+    pdf_bytes = build_point_history_pdf(emp, hist)
+    safe_last = str(emp.get("last_name") or "employee").replace(" ", "_")
+    safe_first = str(emp.get("first_name") or "").replace(" ", "_")
+    report_date = date.today().strftime("%Y%m%d")
+    st.download_button(
+        "Download Point History PDF",
+        data=pdf_bytes,
+        file_name=f"attendance-history-{emp_id}-{safe_last}-{safe_first}-{report_date}.pdf",
+        mime="application/pdf",
+        use_container_width=False,
+    )
+
+    if hist:
+        df_h = pd.DataFrame(hist)[["point_date", "points", "reason", "note", "point_total"]]
+        df_h["point_date"] = df_h["point_date"].apply(fmt_date)
+        df_h["points"] = df_h["points"].apply(lambda v: f"{float(v or 0):.1f}")
+        df_h["point_total"] = df_h["point_total"].apply(lambda v: f"{float(v or 0):.1f}")
+        df_h.columns = ["Date", "Points", "Reason", "Note", "Running Total"]
+        st.dataframe(df_h, use_container_width=True, hide_index=True)
+    else:
+        info_box("No history entries yet for this employee.")
+
+
+# ── Points Ledger ─────────────────────────────────────────────────────────────
+def points_ledger_page(conn, building: str) -> None:
+    page_heading("Points Ledger", "Record attendance transactions and maintain a complete audit trail.")
+
+    employees = load_employees(conn, building=building)
+    if not employees:
+        warn_box("No active employees found for this building filter.")
+        return
+
+    opts = [
+        (int(e["employee_id"]), f"#{e['employee_id']} — {e['last_name']}, {e['first_name']}")
+        for e in employees
+    ]
+
+    # Employee picker (Streamlit selectbox has built-in type-to-search: focus it and start typing)
+    # Kept keyboard-friendly: Tab into the dropdown, type a few letters, use arrows + Enter.
+    prev_emp = st.session_state.get("ledger_emp_id")
+    default_idx = 0
+    if prev_emp is not None:
+        for i, o in enumerate(opts):
+            if o[0] == prev_emp:
+                default_idx = i
+                break
+
+    selected = st.selectbox(
+        "Employee",
+        opts,
+        index=default_idx,
+        format_func=lambda x: x[1],
+        key="ledger_emp_select",
+    )
+    emp_id = int(selected[0])
+    st.session_state["ledger_emp_id"] = emp_id
+
+    # When the employee changes, nudge keyboard focus to the Date field (best-effort).
+    prev_focus_emp = st.session_state.get("_focus_emp_id")
+    if prev_focus_emp != emp_id:
+        st.session_state["_focus_emp_id"] = emp_id
+        components.html(
+            """<script>
+            // best-effort focus: Streamlit renders inputs with aria-labels
+            const sel = () => document.querySelector('input[aria-label="Date (MM/DD/YYYY)"]');
+            const tryFocus = () => { const el = sel(); if (el) { el.focus(); el.select?.(); return true; } return false; };
+            let tries = 0;
+            const t = setInterval(() => { tries++; if (tryFocus() || tries > 20) clearInterval(t); }, 100);
+            </script>""",
+            height=0,
+        )
+    emp = dict(repo.get_employee(conn, emp_id))
+    pts = float(emp.get("point_total") or 0)
+
+    # Status strip
+    st.markdown(
+        f"<div style='display:grid;grid-template-columns:repeat(4,1fr);gap:.7rem;margin:.55rem 0 1.2rem 0'>"
+        f"<div class='card-sm'>"
+        f"<div style='font-size:.67rem;font-weight:700;letter-spacing:.09em;text-transform:uppercase;"
+        f"color:#6a8ab8;margin-bottom:.3rem'>Points</div>{pt_badge(pts)}</div>"
+        f"<div class='card-sm'>"
+        f"<div style='font-size:.67rem;font-weight:700;letter-spacing:.09em;text-transform:uppercase;"
+        f"color:#6a8ab8;margin-bottom:.3rem'>Next Roll-off</div>"
+        f"<div style='font-size:.9rem;font-weight:700;color:#d4e1f7'>{fmt_date(emp.get('rolloff_date'))}</div></div>"
+        f"<div class='card-sm'>"
+        f"<div style='font-size:.67rem;font-weight:700;letter-spacing:.09em;text-transform:uppercase;"
+        f"color:#6a8ab8;margin-bottom:.3rem'>Perfect Att.</div>"
+        f"<div style='font-size:.9rem;font-weight:700;color:#d4e1f7'>{fmt_date(emp.get('perfect_attendance'))}</div></div>"
+        f"<div class='card-sm'>"
+        f"<div style='font-size:.67rem;font-weight:700;letter-spacing:.09em;text-transform:uppercase;"
+        f"color:#6a8ab8;margin-bottom:.3rem'>Last Entry</div>"
+        f"<div style='font-size:.9rem;font-weight:700;color:#d4e1f7'>{fmt_date(emp.get('last_point_date'))}</div></div>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+    col_form, col_hist = st.columns([1, 2], gap="large")
+
+    with col_form:
+        section_label("New Transaction")
+        with st.form("ledger_entry", clear_on_submit=False):
+            # Keyboard-first entry order (Tab works naturally in this top-to-bottom layout)
+            # Date in MM/DD/YYYY (text input is faster than clicking a date picker for batch work)
+            date_str = st.text_input(
+                "Date (MM/DD/YYYY)",
+                value=date.today().strftime("%m/%d/%Y"),
+                placeholder="MM/DD/YYYY",
+                key="ledger_date_str",
+            )
+
+            points = st.selectbox(
+                "Points",
+                [0.5, 1.0, 1.5],
+                index=0,
+                key="ledger_points",
+            )
+
+            reason = st.selectbox(
+                "Reason",
+                ["Tardy/Early Leave", "Absence", "No Call/No Show"],
+                index=0,
+                key="ledger_reason",
+            )
+
+            note = st.text_input("Note (optional)", key="ledger_note")
+            flag_code = st.text_input("Flag code (optional)", key="ledger_flag")
+
+            submit = st.form_submit_button("Add Point", use_container_width=True)
+
+        if submit:
+            # Parse MM/DD/YYYY
+            try:
+                p_date = datetime.strptime(date_str.strip(), "%m/%d/%Y").date()
+            except Exception:
+                st.error("Invalid date. Use MM/DD/YYYY (example: 03/02/2026).")
+            else:
+                if p_date > date.today():
+                    st.error("Date cannot be in the future.")
+                else:
+                    try:
+                        preview = services.preview_add_point(emp_id, p_date, float(points), reason, note)
+                        services.add_point(conn, preview, flag_code=(flag_code or "").strip() or None)
+                        st.success(f"Added {float(points):.1f} pts on {fmt_date(p_date)}.")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(str(exc))
+
+
+    with col_hist:
+        section_label("Transaction History (all events)")
+        hist = [dict(r) for r in repo.get_points_history(conn, emp_id, limit=5000)]
+        if hist:
+            df_h = pd.DataFrame(hist)[["id", "point_date", "points", "reason", "note", "point_total"]]
+            df_h["point_date"] = df_h["point_date"].apply(fmt_date)
+            df_h["points"] = df_h["points"].apply(lambda v: f"{float(v or 0):.1f}")
+            df_h["point_total"] = df_h["point_total"].apply(lambda v: f"{float(v or 0):.1f}")
+            df_h.columns = ["ID", "Date", "Pts", "Reason", "Note", "Running Total"]
+            st.dataframe(df_h.drop(columns=["ID"]), use_container_width=True, hide_index=True, height=430)
+            if st.button("Undo Last Entry", key="undo_last"):
+                try:
+                    services.delete_point_history_entry(conn, point_id=int(df_h.iloc[0]["ID"]), employee_id=emp_id)
+                    st.success("Last entry removed.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+        else:
+            info_box("No history entries for this employee yet.")
+
+
+# ── Manage Employees ──────────────────────────────────────────────────────────
+def manage_employees_page(conn) -> None:
+    page_heading("Manage Employees", "Onboard new employees, update details, archive, or permanently delete records.")
+
+    BLDG_OPTS = ["", *BUILDINGS]
+    tab_add, tab_edit = st.tabs(["Add Employee", "Edit / Archive / Delete"])
+
+    # ── Add ──────────────────────────────────────────────────────────────────
+    with tab_add:
+        st.markdown("<div style='height:.5rem'></div>", unsafe_allow_html=True)
+        col_form, col_info = st.columns([1, 1], gap="large")
+
+        with col_form:
+            with st.form("add_employee", clear_on_submit=True):
+                emp_id   = st.number_input("Employee #", min_value=1, step=1)
+                first    = st.text_input("First Name")
+                last     = st.text_input("Last Name")
+                location = st.selectbox("Building", BLDG_OPTS)
+                added    = st.form_submit_button("Add Employee", use_container_width=True)
+
+            if added:
+                if not first.strip() or not last.strip():
+                    st.error("First and last name are required.")
+                else:
+                    try:
+                        services.create_employee(conn, int(emp_id), last.strip(), first.strip(), location or None)
+                        conn.commit()
+                        st.success(f"Employee #{int(emp_id)} — {last}, {first} added.")
+                    except Exception as exc:
+                        st.error(str(exc))
+
+        with col_info:
+            st.markdown("<div style='height:2.5rem'></div>", unsafe_allow_html=True)
+            st.markdown(
+                "<div class='info-box'><b>New employee checklist</b><br>"
+                "• Employee # must be unique across all locations<br>"
+                "• Building can be set now or updated later via the Edit tab<br>"
+                "• All policy dates are blank until the first point entry is posted</div>",
+                unsafe_allow_html=True,
+            )
+
+    # ── Edit / Archive / Delete ───────────────────────────────────────────────
+    with tab_edit:
+        st.markdown("<div style='height:.5rem'></div>", unsafe_allow_html=True)
+        all_rows = [dict(r) for r in repo.search_employees(conn, q="", active_only=False, limit=3000)]
+        if not all_rows:
+            info_box("No employees in the database yet.")
+            return
+
+        opts = [
+            (
+                int(r["employee_id"]),
+                f"#{r['employee_id']} — {r['last_name']}, {r['first_name']}"
+                + (" (inactive)" if not r.get("is_active", 1) else ""),
+            )
+            for r in all_rows
+        ]
+        sel = st.selectbox("Select employee", opts, format_func=lambda x: x[1], label_visibility="collapsed")
+        emp = dict(repo.get_employee(conn, sel[0]))
+        loc_val = emp.get("Location") or emp.get("location") or ""
+        loc_idx = BLDG_OPTS.index(loc_val) if loc_val in BLDG_OPTS else 0
+
+        col_edit, col_del = st.columns([1, 1], gap="large")
+
+        with col_edit:
+            section_label("Edit Details")
+            with st.form("edit_employee"):
+                first_e = st.text_input("First Name", value=emp.get("first_name") or "")
+                last_e  = st.text_input("Last Name",  value=emp.get("last_name") or "")
+                bldg_e  = st.selectbox("Building", BLDG_OPTS, index=loc_idx)
+                act_e   = st.checkbox("Active", value=bool(emp.get("is_active", 1)))
+                saved   = st.form_submit_button("Save Changes", use_container_width=True)
+
+            if saved:
+                try:
+                    exec_sql(
+                        conn,
+                        'UPDATE employees SET first_name=?, last_name=?, "Location"=?, is_active=? WHERE employee_id=?',
+                        (first_e.strip(), last_e.strip(), bldg_e or None, 1 if act_e else 0, sel[0]),
+                    )
+                    conn.commit()
+                    st.success("Changes saved.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+
+        with col_del:
+            section_label("Danger Zone")
+            st.markdown(
+                "<div class='danger-box'>Permanently removes this employee "
+                "<b>and all their point history</b>. This cannot be undone.</div>",
+                unsafe_allow_html=True,
+            )
+            st.markdown("<div style='height:.6rem'></div>", unsafe_allow_html=True)
+            confirmed = st.checkbox(f"I understand — permanently delete #{sel[0]}")
+            if confirmed:
+                if st.button("Delete Employee", key="del_emp"):
+                    try:
+                        services.delete_employee(conn, sel[0])
+                        conn.commit()
+                        st.success(f"Employee #{sel[0]} deleted.")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(str(exc))
+
+
+# ── Exports & Forecasts ───────────────────────────────────────────────────────
+EXPORT_LABELS = {
+    "30-day point history":        "30-Day Point History",
+    "upcoming 2-month roll-offs":  "Upcoming 2-Month Roll-offs",
+    "upcoming perfect attendance": "Upcoming Perfect Attendance",
+    "upcoming annual roll-off":    "Annual YTD Roll-off Entries",
+}
+
+
+def run_export_query(conn, export_type: str, building: str, start_date: date, end_date: date) -> pd.DataFrame:
+    pg = is_pg(conn)
+
+    if export_type == "30-day point history":
+        if pg:
+            sql = """SELECT e.employee_id, e.last_name, e.first_name, COALESCE(e."Location",'') AS location,
+                            p.point_date, p.points, p.reason, COALESCE(p.note,'') AS note
+                       FROM points_history p JOIN employees e ON e.employee_id=p.employee_id
+                      WHERE (p.point_date::date) BETWEEN (%s::date) AND (%s::date)"""
+        else:
+            sql = """SELECT e.employee_id, e.last_name, e.first_name, COALESCE(e."Location",'') AS location,
+                            p.point_date, p.points, p.reason, COALESCE(p.note,'') AS note
+                       FROM points_history p JOIN employees e ON e.employee_id=p.employee_id
+                      WHERE date(p.point_date) BETWEEN date(?) AND date(?)"""
+        params = [start_date.isoformat(), end_date.isoformat()]
+
+    elif export_type == "upcoming 2-month roll-offs":
+        if pg:
+            sql = """SELECT employee_id, last_name, first_name, COALESCE("Location",'') AS location,
+                            point_total, rolloff_date
+                       FROM employees WHERE rolloff_date IS NOT NULL
+                         AND (rolloff_date::date) BETWEEN (%s::date) AND (%s::date)"""
+        else:
+            sql = """SELECT employee_id, last_name, first_name, COALESCE("Location",'') AS location,
+                            point_total, rolloff_date
+                       FROM employees WHERE rolloff_date IS NOT NULL
+                         AND date(rolloff_date) BETWEEN date(?) AND date(?)"""
+        params = [start_date.isoformat(), end_date.isoformat()]
+
+    elif export_type == "upcoming perfect attendance":
+        if pg:
+            sql = """SELECT employee_id, last_name, first_name, COALESCE("Location",'') AS location,
+                            point_total, perfect_attendance
+                       FROM employees WHERE perfect_attendance IS NOT NULL
+                         AND (perfect_attendance::date) BETWEEN (%s::date) AND (%s::date)"""
+        else:
+            sql = """SELECT employee_id, last_name, first_name, COALESCE("Location",'') AS location,
+                            point_total, perfect_attendance
+                       FROM employees WHERE perfect_attendance IS NOT NULL
+                         AND date(perfect_attendance) BETWEEN date(?) AND date(?)"""
+        params = [start_date.isoformat(), end_date.isoformat()]
+
+    else:  # annual roll-off
+        year_start = date(date.today().year, 1, 1)
+        if pg:
+            sql = """SELECT e.employee_id, e.last_name, e.first_name, COALESCE(e."Location",'') AS location,
+                            p.point_date, p.points, p.reason, COALESCE(p.note,'') AS note
+                       FROM points_history p JOIN employees e ON e.employee_id=p.employee_id
+                      WHERE p.reason='YTD Roll-Off' AND p.flag_code='AUTO'
+                        AND (p.point_date::date) >= (%s::date)"""
+        else:
+            sql = """SELECT e.employee_id, e.last_name, e.first_name, COALESCE(e."Location",'') AS location,
+                            p.point_date, p.points, p.reason, COALESCE(p.note,'') AS note
+                       FROM points_history p JOIN employees e ON e.employee_id=p.employee_id
+                      WHERE p.reason='YTD Roll-Off' AND p.flag_code='AUTO'
+                        AND date(p.point_date) >= date(?)"""
+        params = [year_start.isoformat()]
+
+    if building != "All":
+        e_ref = 'e."Location"' if " JOIN employees e" in sql else '"Location"'
+        sql += f" AND COALESCE({e_ref},'') = ?"
+        params.append(building)
+
+    sql += " ORDER BY last_name, first_name"
+    return pd.DataFrame([dict(r) for r in fetchall(conn, sql, tuple(params))])
+
+
+def exports_page(conn, building: str) -> None:
+    page_heading(
+        "Exports & Forecasts",
+        "Generate and download operational reports for roll-offs, perfect attendance, and point history.",
+    )
+
+    col_ctrl, col_data = st.columns([1, 2.8], gap="large")
+
+    with col_ctrl:
+        section_label("Report Settings")
+        export_type = st.radio(
+            "Report type",
+            list(EXPORT_LABELS.keys()),
+            format_func=lambda k: EXPORT_LABELS[k],
+            key="export_type",
+            label_visibility="collapsed",
+        )
+        st.markdown("<div style='height:.4rem'></div>", unsafe_allow_html=True)
+        start_date = st.date_input("From", value=date.today() - timedelta(days=30))
+        end_date   = st.date_input("To",   value=date.today() + timedelta(days=60))
+        run = st.button("Run Report", use_container_width=True)
+
+    with col_data:
+        if run:
+            df = run_export_query(conn, export_type, building, start_date, end_date)
+            st.session_state["last_export"] = (export_type, df)
+
+        if "last_export" in st.session_state:
+            label, df = st.session_state["last_export"]
+            section_label(EXPORT_LABELS.get(label, label))
+            if df.empty:
+                info_box("No records found for the selected date range and building filter.")
+            else:
+                st.dataframe(df, use_container_width=True, hide_index=True, height=500)
+                st.download_button(
+                    "Download CSV",
+                    data=to_csv(df),
+                    file_name=f"atp_{label.replace(' ', '_')}_{date.today()}.csv",
+                    mime="text/csv",
+                )
+        else:
+            st.markdown("<div style='height:1rem'></div>", unsafe_allow_html=True)
+            info_box("Choose a report type and date range, then click <b>Run Report</b>.")
+
+
+# ── System Updates ────────────────────────────────────────────────────────────
+def system_updates_page(conn) -> None:
+    page_heading(
+        "System Updates",
+        "Run automated maintenance jobs: 2-month roll-offs, perfect attendance advancement, and YTD roll-offs.",
+    )
+
+    if "maintenance_log" not in st.session_state:
+        st.session_state["maintenance_log"] = []
+
+    col_ctrl, col_results = st.columns([1, 2.2], gap="large")
+
+    with col_ctrl:
+        section_label("Job Controls")
+        run_date = st.date_input("Run jobs through date", value=date.today())
+        dry_run  = st.toggle("Dry run (preview only)", value=True)
+
+        if dry_run:
+            st.markdown("<div class='info-box' style='margin:.6rem 0'>Dry run — no data will be changed.</div>", unsafe_allow_html=True)
+            ok = True
+        else:
+            st.markdown("<div class='warn-box' style='margin:.6rem 0'>Live mode — changes will be written to the database.</div>", unsafe_allow_html=True)
+            ok = st.checkbox("I confirm — apply changes to the database")
+
+        st.markdown("<div style='height:.5rem'></div>", unsafe_allow_html=True)
+        btn_roll = st.button("Run 2-Month Roll-offs",      use_container_width=True, disabled=not ok)
+        btn_perf = st.button("Advance Perfect Attendance", use_container_width=True, disabled=not ok)
+        btn_ytd  = st.button("Apply YTD Roll-offs",        use_container_width=True, disabled=not ok)
+
+        st.markdown(
+            "<div style='margin-top:.9rem;font-size:.79rem;color:#6a8ab8'>"
+            "<b style='color:#7eb3ff'>2-Month Roll-offs</b> — removes 1 pt per overdue period, "
+            "advances the roll-off date.<br><br>"
+            "<b style='color:#7eb3ff'>Perfect Attendance</b> — advances eligible milestone dates "
+            "by one month per overdue period. No points are removed.<br><br>"
+            "<b style='color:#7eb3ff'>YTD Roll-offs</b> — applies a rolling 12-month net point "
+            "reduction. Does not move roll-off or perfect attendance anchors.</div>",
+            unsafe_allow_html=True,
+        )
+
+    with col_results:
+        if btn_roll and ok:
+            try:
+                rows = services.apply_2mo_rolloffs(conn, run_date=run_date, dry_run=dry_run)
+                st.session_state["maintenance_log"].append({
+                    "Time": datetime.now().strftime("%H:%M:%S"),
+                    "Job": "2-Month Roll-offs",
+                    "Dry Run": dry_run,
+                    "Affected": len(rows),
+                })
+                if rows:
+                    df = pd.DataFrame(rows)
+                    st.success(f"{'Preview:' if dry_run else 'Applied:'} {len(rows)} employee(s) affected.")
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+                    st.download_button("Download CSV", to_csv(df), file_name=f"rolloffs_{run_date}.csv", mime="text/csv", key="dl_roll")
+                else:
+                    info_box("No 2-month roll-offs are due as of the selected date.")
+            except Exception as exc:
+                st.error(str(exc))
+
+        if btn_perf and ok:
+            try:
+                rows = services.advance_due_perfect_attendance_dates(conn, run_date=run_date, dry_run=dry_run)
+                st.session_state["maintenance_log"].append({
+                    "Time": datetime.now().strftime("%H:%M:%S"),
+                    "Job": "Perfect Attendance",
+                    "Dry Run": dry_run,
+                    "Affected": len(rows),
+                })
+                if rows:
+                    df = pd.DataFrame(rows)
+                    st.success(f"{'Preview:' if dry_run else 'Applied:'} {len(rows)} employee(s) affected.")
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+                    st.download_button("Download CSV", to_csv(df), file_name=f"perfect_att_{run_date}.csv", mime="text/csv", key="dl_perf")
+                else:
+                    info_box("No perfect attendance dates are due for advancement.")
+            except Exception as exc:
+                st.error(str(exc))
+
+        if btn_ytd and ok:
+            try:
+                rows = services.apply_ytd_rolloffs(conn, run_date=run_date, dry_run=dry_run)
+                st.session_state["maintenance_log"].append({
+                    "Time": datetime.now().strftime("%H:%M:%S"),
+                    "Job": "YTD Roll-offs",
+                    "Dry Run": dry_run,
+                    "Affected": len(rows),
+                })
+                if rows:
+                    try:
+                        df = pd.DataFrame(
+                            [{"Employee ID": r[0], "Net Points": r[1], "Roll Date": r[2]} for r in rows]
+                        )
+                    except Exception:
+                        df = pd.DataFrame(rows)
+                    st.success(f"{'Preview:' if dry_run else 'Applied:'} {len(rows)} YTD entry(ies).")
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+                    st.download_button("Download CSV", to_csv(df), file_name=f"ytd_rolloffs_{run_date}.csv", mime="text/csv", key="dl_ytd")
+                else:
+                    info_box("No YTD roll-offs are applicable for the selected date.")
+            except Exception as exc:
+                st.error(str(exc))
+
+        if st.session_state["maintenance_log"]:
+            divider()
+            section_label("Session Run Log")
+            st.dataframe(
+                pd.DataFrame(st.session_state["maintenance_log"]),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+
+# ── Corrective Action ─────────────────────────────────────────────────────────
+def corrective_action_page(conn, building: str) -> None:
+    page_heading(
+        "Corrective Action",
+        "Employees at disciplinary point thresholds. Tap a row to log a corrective action date.",
+    )
+
+    today = date.today()
+    employees = load_employees(conn, building=building)
+    emp_ids = [int(e["employee_id"]) for e in employees]
+    if not emp_ids:
+        info_box("No employees found for this building filter.")
+        return
+
+    ph = ",".join(["%s" if is_pg(conn) else "?"] * len(emp_ids))
+
+    if is_pg(conn):
+        sql_ca = f"""
+            SELECT e.employee_id,
+                   e.last_name,
+                   e.first_name,
+                   COALESCE(e."Location", '') AS building,
+                   GREATEST(0.0, ROUND(COALESCE(SUM(ph2.points), 0.0)::numeric, 1)::float8) AS point_total,
+                   MAX(ph2.point_date::date)::text AS last_point_date,
+                   e.point_warning_date::text AS point_warning_date
+              FROM employees e
+              LEFT JOIN points_history ph2 ON ph2.employee_id = e.employee_id
+             WHERE e.employee_id IN ({ph})
+               AND COALESCE(e.is_active, 1) = 1
+             GROUP BY e.employee_id, e.last_name, e.first_name, e."Location", e.point_warning_date
+            HAVING GREATEST(0.0, ROUND(COALESCE(SUM(ph2.points), 0.0)::numeric, 1)::float8) >= 5.0
+             ORDER BY GREATEST(0.0, ROUND(COALESCE(SUM(ph2.points), 0.0)::numeric, 1)::float8) DESC,
+                      lower(e.last_name), lower(e.first_name)
+        """
+    else:
+        sql_ca = f"""
+            SELECT employee_id, last_name, first_name, building, point_total,
+                   last_point_date, point_warning_date
+              FROM (
+                SELECT e.employee_id, e.last_name, e.first_name,
+                       COALESCE(e."Location", '') AS building,
+                       MAX(0.0, ROUND(COALESCE((
+                           SELECT SUM(ph2.points) FROM points_history ph2
+                            WHERE ph2.employee_id = e.employee_id
+                       ), 0.0), 1)) AS point_total,
+                       (SELECT MAX(date(ph3.point_date)) FROM points_history ph3
+                         WHERE ph3.employee_id = e.employee_id
+                           AND COALESCE(ph3.points,0.0) > 0.0
+                       ) AS last_point_date,
+                       e.point_warning_date
+                  FROM employees e
+                 WHERE e.employee_id IN ({ph})
+                   AND COALESCE(e.is_active, 1) = 1
+              ) sub
+             WHERE point_total >= 5.0
+             ORDER BY point_total DESC, lower(last_name), lower(first_name)
+        """
+
+    ca_rows = [dict(r) for r in fetchall(conn, sql_ca, tuple(emp_ids))]
+
+    # (key, label, range_str, predicate, hex, r, g, b)
+    tiers = [
+        ("termination",     "Termination",    "7.6 +",     lambda p: p > 7.5,         "#ff3b30", 255, 59,  48),
+        ("written_warning", "Written Warning", "7.0 – 7.5", lambda p: 7.0 <= p <= 7.5, "#bf5af2", 191, 90, 242),
+        ("verbal_warning",  "Verbal Warning",  "6.0 – 6.5", lambda p: 6.0 <= p <= 6.5, "#ffd60a", 255, 214, 10),
+        ("verbal_coaching", "Verbal Coaching", "5.0 – 5.5", lambda p: 5.0 <= p <= 5.5, "#32ade6", 50, 173, 230),
+    ]
+
+    def tier_for(pts):
+        for key, lbl, rng, fn, col, r, g, b in tiers:
+            if fn(pts):
+                return key, lbl, rng, col, r, g, b
+        return "none", "—", "—", "#8e8e93", 142, 142, 147
+
+    if not ca_rows:
+        info_box("No active employees are currently at or above the 5.0 point threshold. 🎉")
+        return
+
+    # ── Shared CSS injected once ──────────────────────────────────────────────
+    st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+.ca-wrap { font-family: -apple-system, 'Inter', BlinkMacSystemFont, sans-serif; }
+
+/* Summary pills row */
+.ca-pills {
+  display: flex;
+  gap: .55rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.4rem;
+}
+.ca-pill {
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+  padding: .38rem .85rem;
+  border-radius: 999px;
+  border: 1px solid;
+  font-size: .72rem;
+  font-weight: 600;
+  letter-spacing: .02em;
+  white-space: nowrap;
+  cursor: default;
+}
+.ca-pill-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* Section label */
+.ca-section {
+  font-size: .68rem;
+  font-weight: 600;
+  letter-spacing: .10em;
+  text-transform: uppercase;
+  color: #636366;
+  margin: 1.6rem 0 .55rem 0;
+  padding-bottom: .35rem;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+}
+
+/* Employee row */
+.ca-row {
+  display: flex;
+  align-items: center;
+  padding: .72rem 1rem;
+  border-radius: 12px;
+  margin-bottom: .4rem;
+  border: 1px solid rgba(255,255,255,.07);
+  background: rgba(28,28,30,.55);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  transition: border-color .15s, background .15s;
+  gap: .8rem;
+}
+.ca-row:hover {
+  background: rgba(44,44,46,.70);
+  border-color: rgba(255,255,255,.13);
+}
+.ca-row-active {
+  border-color: rgba(255,255,255,.18) !important;
+  background: rgba(44,44,46,.85) !important;
+}
+
+/* Left color strip */
+.ca-strip {
+  width: 3px;
+  border-radius: 999px;
+  align-self: stretch;
+  min-height: 36px;
+  flex-shrink: 0;
+}
+
+/* Name + meta block */
+.ca-name {
+  font-size: .93rem;
+  font-weight: 600;
+  color: #f2f2f7;
+  line-height: 1.25;
+}
+.ca-meta {
+  font-size: .72rem;
+  color: #8e8e93;
+  margin-top: .1rem;
+}
+
+/* Points badge */
+.ca-pts {
+  font-size: 1.15rem;
+  font-weight: 700;
+  line-height: 1;
+  flex-shrink: 0;
+  min-width: 2.8rem;
+  text-align: right;
+}
+
+/* Date chips */
+.ca-dates {
+  display: flex;
+  flex-direction: column;
+  gap: .22rem;
+  margin-left: auto;
+  flex-shrink: 0;
+  text-align: right;
+}
+.ca-date-chip {
+  font-size: .67rem;
+  padding: .15rem .55rem;
+  border-radius: 999px;
+  background: rgba(255,255,255,.05);
+  color: #aeaeb2;
+  white-space: nowrap;
+}
+.ca-date-chip span { color: #f2f2f7; font-weight: 500; }
+
+/* Edit panel */
+.ca-edit-panel {
+  border-radius: 14px;
+  padding: 1rem 1.2rem;
+  margin-bottom: 1rem;
+  border: 1px solid;
+  background: rgba(28,28,30,.80);
+  backdrop-filter: blur(20px);
+}
+.ca-edit-title {
+  font-size: .68rem;
+  font-weight: 600;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  margin-bottom: .55rem;
+}
+.ca-edit-name {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #f2f2f7;
+}
+.ca-edit-sub {
+  font-size: .78rem;
+  color: #8e8e93;
+  margin-top: .15rem;
+  margin-bottom: .7rem;
+}
+</style>
+<div class="ca-wrap">
+""", unsafe_allow_html=True)
+
+    # ── Summary pills ─────────────────────────────────────────────────────────
+    pills_html = '<div class="ca-pills">'
+    total = len(ca_rows)
+    pills_html += (
+        f"<div class='ca-pill' style='color:#aeaeb2;border-color:rgba(174,174,178,.25);"
+        f"background:rgba(174,174,178,.06)'>"
+        f"<div class='ca-pill-dot' style='background:#8e8e93'></div>"
+        f"{total} flagged</div>"
+    )
+    for key, lbl, rng, fn, col, r, g, b in tiers:
+        n = sum(1 for row in ca_rows if fn(float(row.get("point_total") or 0)))
+        if n == 0:
+            continue
+        pills_html += (
+            f"<div class='ca-pill' style='color:{col};"
+            f"border-color:rgba({r},{g},{b},.30);"
+            f"background:rgba({r},{g},{b},.08)'>"
+            f"<div class='ca-pill-dot' style='background:{col}'></div>"
+            f"{n} {lbl}</div>"
+        )
+    pills_html += "</div>"
+    st.markdown(pills_html, unsafe_allow_html=True)
+
+    # ── Inline edit panel ─────────────────────────────────────────────────────
+    if "ca_edit_id" not in st.session_state:
+        st.session_state["ca_edit_id"] = None
+    editing_id = st.session_state.get("ca_edit_id")
+
+    if editing_id is not None:
+        edit_row = next((r for r in ca_rows if int(r["employee_id"]) == editing_id), None)
+        if edit_row:
+            pts_e = float(edit_row.get("point_total") or 0)
+            _, lbl_e, _, col_e, r_e, g_e, b_e = tier_for(pts_e)
+            st.markdown(
+                f"<div class='ca-edit-panel' style='border-color:rgba({r_e},{g_e},{b_e},.35)'>"
+                f"<div class='ca-edit-title' style='color:{col_e}'>Edit warning date</div>"
+                f"<div class='ca-edit-name'>{edit_row['last_name']}, {edit_row['first_name']}</div>"
+                f"<div class='ca-edit-sub'>Emp #{edit_row['employee_id']} &nbsp;·&nbsp; "
+                f"{pts_e:.1f} pts &nbsp;·&nbsp; {lbl_e}</div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+            existing = edit_row.get("point_warning_date")
+            try:
+                default_val = date.fromisoformat(str(existing)[:10]) if existing else today
+            except Exception:
+                default_val = today
+            ec1, ec2, ec3 = st.columns([2, 1, 1])
+            with ec1:
+                new_date = st.date_input("Warning date", value=default_val,
+                                         key=f"ca_date_{editing_id}",
+                                         label_visibility="collapsed")
+            with ec2:
+                if st.button("Save", key="ca_save", use_container_width=True):
+                    try:
+                        sym = "%s" if is_pg(conn) else "?"
+                        exec_sql(conn,
+                            f"UPDATE employees SET point_warning_date={sym} WHERE employee_id={sym}",
+                            (new_date.isoformat(), editing_id))
+                        conn.commit()
+                        st.session_state["ca_edit_id"] = None
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(str(exc))
+            with ec3:
+                if st.button("Cancel", key="ca_cancel", use_container_width=True):
+                    st.session_state["ca_edit_id"] = None
+                    st.rerun()
+
+    # ── Tier sections ─────────────────────────────────────────────────────────
+    for key, label, rng, fn, col, r, g, b in tiers:
+        tier_rows = [row for row in ca_rows if fn(float(row.get("point_total") or 0))]
+        if not tier_rows:
+            continue
+
+        st.markdown(
+            f"<div class='ca-section'>"
+            f"<span style='color:{col}'>{label}</span>"
+            f"<span style='color:#3a3a3c;margin:0 .4rem'>·</span>"
+            f"<span>{rng} pts</span>"
+            f"<span style='color:#3a3a3c;margin:0 .4rem'>·</span>"
+            f"{len(tier_rows)} {'employee' if len(tier_rows)==1 else 'employees'}"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+        for row in tier_rows:
+            eid   = int(row["employee_id"])
+            pts   = float(row.get("point_total") or 0)
+            name  = f"{row['last_name']}, {row['first_name']}"
+            bldg  = row.get("building") or "—"
+            lpd   = fmt_date(row.get("last_point_date"))
+            pwd   = fmt_date(row.get("point_warning_date"))
+            is_ed = (editing_id == eid)
+
+            active_cls = "ca-row-active" if is_ed else ""
+            warn_color = col if pwd != "—" else "#48484a"
+            warn_label = pwd if pwd != "—" else "Not logged"
+
+            st.markdown(
+                f"<div class='ca-row {active_cls}'>"
+                f"<div class='ca-strip' style='background:{col}'></div>"
+                f"<div style='flex:1;min-width:0'>"
+                f"  <div class='ca-name'>{name}</div>"
+                f"  <div class='ca-meta'>#{eid} &nbsp;·&nbsp; {bldg}</div>"
+                f"</div>"
+                f"<div class='ca-pts' style='color:{col}'>{pts:.1f}</div>"
+                f"<div class='ca-dates'>"
+                f"  <div class='ca-date-chip'>Last point &nbsp;<span>{lpd}</span></div>"
+                f"  <div class='ca-date-chip' style='color:{warn_color}'>"
+                f"    Warning &nbsp;<span style='color:{warn_color}'>{warn_label}</span></div>"
+                f"</div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+            if st.button("Set date", key=f"ca_edit_{eid}", use_container_width=False):
+                st.session_state["ca_edit_id"] = eid
+                st.rerun()
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    divider()
+    df_ca = pd.DataFrame([
+        {
+            "Employee #":         str(int(r["employee_id"])),
+            "Name":               f"{r['last_name']}, {r['first_name']}",
+            "Building":           r.get("building") or "—",
+            "Point Total":        f"{float(r.get('point_total') or 0):.1f}",
+            "Last Point Date":    fmt_date(r.get("last_point_date")),
+            "Point Warning Date": fmt_date(r.get("point_warning_date")),
+            "Tier":               tier_for(float(r.get("point_total") or 0))[1],
+        }
+        for r in ca_rows
+    ])
+    st.download_button(
+        "⬇ Download Corrective Action List",
+        data=to_csv(df_ca),
+        file_name=f"corrective_action_{today}.csv",
+        mime="text/csv",
+        key="dl_ca",
+    )
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+def main() -> None:
+    apply_theme()
+    ensure_session_defaults()
+    conn = get_conn()
+
+    # Resolve any deferred navigation request (e.g. from spotlight button)
+    # Must happen before the radio widget renders so the new value is respected.
+    _nav_to = st.session_state.pop("_nav_to", None)
+    if _nav_to:
+        st.session_state["page"] = _nav_to
+
+    logo_path = REPO_ROOT / "assets" / "logo.png"
+
+    with st.sidebar:
+        if logo_path.exists():
+            st.image(str(logo_path), use_container_width=True)
+        else:
+            st.markdown(
+                "<div class='sidebar-brand'>"
+                "<div class='name'>Attendance Tracker</div>"
+                "<div class='sub'>Point Management System</div>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+
+        st.markdown("<span class='sidebar-nav-label'>Navigation</span>", unsafe_allow_html=True)
+        page = st.radio(
+            "nav",
+            ["Dashboard", "PTO Usage Analytics", "Employees", "Points Ledger", "Corrective Action", "Manage Employees", "Exports & Forecasts", "System Updates"],
+            key="page",
+            label_visibility="collapsed",
+        )
+
+        st.markdown("<span class='sidebar-nav-label'>Building Filter</span>", unsafe_allow_html=True)
+        building = st.selectbox(
+            "building",
+            ["All", *BUILDINGS],
+            key="global_building",
+            label_visibility="collapsed",
+        )
+
+        # Placeholder so the spotlight renders AFTER page content updates session state
+        spotlight_placeholder = st.empty()
+
+    if page == "Dashboard":
+        dashboard_page(conn, building)
+    elif page == "PTO Usage Analytics":
+        pto_page(conn, building)
+    elif page == "Employees":
+        employees_page(conn, building)
+    elif page == "Points Ledger":
+        points_ledger_page(conn, building)
+    elif page == "Corrective Action":
+        corrective_action_page(conn, building)
+    elif page == "Manage Employees":
+        manage_employees_page(conn)
+    elif page == "Exports & Forecasts":
+        exports_page(conn, building)
+    else:
+        system_updates_page(conn)
+
+    # Render spotlight only on Dashboard (after page runs so it reflects current selection)
+    with spotlight_placeholder.container():
+        if page == "Dashboard":
+            selected_employee_sidebar(conn, st.session_state.get("selected_employee_id"))
+
+ensure_session_defaults()
+if not is_authenticated():
+    login_page()
+else:
+    main()
+
