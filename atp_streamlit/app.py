@@ -359,6 +359,13 @@ div[data-testid="stMetric"] [data-testid="stMetricDelta"] {
     border: 1px solid rgba(0,120,255,.15) !important;
     border-radius: 10px !important; overflow: hidden;
     background: rgba(2,8,18,.85) !important;
+    /* Keep animated global scanlines behind tabular content for readability. */
+    position: relative;
+    z-index: 4;
+}
+[data-testid="stDataFrame"] {
+    position: relative;
+    z-index: 4;
 }
 [data-testid="stArrowVegaLiteChart"] {
     border-radius: 12px !important; overflow: hidden;
