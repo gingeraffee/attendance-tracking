@@ -136,24 +136,6 @@ footer, #MainMenu { visibility: hidden; }
     pointer-events: none; z-index: 2;
 }
 
-/* CRT scanlines (injected div) */
-@keyframes scanline-drift {
-  0%   { background-position: 0 0; }
-  100% { background-position: 0 100px; }
-}
-.scanlines {
-    position: fixed; inset: 0;
-    background: repeating-linear-gradient(
-        0deg,
-        transparent,
-        transparent 2px,
-        rgba(0,0,0,.055) 2px,
-        rgba(0,0,0,.055) 4px
-    );
-    animation: scanline-drift 8s linear infinite;
-    pointer-events: none; z-index: 3;
-}
-
 /* Corner brackets (HUD decorators) */
 .hud-corner {
     position: fixed; width: 22px; height: 22px;
@@ -259,22 +241,6 @@ div[data-testid="stMetric"]::before {
     background: linear-gradient(135deg, rgba(0,120,255,.07) 0%, transparent 50%);
     pointer-events: none;
 }
-/* Horizontal scan sweep */
-div[data-testid="stMetric"]::after {
-    content: ''; position: absolute;
-    top: 0; left: -100%; width: 55%; height: 100%;
-    background: linear-gradient(90deg,
-        transparent 0%,
-        rgba(0,200,240,.04) 40%,
-        rgba(0,200,240,.07) 50%,
-        rgba(0,200,240,.04) 60%,
-        transparent 100%);
-    animation: metric-scan 9s ease-in-out infinite;
-}
-@keyframes metric-scan {
-    0%   { left: -100%; }
-    100% { left: 200%;  }
-}
 div[data-testid="stMetric"] label {
     color: var(--muted) !important;
     font-size: .66rem !important; font-weight: 700 !important;
@@ -377,6 +343,46 @@ div[data-testid="stMetric"] [data-testid="stMetricDelta"] {
     border-radius: 7px !important; color: var(--text) !important;
 }
 
+/* High-contrast text + caret across all editable fields */
+.stApp input,
+.stApp textarea {
+    color: var(--text-hi) !important;
+    -webkit-text-fill-color: var(--text-hi) !important;
+    caret-color: var(--cyan) !important;
+}
+.stApp input::placeholder,
+.stApp textarea::placeholder {
+    color: #6d8db2 !important;
+    opacity: 1 !important;
+}
+.stApp input::selection,
+.stApp textarea::selection {
+    background: rgba(0,200,240,.35);
+    color: #f2f8ff;
+}
+.stApp input::-moz-selection,
+.stApp textarea::-moz-selection {
+    background: rgba(0,200,240,.35);
+    color: #f2f8ff;
+}
+.stApp div[data-baseweb="input"] > div {
+    background: rgba(2,8,20,.92) !important;
+    border-color: rgba(0,120,255,.20) !important;
+}
+.stApp div[data-baseweb="input"] input {
+    background: transparent !important;
+    color: var(--text-hi) !important;
+    -webkit-text-fill-color: var(--text-hi) !important;
+    caret-color: var(--cyan) !important;
+}
+.stApp div[data-baseweb="input"] input:focus,
+.stApp div[data-baseweb="textarea"] textarea:focus,
+.stDateInput input:focus {
+    color: var(--text-hi) !important;
+    -webkit-text-fill-color: var(--text-hi) !important;
+    caret-color: var(--cyan) !important;
+}
+
 /* ══════════════════════════════════════════════════════════════
    DATA FRAMES & CHARTS
 ══════════════════════════════════════════════════════════════ */
@@ -384,7 +390,7 @@ div[data-testid="stMetric"] [data-testid="stMetricDelta"] {
     border: 1px solid rgba(0,120,255,.15) !important;
     border-radius: 10px !important; overflow: hidden;
     background: rgba(2,8,18,.85) !important;
-    /* Keep animated global scanlines behind tabular content for readability. */
+    /* Keep tabular content above atmospheric background layers for readability. */
     position: relative;
     z-index: 4;
 }
@@ -768,7 +774,6 @@ div[data-testid="stMetric"]:nth-child(6) { animation-delay: 3.5s; }
     st.markdown(
         '<div class="aurora-bg"></div>'
         '<div class="tech-grid-overlay"></div>'
-        '<div class="scanlines"></div>'
         '<div class="hud-corner hud-corner-tl"></div>'
         '<div class="hud-corner hud-corner-tr"></div>'
         '<div class="hud-corner hud-corner-bl"></div>'
