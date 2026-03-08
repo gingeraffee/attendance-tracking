@@ -48,6 +48,59 @@ def _coerce_iso_date(value):
         return value
     return datetime.strptime(str(value), "%Y-%m-%d").date()
 
+
+def _history_sort_key(row: dict) -> tuple:
+    row_id = row.get("id")
+    row_id_sort = int(row_id) if row_id not in (None, "") else 10**18
+    return (str(row.get("point_date") or "")[:10], row_id_sort)
+
+
+def _assert_transaction_does_not_overdraw(
+    conn: sqlite3.Connection,
+    employee_id: int,
+    point_date: date,
+    points: float,
+    *,
+    point_id: int | None = None,
+) -> None:
+    if float(points) >= 0.0:
+        return
+
+    history_rows = repo.get_points_history_ordered(conn, int(employee_id))
+
+    if point_id is None:
+        history_rows.append({
+            "id": None,
+            "point_date": point_date.isoformat(),
+            "points": float(points),
+        })
+    else:
+        replaced = False
+        for row in history_rows:
+            if int(row["id"]) == int(point_id):
+                row["point_date"] = point_date.isoformat()
+                row["points"] = float(points)
+                replaced = True
+                break
+        if not replaced:
+            raise ValueError("Point history row not found.")
+
+    running_total = 0.0
+    for row in sorted(history_rows, key=_history_sort_key):
+        balance_before = running_total
+        delta = round(float(row.get("points") or 0.0), 3)
+        is_target_row = row.get("id") == point_id or (point_id is None and row.get("id") is None)
+        if is_target_row and delta < 0.0 and (balance_before + delta) < -1e-9:
+            raise ValueError("This transaction would take the employee below 0.0 points.")
+        running_total = max(0.0, round(running_total + delta, 3))
+
+
+def recalculate_all_employee_dates(conn: sqlite3.Connection) -> None:
+    employee_rows = _fetchall(conn, "SELECT employee_id FROM employees ORDER BY employee_id")
+    with tx(conn):
+        for row in employee_rows:
+            recalculate_employee_dates(conn, int(row["employee_id"]))
+
 # ---------------------------------------------------------------------------
 # Core recalculation — the single function called after EVERY history change
 # ---------------------------------------------------------------------------
@@ -85,13 +138,9 @@ def recalculate_employee_dates(conn: sqlite3.Connection, employee_id: int) -> No
     WHEN NO HISTORY EXISTS AT ALL
         All three date fields are cleared and total is set to 0.0.
     """
-    # --- Step 1: total across all history ---
-    total_row = _fetchone(conn,
-        "SELECT SUM(points) AS total FROM points_history WHERE employee_id = ?",
-        (employee_id,),
-    )
-    new_total = float(total_row["total"]) if total_row["total"] is not None else 0.0
-    new_total = max(0.0, round(new_total, 1))
+    # --- Step 1: total across all history, flooring at zero after each event ---
+    history_rows = repo.with_running_point_totals(repo.get_points_history_ordered(conn, int(employee_id)))
+    new_total = float(history_rows[-1]["point_total"]) if history_rows else 0.0
 
     # --- Step 2: roll-off anchor (any entry except YTD Roll-Off) ---
     rolloff_anchor_row = _fetchone(conn,
@@ -226,6 +275,12 @@ def add_point(
 ) -> None:
     """Insert a history row and recompute all employee date fields."""
     with tx(conn):
+        _assert_transaction_does_not_overdraw(
+            conn,
+            preview.employee_id,
+            preview.point_date,
+            preview.points,
+        )
         repo.insert_points_history(
             conn,
             employee_id=preview.employee_id,
@@ -260,6 +315,13 @@ def update_point_history_entry(
         raise ValueError("Point date cannot be in the future.")
 
     with tx(conn):
+        _assert_transaction_does_not_overdraw(
+            conn,
+            int(employee_id),
+            point_date,
+            float(points),
+            point_id=int(point_id),
+        )
         repo.update_points_history_entry(
             conn,
             point_id=int(point_id),

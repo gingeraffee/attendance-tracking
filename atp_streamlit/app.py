@@ -798,6 +798,10 @@ def get_conn():
                 conn.commit()
     except Exception:
         pass
+
+    if not st.session_state.get("_point_balance_repaired"):
+        services.recalculate_all_employee_dates(conn)
+        st.session_state["_point_balance_repaired"] = True
     return conn
 
 
@@ -1667,9 +1671,7 @@ def get_employee_spotlight(conn, employee_id: int | None) -> dict | None:
                    e.first_name,
                    e.last_name,
                    COALESCE(e."Location", '') AS building,
-                   GREATEST(0.0, ROUND(COALESCE((
-                       SELECT SUM(ph.points) FROM points_history ph WHERE ph.employee_id = e.employee_id
-                   ), 0.0)::numeric, 1)::float8) AS point_total,
+                   COALESCE(e.point_total, 0.0) AS point_total,
                    (
                        SELECT MAX(ph2.point_date::date)
                          FROM points_history ph2
@@ -1689,9 +1691,7 @@ def get_employee_spotlight(conn, employee_id: int | None) -> dict | None:
                    e.first_name,
                    e.last_name,
                    COALESCE(e."Location", '') AS building,
-                   MAX(0.0, ROUND(COALESCE((
-                       SELECT SUM(ph.points) FROM points_history ph WHERE ph.employee_id = e.employee_id
-                   ), 0.0), 1)) AS point_total,
+                   COALESCE(e.point_total, 0.0) AS point_total,
                    (
                        SELECT MAX(date(ph2.point_date))
                          FROM points_history ph2
@@ -1862,7 +1862,7 @@ def dashboard_page(conn, building: str) -> None:
         sql_emp_detail = f'''
             SELECT e.employee_id, e.last_name, e.first_name,
                    COALESCE(e."Location",'') AS building,
-                   GREATEST(0.0, ROUND(COALESCE(SUM(ph.points), 0.0)::numeric, 1)::float8) AS point_total,
+                   COALESCE(e.point_total, 0.0) AS point_total,
                    e.last_point_date, e.rolloff_date, e.perfect_attendance
               FROM employees e
               LEFT JOIN points_history ph ON ph.employee_id = e.employee_id
@@ -1906,7 +1906,7 @@ def dashboard_page(conn, building: str) -> None:
         sql_active_emp_points = '''
             SELECT e.employee_id,
                    COALESCE(e."Location", '') AS building,
-                   GREATEST(0.0, ROUND(COALESCE(SUM(ph.points), 0.0)::numeric, 1)::float8) AS point_total
+                   COALESCE(e.point_total, 0.0) AS point_total
               FROM employees e
               LEFT JOIN points_history ph ON ph.employee_id = e.employee_id
              WHERE COALESCE(e.is_active, 1) = 1
@@ -2042,9 +2042,7 @@ def dashboard_page(conn, building: str) -> None:
         sql_emp_detail = f'''
             SELECT e.employee_id, e.last_name, e.first_name,
                    COALESCE(e."Location",'') AS building,
-                   MAX(0.0, ROUND(COALESCE((
-                       SELECT SUM(ph.points) FROM points_history ph WHERE ph.employee_id = e.employee_id
-                   ), 0.0), 1)) AS point_total,
+                   COALESCE(e.point_total, 0.0) AS point_total,
                    e.last_point_date, e.rolloff_date, e.perfect_attendance
               FROM employees e
              WHERE e.employee_id IN ({ph})
@@ -2085,9 +2083,7 @@ def dashboard_page(conn, building: str) -> None:
         sql_active_emp_points = '''
             SELECT e.employee_id,
                    COALESCE(e."Location", '') AS building,
-                   MAX(0.0, ROUND(COALESCE((
-                       SELECT SUM(ph.points) FROM points_history ph WHERE ph.employee_id = e.employee_id
-                   ), 0.0), 1)) AS point_total
+                   COALESCE(e.point_total, 0.0) AS point_total
               FROM employees e
              WHERE COALESCE(e.is_active, 1) = 1
              GROUP BY e.employee_id, e."Location"
@@ -2821,20 +2817,23 @@ def pto_page(conn, building: str) -> None:
         active_count_in_scope = len(active_db)
 
     # ── Load persisted PTO data from DB into session state if not already loaded ──
+    def _set_session_pto_df(rows: list[dict]) -> bool:
+        if not rows:
+            return False
+        _df = pd.DataFrame([dict(r) for r in rows])
+        _df["start_date"] = pd.to_datetime(_df["start_date"], errors="coerce")
+        _df["end_date"] = pd.to_datetime(_df["end_date"], errors="coerce")
+        _df["hours"] = pd.to_numeric(_df["hours"], errors="coerce").fillna(0)
+        _df["building"] = _df["building"].astype(str).str.strip()
+        _df["pto_type"] = _df["pto_type"].astype(str).str.strip()
+        _df["employee"] = _df["last_name"].str.strip() + ", " + _df["first_name"].str.strip()
+        _df["days"] = (_df["hours"] / 8).round(2)
+        st.session_state["pto_df"] = _df
+        return True
+
     if "pto_df" not in st.session_state:
         try:
-            db_rows = repo.load_pto_data(conn)
-            if db_rows:
-                import pandas as _pd
-                _df = _pd.DataFrame([dict(r) for r in db_rows])
-                _df["start_date"] = _pd.to_datetime(_df["start_date"], errors="coerce")
-                _df["end_date"] = _pd.to_datetime(_df["end_date"], errors="coerce")
-                _df["hours"] = _pd.to_numeric(_df["hours"], errors="coerce").fillna(0)
-                _df["building"] = _df["building"].astype(str).str.strip()
-                _df["pto_type"] = _df["pto_type"].astype(str).str.strip()
-                _df["employee"] = _df["last_name"].str.strip() + ", " + _df["first_name"].str.strip()
-                _df["days"] = (_df["hours"] / 8).round(2)
-                st.session_state["pto_df"] = _df
+            _set_session_pto_df(repo.load_pto_data(conn))
         except Exception:
             pass  # No persisted data or schema not yet migrated
 
@@ -2920,14 +2919,17 @@ def pto_page(conn, building: str) -> None:
                         raw["end_date"] = pd.to_datetime(raw["end_date"], errors="coerce")
                         raw = raw.dropna(subset=["start_date", "end_date"])
                         raw = _normalize_and_filter(raw)
-                        st.session_state["pto_df"] = raw
-                        st.session_state.pop("pto_type_toggles", None)
                         try:
                             with db.tx(conn):
-                                repo.save_pto_data(conn, raw.to_dict("records"))
+                                stats = repo.save_pto_data(conn, raw.to_dict("records"))
+                            _set_session_pto_df(repo.load_pto_data(conn))
+                            st.session_state.pop("pto_type_toggles", None)
+                            st.success(
+                                f"Imported {stats['inserted']:,} new PTO record(s), skipped {stats['duplicate']:,} exact duplicate(s). "
+                                f"Total stored: {stats['total']:,}."
+                            )
                         except Exception as _save_err:
-                            st.warning(f"PTO data loaded but could not be saved to database: {_save_err}")
-                        st.success(f"Loaded {len(raw):,} PTO records for active employees.")
+                            st.warning(f"PTO data parsed but could not be saved to database: {_save_err}")
                 elif "date" in cols:
                     # Legacy single-day format — convert to range format
                     required = {"last_name", "first_name", "building", "pto_type", "date", "hours"}
@@ -2939,14 +2941,17 @@ def pto_page(conn, building: str) -> None:
                         raw["end_date"] = raw["start_date"]
                         raw = raw.dropna(subset=["start_date"])
                         raw = _normalize_and_filter(raw)
-                        st.session_state["pto_df"] = raw
-                        st.session_state.pop("pto_type_toggles", None)
                         try:
                             with db.tx(conn):
-                                repo.save_pto_data(conn, raw.to_dict("records"))
+                                stats = repo.save_pto_data(conn, raw.to_dict("records"))
+                            _set_session_pto_df(repo.load_pto_data(conn))
+                            st.session_state.pop("pto_type_toggles", None)
+                            st.success(
+                                f"Imported {stats['inserted']:,} new PTO record(s), skipped {stats['duplicate']:,} exact duplicate(s). "
+                                f"Total stored: {stats['total']:,} (legacy format upload)."
+                            )
                         except Exception as _save_err:
-                            st.warning(f"PTO data loaded but could not be saved to database: {_save_err}")
-                        st.success(f"Loaded {len(raw):,} PTO records for active employees (legacy format).")
+                            st.warning(f"PTO data parsed but could not be saved to database: {_save_err}")
                 else:
                     st.error("CSV must contain either `start_date`/`end_date` columns or a `date` column.")
             except Exception as exc:
@@ -3802,18 +3807,20 @@ def employees_page(conn, building: str) -> None:
 def points_ledger_page(conn, building: str) -> None:
     page_heading("Points Ledger", "Record attendance transactions and maintain a complete audit trail.")
 
+    notice = st.session_state.pop("ledger_notice", None)
+    if notice:
+        st.success(notice)
+
     employees = load_employees(conn, building=building)
     if not employees:
         warn_box("No active employees found for this building filter.")
         return
 
     opts = [
-        (int(e["employee_id"]), f"#{e['employee_id']} — {e['last_name']}, {e['first_name']}")
+        (int(e["employee_id"]), f"#{e['employee_id']} - {e['last_name']}, {e['first_name']}")
         for e in employees
     ]
 
-    # Employee picker (Streamlit selectbox has built-in type-to-search: focus it and start typing)
-    # Kept keyboard-friendly: Tab into the dropdown, type a few letters, use arrows + Enter.
     prev_emp = st.session_state.get("ledger_emp_id")
     default_idx = 0
     if prev_emp is not None:
@@ -3832,7 +3839,6 @@ def points_ledger_page(conn, building: str) -> None:
     emp_id = int(selected[0])
     st.session_state["ledger_emp_id"] = emp_id
 
-    # Employee-scoped widget keys avoid state/default collisions and reset per employee.
     ledger_date_key = f"ledger_date_str_{emp_id}"
     ledger_points_key = f"ledger_points_{emp_id}"
     ledger_reason_key = f"ledger_reason_{emp_id}"
@@ -3842,7 +3848,6 @@ def points_ledger_page(conn, building: str) -> None:
     def focus_ledger_date_field() -> None:
         components.html(
             """<script>
-            // Focus date field in the parent Streamlit document.
             const rootDoc = (window.parent && window.parent.document) ? window.parent.document : document;
             const selectors = [
               'input[aria-label="Date (MM/DD/YYYY)"]',
@@ -3874,14 +3879,25 @@ def points_ledger_page(conn, building: str) -> None:
             height=0,
         )
 
+    def set_ledger_notice(message: str) -> None:
+        st.session_state["ledger_notice"] = message
+
+    def parse_mdy(value: str) -> date:
+        return datetime.strptime(value.strip(), "%m/%d/%Y").date()
+
+    def format_mdy(value: str | None) -> str:
+        if not value:
+            return date.today().strftime("%m/%d/%Y")
+        return datetime.strptime(str(value)[:10], "%Y-%m-%d").strftime("%m/%d/%Y")
+
     prev_focus_emp = st.session_state.get("_focus_emp_id")
     if prev_focus_emp != emp_id:
         st.session_state["_focus_emp_id"] = emp_id
         focus_ledger_date_field()
+
     emp = dict(repo.get_employee(conn, emp_id))
     pts = float(emp.get("point_total") or 0)
 
-    # Status strip
     st.markdown(
         f"<div style='display:grid;grid-template-columns:repeat(4,1fr);gap:.7rem;margin:.55rem 0 1.2rem 0'>"
         f"<div class='card-sm'>"
@@ -3908,8 +3924,6 @@ def points_ledger_page(conn, building: str) -> None:
     with col_form:
         section_label("New Transaction")
         with st.form("ledger_entry", clear_on_submit=False):
-            # Keyboard-first entry order (Tab works naturally in this top-to-bottom layout)
-            # Date in MM/DD/YYYY (text input is faster than clicking a date picker for batch work)
             date_str = st.text_input(
                 "Date (MM/DD/YYYY)",
                 value=date.today().strftime("%m/%d/%Y"),
@@ -3926,7 +3940,7 @@ def points_ledger_page(conn, building: str) -> None:
 
             reason = st.selectbox(
                 "Reason",
-                ["Tardy/Early Leave", "Absence", "No Call/No Show"],
+                REASON_OPTIONS,
                 index=0,
                 key=ledger_reason_key,
             )
@@ -3937,9 +3951,8 @@ def points_ledger_page(conn, building: str) -> None:
             submit = st.form_submit_button("Add Point", use_container_width=True)
 
         if submit:
-            # Parse MM/DD/YYYY
             try:
-                p_date = datetime.strptime(date_str.strip(), "%m/%d/%Y").date()
+                p_date = parse_mdy(date_str)
             except Exception:
                 st.error("Invalid date. Use MM/DD/YYYY (example: 03/02/2026).")
             else:
@@ -3949,11 +3962,31 @@ def points_ledger_page(conn, building: str) -> None:
                     try:
                         preview = services.preview_add_point(emp_id, p_date, float(points), reason, note)
                         services.add_point(conn, preview, flag_code=(flag_code or "").strip() or None)
-                        st.success(f"Added {float(points):.1f} pts on {fmt_date(p_date)}.")
-                        focus_ledger_date_field()
+                        set_ledger_notice(f"Added {float(points):.1f} pts on {fmt_date(p_date)}.")
+                        st.rerun()
                     except Exception as exc:
                         st.error(str(exc))
 
+        section_label("Repair Totals")
+        st.caption("Employee totals are calculated from transaction history. Recalculate after correcting a bad roll-off or manual entry.")
+        repair_col1, repair_col2 = st.columns(2)
+        with repair_col1:
+            if st.button("Recalculate Employee", key=f"repair_emp_{emp_id}", use_container_width=True):
+                try:
+                    with db.tx(conn):
+                        services.recalculate_employee_dates(conn, emp_id)
+                    set_ledger_notice(f"Recalculated point totals for employee #{emp_id}.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+        with repair_col2:
+            if st.button("Recalculate Everyone", key="repair_all_employees", use_container_width=True):
+                try:
+                    services.recalculate_all_employee_dates(conn)
+                    set_ledger_notice("Recalculated point totals for all employees.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
 
     with col_hist:
         section_label("Transaction History (all events)")
@@ -3965,10 +3998,96 @@ def points_ledger_page(conn, building: str) -> None:
             df_h["point_total"] = df_h["point_total"].apply(lambda v: f"{float(v or 0):.1f}")
             df_h.columns = ["ID", "Date", "Pts", "Reason", "Note", "Running Total"]
             st.dataframe(df_h.drop(columns=["ID"]), use_container_width=True, hide_index=True, height=430)
+
             if st.button("Undo Last Entry", key="undo_last"):
                 try:
                     services.delete_point_history_entry(conn, point_id=int(df_h.iloc[0]["ID"]), employee_id=emp_id)
-                    st.success("Last entry removed.")
+                    set_ledger_notice("Last entry removed.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+
+            section_label("Edit Transaction")
+            entry_options = [
+                (
+                    int(row["id"]),
+                    f"{fmt_date(row.get('point_date'))} | {float(row.get('points') or 0):+.1f} | {row.get('reason') or 'No reason'}",
+                )
+                for row in hist
+            ]
+            selected_entry = st.selectbox(
+                "Select transaction",
+                entry_options,
+                format_func=lambda x: x[1],
+                key=f"ledger_edit_entry_{emp_id}",
+            )
+            selected_point_id = int(selected_entry[0])
+            selected_row = next(row for row in hist if int(row["id"]) == selected_point_id)
+
+            with st.form(f"ledger_edit_form_{emp_id}_{selected_point_id}", clear_on_submit=False):
+                edit_date_str = st.text_input(
+                    "Date (MM/DD/YYYY)",
+                    value=format_mdy(selected_row.get("point_date")),
+                    key=f"ledger_edit_date_{selected_point_id}",
+                )
+                edit_points = st.number_input(
+                    "Points",
+                    value=float(selected_row.get("points") or 0.0),
+                    step=0.5,
+                    format="%.1f",
+                    key=f"ledger_edit_points_{selected_point_id}",
+                )
+                edit_reason = st.text_input(
+                    "Reason",
+                    value=str(selected_row.get("reason") or ""),
+                    key=f"ledger_edit_reason_{selected_point_id}",
+                )
+                edit_note = st.text_input(
+                    "Note",
+                    value=str(selected_row.get("note") or ""),
+                    key=f"ledger_edit_note_{selected_point_id}",
+                )
+                edit_flag_code = st.text_input(
+                    "Flag code",
+                    value=str(selected_row.get("flag_code") or ""),
+                    key=f"ledger_edit_flag_{selected_point_id}",
+                )
+
+                save_col, delete_col = st.columns(2)
+                save_entry = save_col.form_submit_button("Save Entry", use_container_width=True)
+                delete_entry = delete_col.form_submit_button("Delete Entry", use_container_width=True)
+
+            st.caption(f"Running total after this entry: {float(selected_row.get('point_total') or 0):.1f} pts")
+
+            if save_entry:
+                try:
+                    edit_date = parse_mdy(edit_date_str)
+                except Exception:
+                    st.error("Invalid date. Use MM/DD/YYYY (example: 03/02/2026).")
+                else:
+                    if edit_date > date.today():
+                        st.error("Date cannot be in the future.")
+                    else:
+                        try:
+                            services.update_point_history_entry(
+                                conn,
+                                point_id=selected_point_id,
+                                employee_id=emp_id,
+                                point_date=edit_date,
+                                points=float(edit_points),
+                                reason=edit_reason,
+                                note=edit_note,
+                                flag_code=(edit_flag_code or "").strip() or None,
+                            )
+                            set_ledger_notice(f"Updated transaction #{selected_point_id}.")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(str(exc))
+
+            if delete_entry:
+                try:
+                    services.delete_point_history_entry(conn, point_id=selected_point_id, employee_id=emp_id)
+                    set_ledger_notice(f"Deleted transaction #{selected_point_id}.")
                     st.rerun()
                 except Exception as exc:
                     st.error(str(exc))
@@ -3976,7 +4095,7 @@ def points_ledger_page(conn, building: str) -> None:
             info_box("No history entries for this employee yet.")
 
 
-# ── Manage Employees ──────────────────────────────────────────────────────────
+
 def manage_employees_page(conn) -> None:
     page_heading("Manage Employees", "Onboard new employees, update details, archive, or permanently delete records.")
 
@@ -4097,67 +4216,70 @@ def run_export_query(conn, export_type: str, building: str, start_date: date, en
     if export_type == "30-day point history":
         if pg:
             sql = """
-                WITH ph_running AS (
-                    SELECT ph.employee_id,
-                           ph.point_date,
-                           ph.points,
-                           ph.reason,
-                           ph.note,
-                           ROUND(
-                               SUM(COALESCE(ph.points, 0.0)) OVER (
-                                   PARTITION BY ph.employee_id
-                                   ORDER BY (ph.point_date::date), ph.id
-                                   ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-                               )::numeric,
-                               1
-                           )::float8 AS point_total
-                      FROM points_history ph
-                )
                 SELECT e.employee_id AS "Employee #",
                        e.last_name AS "Last Name",
                        e.first_name AS "First Name",
                        COALESCE(e."Location", '') AS "Location",
-                       p.point_date AS "Point Date",
-                       p.points AS "Point",
-                       p.reason AS "Reason",
-                       COALESCE(p.note, '') AS "Note",
-                       p.point_total AS "Point Total"
-                  FROM ph_running p
-                  JOIN employees e ON e.employee_id = p.employee_id
-                 WHERE (p.point_date::date) BETWEEN (%s::date) AND (%s::date)
+                       ph.id AS "_History ID",
+                       ph.point_date AS "Point Date",
+                       ph.points AS "Point",
+                       ph.reason AS "Reason",
+                       COALESCE(ph.note, '') AS "Note"
+                  FROM points_history ph
+                  JOIN employees e ON e.employee_id = ph.employee_id
             """
         else:
             sql = """
-                WITH ph_running AS (
-                    SELECT ph.employee_id,
-                           ph.point_date,
-                           ph.points,
-                           ph.reason,
-                           ph.note,
-                           ROUND(
-                               SUM(COALESCE(ph.points, 0.0)) OVER (
-                                   PARTITION BY ph.employee_id
-                                   ORDER BY date(ph.point_date), ph.id
-                                   ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-                               ),
-                               1
-                           ) AS point_total
-                      FROM points_history ph
-                )
                 SELECT e.employee_id AS "Employee #",
                        e.last_name AS "Last Name",
                        e.first_name AS "First Name",
                        COALESCE(e."Location", '') AS "Location",
-                       p.point_date AS "Point Date",
-                       p.points AS "Point",
-                       p.reason AS "Reason",
-                       COALESCE(p.note, '') AS "Note",
-                       p.point_total AS "Point Total"
-                  FROM ph_running p
-                  JOIN employees e ON e.employee_id = p.employee_id
-                 WHERE date(p.point_date) BETWEEN date(?) AND date(?)
+                       ph.id AS "_History ID",
+                       ph.point_date AS "Point Date",
+                       ph.points AS "Point",
+                       ph.reason AS "Reason",
+                       COALESCE(ph.note, '') AS "Note"
+                  FROM points_history ph
+                  JOIN employees e ON e.employee_id = ph.employee_id
             """
-        params = [start_date.isoformat(), end_date.isoformat()]
+        params = []
+        if building != "All":
+            sql += " WHERE COALESCE(e.\"Location\", '') = ?"
+            params.append(building)
+        if pg:
+            sql += ' ORDER BY "Employee #", (ph.point_date::date), "_History ID"'
+        else:
+            sql += ' ORDER BY "Employee #", date(ph.point_date), "_History ID"'
+
+        rows = [dict(r) for r in fetchall(conn, sql, tuple(params))]
+        running_by_employee: dict[int, float] = {}
+        export_rows: list[dict] = []
+        start_iso = start_date.isoformat()
+        end_iso = end_date.isoformat()
+
+        for row in rows:
+            employee_id = int(row["Employee #"])
+            running_total = running_by_employee.get(employee_id, 0.0)
+            running_total = max(0.0, round(running_total + float(row.get("Point") or 0.0), 3))
+            running_by_employee[employee_id] = running_total
+
+            point_day = str(row.get("Point Date") or "")[:10]
+            if start_iso <= point_day <= end_iso:
+                row["Point Total"] = round(running_total, 1)
+                row.pop("_History ID", None)
+                export_rows.append(row)
+
+        df = pd.DataFrame(export_rows)
+        if not df.empty:
+            if "Point" in df.columns:
+                df["Point"] = pd.to_numeric(df["Point"], errors="coerce").map(
+                    lambda v: f"{v:.1f}" if pd.notna(v) else ""
+                )
+            if "Point Total" in df.columns:
+                df["Point Total"] = pd.to_numeric(df["Point Total"], errors="coerce").map(
+                    lambda v: f"{v:.1f}" if pd.notna(v) else ""
+                )
+        return df
 
     elif export_type == "upcoming 2-month roll-offs":
         if pg:
@@ -4209,10 +4331,15 @@ def run_export_query(conn, export_type: str, building: str, start_date: date, en
     sql += " ORDER BY last_name, first_name"
     df = pd.DataFrame([dict(r) for r in fetchall(conn, sql, tuple(params))])
 
-    if export_type == "30-day point history" and not df.empty and "Point Total" in df.columns:
-        df["Point Total"] = pd.to_numeric(df["Point Total"], errors="coerce").map(
-            lambda v: f"{v:.1f}" if pd.notna(v) else ""
-        )
+    if export_type == "30-day point history" and not df.empty:
+        if "Point" in df.columns:
+            df["Point"] = pd.to_numeric(df["Point"], errors="coerce").map(
+                lambda v: f"{v:.1f}" if pd.notna(v) else ""
+            )
+        if "Point Total" in df.columns:
+            df["Point Total"] = pd.to_numeric(df["Point Total"], errors="coerce").map(
+                lambda v: f"{v:.1f}" if pd.notna(v) else ""
+            )
 
     return df
 
@@ -4397,7 +4524,7 @@ def corrective_action_page(conn, building: str) -> None:
                    e.last_name,
                    e.first_name,
                    COALESCE(e."Location", '') AS building,
-                   GREATEST(0.0, ROUND(COALESCE(SUM(ph2.points), 0.0)::numeric, 1)::float8) AS point_total,
+                   COALESCE(e.point_total, 0.0) AS point_total,
                    MAX(ph2.point_date::date)::text AS last_point_date,
                    e.point_warning_date::text AS point_warning_date
               FROM employees e
@@ -4405,8 +4532,8 @@ def corrective_action_page(conn, building: str) -> None:
              WHERE e.employee_id IN ({ph})
                AND COALESCE(e.is_active, 1) = 1
              GROUP BY e.employee_id, e.last_name, e.first_name, e."Location", e.point_warning_date
-            HAVING GREATEST(0.0, ROUND(COALESCE(SUM(ph2.points), 0.0)::numeric, 1)::float8) >= 5.0
-             ORDER BY GREATEST(0.0, ROUND(COALESCE(SUM(ph2.points), 0.0)::numeric, 1)::float8) DESC,
+            HAVING COALESCE(e.point_total, 0.0) >= 5.0
+             ORDER BY COALESCE(e.point_total, 0.0) DESC,
                       lower(e.last_name), lower(e.first_name)
         """
     else:
@@ -4416,10 +4543,7 @@ def corrective_action_page(conn, building: str) -> None:
               FROM (
                 SELECT e.employee_id, e.last_name, e.first_name,
                        COALESCE(e."Location", '') AS building,
-                       MAX(0.0, ROUND(COALESCE((
-                           SELECT SUM(ph2.points) FROM points_history ph2
-                            WHERE ph2.employee_id = e.employee_id
-                       ), 0.0), 1)) AS point_total,
+                       COALESCE(e.point_total, 0.0) AS point_total,
                        (SELECT MAX(date(ph3.point_date)) FROM points_history ph3
                          WHERE ph3.employee_id = e.employee_id
                            AND COALESCE(ph3.points,0.0) > 0.0

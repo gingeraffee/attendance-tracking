@@ -56,6 +56,39 @@ def _row_get(row, key: str, default=None):
     return row[key] if key in row.keys() else default
 
 
+def get_points_history_ordered(conn, employee_id: int) -> list[dict]:
+    if _is_pg(conn):
+        sql = """
+            SELECT id, point_date, points, reason, note, flag_code
+            FROM points_history
+            WHERE employee_id = %s
+            ORDER BY (point_date::date), id;
+        """
+    else:
+        sql = """
+            SELECT id, point_date, points, reason, note, flag_code
+            FROM points_history
+            WHERE employee_id = ?
+            ORDER BY date(point_date), id;
+        """
+    return [dict(r) for r in _fetchall(conn, sql, (int(employee_id),))]
+
+
+def with_running_point_totals(rows: list) -> list[dict]:
+    running_total = 0.0
+    computed: list[dict] = []
+
+    for raw in rows:
+        row = dict(raw) if not isinstance(raw, dict) else dict(raw)
+        delta = round(float(_row_get(row, "points", 0.0) or 0.0), 3)
+        row["balance_before"] = round(running_total, 1)
+        running_total = max(0.0, round(running_total + delta, 3))
+        row["point_total"] = round(running_total, 1)
+        computed.append(row)
+
+    return computed
+
+
 def search_employees(conn, q: str, active_only: bool = True, limit: int = 50):
     q = (q or "").strip()
     where = []
@@ -94,62 +127,14 @@ def get_employee(conn, employee_id: int):
 
 
 def get_points_history(conn, employee_id: int, limit: int = 200):
-    if _is_pg(conn):
-        sql = """
-            WITH ordered AS (
-                SELECT
-                    id,
-                    point_date,
-                    points,
-                    reason,
-                    note,
-                    flag_code,
-                    ROUND(
-                        (
-                            SUM(COALESCE(points, 0.0)) OVER (
-                                PARTITION BY employee_id
-                                ORDER BY (point_date::date), id
-                                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-                            )
-                        )::numeric,
-                        1
-                    )::float8 AS point_total
-                FROM points_history
-                WHERE employee_id = %s
-            )
-            SELECT id, point_date, points, reason, note, flag_code, point_total
-            FROM ordered
-            ORDER BY (point_date::date) DESC, id DESC
-            LIMIT %s;
-        """
-        return _fetchall(conn, sql, (int(employee_id), int(limit)))
-
-    sql = """
-        WITH ordered AS (
-            SELECT
-                id,
-                point_date,
-                points,
-                reason,
-                note,
-                flag_code,
-                ROUND(
-                    SUM(COALESCE(points, 0.0)) OVER (
-                        PARTITION BY employee_id
-                        ORDER BY date(point_date), id
-                        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-                    ),
-                    1
-                ) AS point_total
-            FROM points_history
-            WHERE employee_id = ?
-        )
-        SELECT id, point_date, points, reason, note, flag_code, point_total
-        FROM ordered
-        ORDER BY date(point_date) DESC, id DESC
-        LIMIT ?;
-    """
-    return _fetchall(conn, sql, (int(employee_id), int(limit)))
+    computed_rows = with_running_point_totals(get_points_history_ordered(conn, int(employee_id)))
+    result = []
+    for row in reversed(computed_rows):
+        row.pop("balance_before", None)
+        result.append(row)
+        if len(result) >= int(limit):
+            break
+    return result
 
 
 def insert_points_history(conn, employee_id: int, point_date: date, points: float,
@@ -181,16 +166,10 @@ def delete_employee(conn, employee_id: int):
 
 
 def update_employee_point_total(conn, employee_id: int):
+    history_rows = with_running_point_totals(get_points_history_ordered(conn, int(employee_id)))
+    total = float(history_rows[-1]["point_total"]) if history_rows else 0.0
+
     if _is_pg(conn):
-        total_row = _fetchone(
-            conn,
-            """
-            SELECT ROUND((COALESCE(SUM(points), 0.0))::numeric, 3)::float8 AS total
-            FROM points_history
-            WHERE employee_id = %s;
-            """,
-            (int(employee_id),),
-        )
         last_row = _fetchone(
             conn,
             """
@@ -202,15 +181,6 @@ def update_employee_point_total(conn, employee_id: int):
             (int(employee_id),),
         )
     else:
-        total_row = _fetchone(
-            conn,
-            """
-            SELECT ROUND(COALESCE(SUM(points), 0.0), 3) AS total
-            FROM points_history
-            WHERE employee_id = ?;
-            """,
-            (int(employee_id),),
-        )
         last_row = _fetchone(
             conn,
             """
@@ -222,7 +192,6 @@ def update_employee_point_total(conn, employee_id: int):
             (int(employee_id),),
         )
 
-    total = float(_row_get(total_row, "total", 0.0) or 0.0)
     last_point_date = _row_get(last_row, "last_point_date")
 
     rolloff_date = None
@@ -368,31 +337,65 @@ def report_points_last_30_days(conn, as_of: date | None = None):
     return _fetchall(conn, sql, (start.isoformat(),))
 
 
-def save_pto_data(conn, rows: list) -> None:
-    """Replace all stored PTO data with the provided rows (list of dicts)."""
-    pg = _is_pg(conn)
-    if pg:
-        _exec(conn, "TRUNCATE pto_uploads;")
-    else:
-        _exec(conn, "DELETE FROM pto_uploads;")
+def save_pto_data(conn, rows: list) -> dict[str, int]:
+    """Append PTO rows while skipping exact duplicates.
+
+    Duplicate matching uses the full PTO payload fields:
+    employee_id, last_name, first_name, building, pto_type,
+    start_date, end_date, and hours.
+    """
+
+    def _norm_payload(row: dict) -> tuple:
+        emp_raw = row.get("employee_id")
+        try:
+            employee_id = int(emp_raw) if emp_raw not in (None, "") else None
+        except (ValueError, TypeError):
+            employee_id = None
+
+        return (
+            employee_id,
+            str(row.get("last_name", "")).strip(),
+            str(row.get("first_name", "")).strip(),
+            str(row.get("building", "")).strip(),
+            str(row.get("pto_type", "")).strip(),
+            str(row.get("start_date", ""))[:10],
+            str(row.get("end_date", ""))[:10],
+            round(float(row.get("hours", 0) or 0), 3),
+        )
+
+    existing_rows = load_pto_data(conn)
+    existing_keys = {
+        _norm_payload(dict(r) if not isinstance(r, dict) else r)
+        for r in existing_rows
+    }
+
+    inserted = 0
+    duplicate = 0
+    seen_in_batch: set[tuple] = set()
+
     for row in rows:
+        payload = _norm_payload(row)
+        if payload in existing_keys or payload in seen_in_batch:
+            duplicate += 1
+            continue
+
         _exec(
             conn,
             """
             INSERT INTO pto_uploads (employee_id, last_name, first_name, building, pto_type, start_date, end_date, hours)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?);
             """,
-            (
-                row.get("employee_id"),
-                str(row.get("last_name", "")).strip(),
-                str(row.get("first_name", "")).strip(),
-                str(row.get("building", "")).strip(),
-                str(row.get("pto_type", "")).strip(),
-                str(row.get("start_date", ""))[:10],
-                str(row.get("end_date", ""))[:10],
-                float(row.get("hours", 0) or 0),
-            ),
+            payload,
         )
+        seen_in_batch.add(payload)
+        existing_keys.add(payload)
+        inserted += 1
+
+    return {
+        "inserted": inserted,
+        "duplicate": duplicate,
+        "total": len(existing_keys),
+    }
 
 
 def load_pto_data(conn) -> list:
