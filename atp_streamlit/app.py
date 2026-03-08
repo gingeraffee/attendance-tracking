@@ -39,6 +39,7 @@ from atp_core import repo, services
 from atp_core.rules import REASON_OPTIONS
 
 BUILDINGS = ["APIM", "APIS", "AAP"]
+POINT_BALANCE_REPAIR_VERSION = 2
 
 
 # ── Theme ─────────────────────────────────────────────────────────────────────
@@ -799,7 +800,7 @@ def get_conn():
     except Exception:
         pass
 
-    if not st.session_state.get("_point_balance_repaired"):
+    if st.session_state.get("_point_balance_repair_version") != POINT_BALANCE_REPAIR_VERSION:
         bulk_recalc = getattr(services, "recalculate_all_employee_dates", None)
         single_recalc = getattr(services, "recalculate_employee_dates", None)
         if callable(bulk_recalc):
@@ -809,6 +810,7 @@ def get_conn():
             with db.tx(conn):
                 for row in employee_rows:
                     single_recalc(conn, int(row["employee_id"]))
+        st.session_state["_point_balance_repair_version"] = POINT_BALANCE_REPAIR_VERSION
         st.session_state["_point_balance_repaired"] = True
     return conn
 
