@@ -800,7 +800,15 @@ def get_conn():
         pass
 
     if not st.session_state.get("_point_balance_repaired"):
-        services.recalculate_all_employee_dates(conn)
+        bulk_recalc = getattr(services, "recalculate_all_employee_dates", None)
+        single_recalc = getattr(services, "recalculate_employee_dates", None)
+        if callable(bulk_recalc):
+            bulk_recalc(conn)
+        elif callable(single_recalc):
+            employee_rows = fetchall(conn, "SELECT employee_id FROM employees")
+            with db.tx(conn):
+                for row in employee_rows:
+                    single_recalc(conn, int(row["employee_id"]))
         st.session_state["_point_balance_repaired"] = True
     return conn
 
