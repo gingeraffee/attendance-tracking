@@ -5,7 +5,7 @@ import sqlite3
 
 from .db import tx
 from . import repo
-from .rules import calc_rolloff_and_perfect, step_next_perfect_attendance, step_next_rolloff
+from .rules import calc_rolloff_and_perfect, step_next_perfect_attendance, step_next_rolloff, three_months_then_first
 
 
 def _is_pg(conn) -> bool:
@@ -138,6 +138,19 @@ def recalculate_employee_dates(conn: sqlite3.Connection, employee_id: int) -> No
     WHEN NO HISTORY EXISTS AT ALL
         All three date fields are cleared and total is set to 0.0.
     """
+    employee_row = repo.get_employee(conn, int(employee_id))
+    if not employee_row:
+        raise ValueError("Employee not found.")
+
+    employee = dict(employee_row)
+    start_date_iso = str(employee.get("start_date") or "")[:10] or None
+    existing_perfect_iso = str(employee.get("perfect_attendance") or "")[:10] or None
+    start_based_perfect_iso = None
+    if start_date_iso:
+        start_based_perfect_iso = three_months_then_first(
+            datetime.strptime(start_date_iso, "%Y-%m-%d").date()
+        ).isoformat()
+
     # --- Step 1: total across all history, flooring at zero after each event ---
     history_rows = repo.with_running_point_totals(repo.get_points_history_ordered(conn, int(employee_id)))
     new_total = float(history_rows[-1]["point_total"]) if history_rows else 0.0
@@ -168,17 +181,16 @@ def recalculate_employee_dates(conn: sqlite3.Connection, employee_id: int) -> No
 
     # --- Step 4: decide what to write ---
     if not rolloff_anchor_iso and not perfect_anchor_iso:
-        # No history at all — clear everything
         _exec(conn,
             """
             UPDATE employees
                SET point_total        = ?,
                    last_point_date    = NULL,
                    rolloff_date       = NULL,
-                   perfect_attendance = NULL
+                   perfect_attendance = ?
              WHERE employee_id = ?
             """,
-            (new_total, employee_id),
+            (new_total, start_based_perfect_iso, employee_id),
         )
         return
 
@@ -206,6 +218,9 @@ def recalculate_employee_dates(conn: sqlite3.Connection, employee_id: int) -> No
         # (per policy: no points = no rolloff scheduled, no perfect date shown).
         rolloff_date_iso = None
         perfect_date_iso = None
+    else:
+        rolloff_date_iso = None
+        perfect_date_iso = existing_perfect_iso or start_based_perfect_iso
 
     _exec(conn,
         """
@@ -354,6 +369,7 @@ def create_employee(
     employee_id: int,
     last_name: str,
     first_name: str,
+    start_date: date,
     location: str | None = None,
 ) -> None:
     if employee_id is None:
@@ -362,6 +378,8 @@ def create_employee(
         raise ValueError("Last name is required.")
     if not str(first_name or "").strip():
         raise ValueError("First name is required.")
+    if start_date is None:
+        raise ValueError("Start date is required.")
 
     with tx(conn):
         repo.create_employee(
@@ -369,8 +387,10 @@ def create_employee(
             employee_id=int(employee_id),
             last_name=str(last_name).strip(),
             first_name=str(first_name).strip(),
+            start_date=start_date.isoformat(),
             location=(location or "").strip(),
         )
+        recalculate_employee_dates(conn, int(employee_id))
 
 
 def delete_employee(conn: sqlite3.Connection, employee_id: int) -> None:

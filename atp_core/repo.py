@@ -118,7 +118,7 @@ def get_employee(conn, employee_id: int):
         conn,
         """
         SELECT employee_id, last_name, first_name, COALESCE("Location", '') AS location,
-               point_total, last_point_date, rolloff_date, perfect_attendance, point_warning_date, is_active
+               start_date, point_total, last_point_date, rolloff_date, perfect_attendance, point_warning_date, is_active
         FROM employees
         WHERE employee_id = ?;
         """,
@@ -149,14 +149,27 @@ def insert_points_history(conn, employee_id: int, point_date: date, points: floa
     )
 
 
-def create_employee(conn, employee_id: int, last_name: str, first_name: str, location: str | None = None):
+def create_employee(
+    conn,
+    employee_id: int,
+    last_name: str,
+    first_name: str,
+    start_date: str,
+    location: str | None = None,
+):
     _exec(
         conn,
         """
-        INSERT INTO employees (employee_id, last_name, first_name, "Location", is_active)
-        VALUES (?, ?, ?, ?, 1);
+        INSERT INTO employees (employee_id, last_name, first_name, start_date, "Location", is_active)
+        VALUES (?, ?, ?, ?, ?, 1);
         """,
-        (int(employee_id), str(last_name).strip(), str(first_name).strip(), (location or "").strip() or None),
+        (
+            int(employee_id),
+            str(last_name).strip(),
+            str(first_name).strip(),
+            str(start_date).strip(),
+            (location or "").strip() or None,
+        ),
     )
 
 

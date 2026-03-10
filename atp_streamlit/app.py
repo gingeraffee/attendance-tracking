@@ -40,6 +40,10 @@ from atp_core.rules import REASON_OPTIONS
 
 BUILDINGS = ["APIM", "APIS", "AAP"]
 POINT_BALANCE_REPAIR_VERSION = 2
+EMPLOYEE_CACHE_TTL_SECONDS = 60
+DASHBOARD_CACHE_TTL_SECONDS = 45
+LEDGER_HISTORY_DEFAULT_LIMIT = 500
+LEDGER_HISTORY_FULL_LIMIT = 5000
 
 
 # ── Theme ─────────────────────────────────────────────────────────────────────
@@ -784,10 +788,19 @@ div[data-testid="stMetric"]:nth-child(6) { animation-delay: 3.5s; }
 
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
-def get_conn():
-    conn = db.connect()
+def _db_cache_key() -> str:
+    return db.get_db_path()
+
+
+@st.cache_resource(show_spinner=False)
+def _get_cached_conn(db_key: str):
+    return db.connect()
+
+
+@st.cache_resource(show_spinner=False)
+def _initialize_database(db_key: str, repair_version: int) -> None:
+    conn = _get_cached_conn(db_key)
     ensure_schema(conn)
-    # ── Additive migration: point_warning_date column ─────────────────────────
     try:
         if is_pg(conn):
             exec_sql(conn, "ALTER TABLE employees ADD COLUMN IF NOT EXISTS point_warning_date DATE")
@@ -800,20 +813,41 @@ def get_conn():
     except Exception:
         pass
 
-    if st.session_state.get("_point_balance_repair_version") != POINT_BALANCE_REPAIR_VERSION:
-        bulk_recalc = getattr(services, "recalculate_all_employee_dates", None)
-        single_recalc = getattr(services, "recalculate_employee_dates", None)
-        if callable(bulk_recalc):
-            bulk_recalc(conn)
-        elif callable(single_recalc):
-            employee_rows = fetchall(conn, "SELECT employee_id FROM employees")
-            with db.tx(conn):
-                for row in employee_rows:
-                    single_recalc(conn, int(row["employee_id"]))
-        st.session_state["_point_balance_repair_version"] = POINT_BALANCE_REPAIR_VERSION
-        st.session_state["_point_balance_repaired"] = True
-    return conn
+    bulk_recalc = getattr(services, "recalculate_all_employee_dates", None)
+    single_recalc = getattr(services, "recalculate_employee_dates", None)
+    if callable(bulk_recalc):
+        bulk_recalc(conn)
+    elif callable(single_recalc):
+        employee_rows = fetchall(conn, "SELECT employee_id FROM employees")
+        with db.tx(conn):
+            for row in employee_rows:
+                single_recalc(conn, int(row["employee_id"]))
 
+
+@st.cache_data(ttl=EMPLOYEE_CACHE_TTL_SECONDS, show_spinner=False)
+def _load_employees_cached(db_key: str, q: str, building: str) -> list[dict]:
+    conn = _get_cached_conn(db_key)
+    rows = [dict(r) for r in repo.search_employees(conn, q=q, limit=3000)]
+    if building != "All":
+        rows = [r for r in rows if (r.get("location") or "") == building]
+    return rows
+
+
+@st.cache_data(ttl=DASHBOARD_CACHE_TTL_SECONDS, show_spinner=False)
+def _fetchall_cached(db_key: str, sql: str, params: tuple = ()) -> list[dict]:
+    conn = _get_cached_conn(db_key)
+    return [dict(r) for r in fetchall(conn, sql, params)]
+
+
+def clear_read_caches() -> None:
+    _load_employees_cached.clear()
+    _fetchall_cached.clear()
+
+
+def get_conn():
+    db_key = _db_cache_key()
+    _initialize_database(db_key, POINT_BALANCE_REPAIR_VERSION)
+    return _get_cached_conn(db_key)
 
 def is_pg(conn) -> bool:
     return conn.__class__.__module__.startswith("psycopg2")
@@ -1773,10 +1807,7 @@ def selected_employee_sidebar(conn, employee_id: int | None) -> None:
 
 
 def load_employees(conn, q: str = "", building: str = "All") -> list[dict]:
-    rows = [dict(r) for r in repo.search_employees(conn, q=q, limit=3000)]
-    if building != "All":
-        rows = [r for r in rows if (r.get("location") or "") == building]
-    return rows
+    return _load_employees_cached(_db_cache_key(), q, building)
 
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -1796,13 +1827,16 @@ def dashboard_page(conn, building: str) -> None:
         info_box("No employees found for this building filter.")
         return
     ph = ",".join(["?" if not is_pg(conn) else "%s"] * len(emp_ids))
+    db_key = _db_cache_key()
 
-    def _scalar_n(conn, sql: str, params: tuple) -> int:
-        rows = fetchall(conn, sql, params)
+    def _read_rows(sql: str, params: tuple) -> list[dict]:
+        return _fetchall_cached(db_key, sql, tuple(params))
+
+    def _scalar_n(sql: str, params: tuple) -> int:
+        rows = _read_rows(sql, params)
         if not rows:
             return 0
-        r0 = dict(rows[0])
-        return int(r0.get("n") or 0)
+        return int(rows[0].get("n") or 0)
 
     # ── HR Live Monitor data ──────────────────────────────────────────────────
     since_24h = (today - timedelta(days=1)).isoformat()
@@ -1833,10 +1867,10 @@ def dashboard_page(conn, building: str) -> None:
                AND (perfect_attendance::date) <= (%s::date)
         """
 
-        points_24h = _scalar_n(conn, sql_points_since, (*emp_ids, since_24h))
-        points_7d = _scalar_n(conn, sql_points_since, (*emp_ids, since_7d))
-        rolloffs_due_7d = _scalar_n(conn, sql_roll_due_7d, (*emp_ids, today.isoformat(), due_7d))
-        perfect_due_7d = _scalar_n(conn, sql_perf_due_7d, (*emp_ids, today.isoformat(), due_7d))
+        points_24h = _scalar_n(sql_points_since, (*emp_ids, since_24h))
+        points_7d = _scalar_n(sql_points_since, (*emp_ids, since_7d))
+        rolloffs_due_7d = _scalar_n(sql_roll_due_7d, (*emp_ids, today.isoformat(), due_7d))
+        perfect_due_7d = _scalar_n(sql_perf_due_7d, (*emp_ids, today.isoformat(), due_7d))
 
     else:
         sql_points_since = f"""
@@ -1863,10 +1897,10 @@ def dashboard_page(conn, building: str) -> None:
                AND date(perfect_attendance) <= date(?)
         """
 
-        points_24h = _scalar_n(conn, sql_points_since, (*emp_ids, since_24h))
-        points_7d = _scalar_n(conn, sql_points_since, (*emp_ids, since_7d))
-        rolloffs_due_7d = _scalar_n(conn, sql_roll_due_7d, (*emp_ids, today.isoformat(), due_7d))
-        perfect_due_7d = _scalar_n(conn, sql_perf_due_7d, (*emp_ids, today.isoformat(), due_7d))
+        points_24h = _scalar_n(sql_points_since, (*emp_ids, since_24h))
+        points_7d = _scalar_n(sql_points_since, (*emp_ids, since_7d))
+        rolloffs_due_7d = _scalar_n(sql_roll_due_7d, (*emp_ids, today.isoformat(), due_7d))
+        perfect_due_7d = _scalar_n(sql_perf_due_7d, (*emp_ids, today.isoformat(), due_7d))
 
     if is_pg(conn):
         sql_emp_detail = f'''
@@ -2225,9 +2259,9 @@ def dashboard_page(conn, building: str) -> None:
              ORDER BY total_points DESC, lower(e.last_name), lower(e.first_name)
         '''
 
-    emp_detail_rows = [dict(r) for r in fetchall(conn, sql_emp_detail, tuple(emp_ids))]
-    roll_due_rows = [dict(r) for r in fetchall(conn, sql_roll_due, (*emp_ids, today.isoformat(), in_30_days.isoformat()))]
-    perf_due_rows = [dict(r) for r in fetchall(conn, sql_perf_due, (*emp_ids, today.isoformat(), in_30_days.isoformat()))]
+    emp_detail_rows = _read_rows(sql_emp_detail, tuple(emp_ids))
+    roll_due_rows = _read_rows(sql_roll_due, (*emp_ids, today.isoformat(), in_30_days.isoformat()))
+    perf_due_rows = _read_rows(sql_perf_due, (*emp_ids, today.isoformat(), in_30_days.isoformat()))
 
     bucket_defs = {
         "gt1": lambda pts: pts > 1.0,
@@ -2448,27 +2482,21 @@ def dashboard_page(conn, building: str) -> None:
     divider()
     section_label("Building Snapshot (Average Points per Employee)")
 
-    active_rows = [
-        dict(r)
-        for r in fetchall(
-            conn,
-            """SELECT COALESCE("Location", '') AS building, COUNT(*) AS n
-               FROM employees
-              WHERE COALESCE(is_active,1)=1
-              GROUP BY COALESCE("Location", '')""",
-        )
-    ]
-    avg_total_rows = [
-        dict(r)
-        for r in fetchall(
-            conn,
-            """SELECT COALESCE("Location", '') AS building,
-                      AVG(COALESCE(point_total, 0.0)) AS avg_point_total
-               FROM employees
-              WHERE COALESCE(is_active,1)=1
-              GROUP BY COALESCE("Location", '')""",
-        )
-    ]
+    active_rows = _read_rows(
+        """SELECT COALESCE("Location", '') AS building, COUNT(*) AS n
+           FROM employees
+          WHERE COALESCE(is_active,1)=1
+          GROUP BY COALESCE("Location", '')""",
+        (),
+    )
+    avg_total_rows = _read_rows(
+        """SELECT COALESCE("Location", '') AS building,
+                  AVG(COALESCE(point_total, 0.0)) AS avg_point_total
+           FROM employees
+          WHERE COALESCE(is_active,1)=1
+          GROUP BY COALESCE("Location", '')""",
+        (),
+    )
     active_by_build = {b: 0 for b in BUILDINGS}
     avg_total_by_build = {b: 0.0 for b in BUILDINGS}
     for r in active_rows:
@@ -2482,8 +2510,8 @@ def dashboard_page(conn, building: str) -> None:
     since_60 = (today - timedelta(days=60)).isoformat()
     tomorrow = (today + timedelta(days=1)).isoformat()
 
-    current_rows = [dict(r) for r in fetchall(conn, sql_build_points_window, (*emp_ids, since_30, tomorrow))]
-    prior_rows = [dict(r) for r in fetchall(conn, sql_build_points_window, (*emp_ids, since_60, since_30))]
+    current_rows = _read_rows(sql_build_points_window, (*emp_ids, since_30, tomorrow))
+    prior_rows = _read_rows(sql_build_points_window, (*emp_ids, since_60, since_30))
     current_points = {r.get("building") or "": float(r.get("pts") or 0.0) for r in current_rows}
     prior_points = {r.get("building") or "": float(r.get("pts") or 0.0) for r in prior_rows}
 
@@ -2500,7 +2528,7 @@ def dashboard_page(conn, building: str) -> None:
             pct_txt = f"{pct_change:+.1f}%"
         else:
             pct_txt = "—"
-        reason_rows = [dict(r) for r in fetchall(conn, sql_build_reasons, (since_30, b))]
+        reason_rows = _read_rows(sql_build_reasons, (since_30, b))
         most_common_reason = (reason_rows[0].get("reason") if reason_rows else None) or "—"
         snap_rows.append(
             {
@@ -2518,7 +2546,7 @@ def dashboard_page(conn, building: str) -> None:
     section_label("Forecasting")
 
     st.markdown("#### Employees > 1.0 Point (Last 30 Days)")
-    gt1_rows = [dict(r) for r in fetchall(conn, sql_insights_gt1, (since_30, *emp_ids, since_30))]
+    gt1_rows = _read_rows(sql_insights_gt1, (since_30, *emp_ids, since_30))
     if gt1_rows:
         df_gt1 = pd.DataFrame(
             [
@@ -2541,7 +2569,7 @@ def dashboard_page(conn, building: str) -> None:
         info_box("No employees over 1.0 points in the last 30 days.")
 
     st.markdown("#### Trending Risks  — On track to exceed 8 points")
-    pts60_rows = [dict(r) for r in fetchall(conn, sql_points_60d, (*emp_ids, since_60))]
+    pts60_rows = _read_rows(sql_points_60d, (*emp_ids, since_60))
     points60_by_emp = {int(r.get("employee_id")): float(r.get("points_60d") or 0.0) for r in pts60_rows}
     weekdays_60 = max(len(pd.bdate_range(start=today - timedelta(days=60), end=today)), 1)
     weekdays_30 = len(pd.bdate_range(start=today + timedelta(days=1), end=today + timedelta(days=30)))
@@ -2573,7 +2601,7 @@ def dashboard_page(conn, building: str) -> None:
         info_box("No active employees currently trend to 8.0+ points in the next 30 days.")
 
     st.markdown("#### Absenteeism Trend (90 Days)")
-    trend_rows = [dict(r) for r in fetchall(conn, sql_trend_90d, (*emp_ids, (today - timedelta(days=90)).isoformat()))]
+    trend_rows = _read_rows(sql_trend_90d, (*emp_ids, (today - timedelta(days=90)).isoformat()))
     # Merge on plain string dates to avoid pandas datetime-resolution mismatches
     # (bdate_range may return datetime64[ns] while pd.to_datetime from SQL strings
     #  returns datetime64[us] in newer pandas, causing silent merge failures).
@@ -2613,11 +2641,11 @@ def dashboard_page(conn, building: str) -> None:
 
     current_rows = [
         dict(r)
-        for r in fetchall(conn, sql_weekday_window, (*emp_ids, window_start.isoformat(), window_end.isoformat(), *emp_ids, window_start.isoformat(), window_end.isoformat()))
+        for r in _read_rows(sql_weekday_window, (*emp_ids, window_start.isoformat(), window_end.isoformat(), *emp_ids, window_start.isoformat(), window_end.isoformat()))
     ]
     prior_rows = [
         dict(r)
-        for r in fetchall(conn, sql_weekday_window, (*emp_ids, prior_start.isoformat(), prior_end.isoformat(), *emp_ids, prior_start.isoformat(), prior_end.isoformat()))
+        for r in _read_rows(sql_weekday_window, (*emp_ids, prior_start.isoformat(), prior_end.isoformat(), *emp_ids, prior_start.isoformat(), prior_end.isoformat()))
     ]
 
     current_by_dow = {
@@ -2664,14 +2692,10 @@ def dashboard_page(conn, building: str) -> None:
         selected_val = metric_value(stats, metric_choice)
         metric_values[dow] = selected_val
 
-        weekday_reason_rows = [
-            dict(r)
-            for r in fetchall(
-                conn,
-                sql_weekday_reason,
-                (*emp_ids, window_start.isoformat(), window_end.isoformat(), dow),
-            )
-        ]
+        weekday_reason_rows = _read_rows(
+            sql_weekday_reason,
+            (*emp_ids, window_start.isoformat(), window_end.isoformat(), dow),
+        )
         top_reason_day = (weekday_reason_rows[0].get("reason") if weekday_reason_rows else None) or "—"
 
         table_rows.append(
@@ -2697,14 +2721,10 @@ def dashboard_page(conn, building: str) -> None:
         sel_idx = selected_rows[0]
         sel_dow = dow_order[sel_idx]
         sel_label = dow_labels[sel_dow]
-        emp_rows = [
-            dict(r)
-            for r in fetchall(
-                conn,
-                sql_weekday_employees,
-                (*emp_ids, window_start.isoformat(), window_end.isoformat(), sel_dow),
-            )
-        ]
+        emp_rows = _read_rows(
+            sql_weekday_employees,
+            (*emp_ids, window_start.isoformat(), window_end.isoformat(), sel_dow),
+        )
         if emp_rows:
             st.markdown(f"**Employees pointed on {sel_label}s** ({window_start.strftime('%b %d')} – {window_end.strftime('%b %d, %Y')})")
             emp_display = pd.DataFrame([
@@ -2748,14 +2768,10 @@ def dashboard_page(conn, building: str) -> None:
         ch_dow, _, pct_txt = max(delta_rows, key=lambda x: x[1])
         st.markdown(f"• Biggest change vs prior matching window: **{dow_labels[ch_dow]}** — **{pct_txt}**")
 
-    reason_rows = [
-        dict(r)
-        for r in fetchall(
-            conn,
-            sql_weekday_reason,
-            (*emp_ids, window_start.isoformat(), window_end.isoformat(), worst_dow),
-        )
-    ]
+    reason_rows = _read_rows(
+        sql_weekday_reason,
+        (*emp_ids, window_start.isoformat(), window_end.isoformat(), worst_dow),
+    )
     top_reason = (reason_rows[0].get("reason") if reason_rows else None) or "—"
     if top_reason != "—":
         st.markdown(f"• Most common reason on {worst_label}: **{top_reason}**")
@@ -3972,6 +3988,7 @@ def points_ledger_page(conn, building: str) -> None:
                     try:
                         preview = services.preview_add_point(emp_id, p_date, float(points), reason, note)
                         services.add_point(conn, preview, flag_code=(flag_code or "").strip() or None)
+                        clear_read_caches()
                         set_ledger_notice(f"Added {float(points):.1f} pts on {fmt_date(p_date)}.")
                         st.rerun()
                     except Exception as exc:
@@ -3985,6 +4002,7 @@ def points_ledger_page(conn, building: str) -> None:
                 try:
                     with db.tx(conn):
                         services.recalculate_employee_dates(conn, emp_id)
+                    clear_read_caches()
                     set_ledger_notice(f"Recalculated point totals for employee #{emp_id}.")
                     st.rerun()
                 except Exception as exc:
@@ -3993,6 +4011,7 @@ def points_ledger_page(conn, building: str) -> None:
             if st.button("Recalculate Everyone", key="repair_all_employees", use_container_width=True):
                 try:
                     services.recalculate_all_employee_dates(conn)
+                    clear_read_caches()
                     set_ledger_notice("Recalculated point totals for all employees.")
                     st.rerun()
                 except Exception as exc:
@@ -4000,7 +4019,9 @@ def points_ledger_page(conn, building: str) -> None:
 
     with col_hist:
         section_label("Transaction History (all events)")
-        hist = [dict(r) for r in repo.get_points_history(conn, emp_id, limit=5000)]
+        history_limit_key = f"ledger_history_limit_{emp_id}"
+        current_history_limit = int(st.session_state.get(history_limit_key, LEDGER_HISTORY_DEFAULT_LIMIT))
+        hist = [dict(r) for r in repo.get_points_history(conn, emp_id, limit=current_history_limit)]
         if hist:
             df_h = pd.DataFrame(hist)[["id", "point_date", "points", "reason", "note", "point_total"]]
             df_h["point_date"] = df_h["point_date"].apply(fmt_date)
@@ -4009,9 +4030,15 @@ def points_ledger_page(conn, building: str) -> None:
             df_h.columns = ["ID", "Date", "Pts", "Reason", "Note", "Running Total"]
             st.dataframe(df_h.drop(columns=["ID"]), use_container_width=True, hide_index=True, height=430)
 
+            if len(hist) >= current_history_limit and current_history_limit < LEDGER_HISTORY_FULL_LIMIT:
+                if st.button("Load Full History", key=f"load_full_history_{emp_id}"):
+                    st.session_state[history_limit_key] = LEDGER_HISTORY_FULL_LIMIT
+                    st.rerun()
+
             if st.button("Undo Last Entry", key="undo_last"):
                 try:
                     services.delete_point_history_entry(conn, point_id=int(df_h.iloc[0]["ID"]), employee_id=emp_id)
+                    clear_read_caches()
                     set_ledger_notice("Last entry removed.")
                     st.rerun()
                 except Exception as exc:
@@ -4089,6 +4116,7 @@ def points_ledger_page(conn, building: str) -> None:
                                 note=edit_note,
                                 flag_code=(edit_flag_code or "").strip() or None,
                             )
+                            clear_read_caches()
                             set_ledger_notice(f"Updated transaction #{selected_point_id}.")
                             st.rerun()
                         except Exception as exc:
@@ -4097,6 +4125,7 @@ def points_ledger_page(conn, building: str) -> None:
             if delete_entry:
                 try:
                     services.delete_point_history_entry(conn, point_id=selected_point_id, employee_id=emp_id)
+                    clear_read_caches()
                     set_ledger_notice(f"Deleted transaction #{selected_point_id}.")
                     st.rerun()
                 except Exception as exc:
@@ -4119,19 +4148,28 @@ def manage_employees_page(conn) -> None:
 
         with col_form:
             with st.form("add_employee", clear_on_submit=True):
-                emp_id   = st.number_input("Employee #", min_value=1, step=1)
-                first    = st.text_input("First Name")
-                last     = st.text_input("Last Name")
-                location = st.selectbox("Building", BLDG_OPTS)
-                added    = st.form_submit_button("Add Employee", use_container_width=True)
+                emp_id     = st.number_input("Employee #", min_value=1, step=1)
+                first      = st.text_input("First Name")
+                last       = st.text_input("Last Name")
+                start_date = st.date_input("Hire / Start Date", value=date.today())
+                location   = st.selectbox("Building", BLDG_OPTS)
+                added      = st.form_submit_button("Add Employee", use_container_width=True)
 
             if added:
                 if not first.strip() or not last.strip():
                     st.error("First and last name are required.")
                 else:
                     try:
-                        services.create_employee(conn, int(emp_id), last.strip(), first.strip(), location or None)
+                        services.create_employee(
+                            conn,
+                            int(emp_id),
+                            last.strip(),
+                            first.strip(),
+                            start_date,
+                            location or None,
+                        )
                         conn.commit()
+                        clear_read_caches()
                         st.success(f"Employee #{int(emp_id)} — {last}, {first} added.")
                     except Exception as exc:
                         st.error(str(exc))
@@ -4166,6 +4204,11 @@ def manage_employees_page(conn) -> None:
         emp = dict(repo.get_employee(conn, sel[0]))
         loc_val = emp.get("Location") or emp.get("location") or ""
         loc_idx = BLDG_OPTS.index(loc_val) if loc_val in BLDG_OPTS else 0
+        start_raw = str(emp.get("start_date") or "")[:10]
+        try:
+            start_val = date.fromisoformat(start_raw) if start_raw else date.today()
+        except ValueError:
+            start_val = date.today()
 
         col_edit, col_del = st.columns([1, 1], gap="large")
 
@@ -4174,6 +4217,7 @@ def manage_employees_page(conn) -> None:
             with st.form("edit_employee"):
                 first_e = st.text_input("First Name", value=emp.get("first_name") or "")
                 last_e  = st.text_input("Last Name",  value=emp.get("last_name") or "")
+                start_e = st.date_input("Hire / Start Date", value=start_val)
                 bldg_e  = st.selectbox("Building", BLDG_OPTS, index=loc_idx)
                 act_e   = st.checkbox("Active", value=bool(emp.get("is_active", 1)))
                 saved   = st.form_submit_button("Save Changes", use_container_width=True)
@@ -4182,10 +4226,14 @@ def manage_employees_page(conn) -> None:
                 try:
                     exec_sql(
                         conn,
-                        'UPDATE employees SET first_name=?, last_name=?, "Location"=?, is_active=? WHERE employee_id=?',
-                        (first_e.strip(), last_e.strip(), bldg_e or None, 1 if act_e else 0, sel[0]),
+                        'UPDATE employees SET first_name=?, last_name=?, start_date=?, "Location"=?, is_active=? WHERE employee_id=?',
+                        (first_e.strip(), last_e.strip(), start_e.isoformat(), bldg_e or None, 1 if act_e else 0, sel[0]),
                     )
+                    if start_raw != start_e.isoformat():
+                        exec_sql(conn, 'UPDATE employees SET perfect_attendance=NULL WHERE employee_id=?', (sel[0],))
+                    services.recalculate_employee_dates(conn, sel[0])
                     conn.commit()
+                    clear_read_caches()
                     st.success("Changes saved.")
                     st.rerun()
                 except Exception as exc:
@@ -4205,6 +4253,7 @@ def manage_employees_page(conn) -> None:
                     try:
                         services.delete_employee(conn, sel[0])
                         conn.commit()
+                        clear_read_caches()
                         st.success(f"Employee #{sel[0]} deleted.")
                         st.rerun()
                     except Exception as exc:
@@ -4443,6 +4492,8 @@ def system_updates_page(conn) -> None:
         if btn_roll and ok:
             try:
                 rows = services.apply_2mo_rolloffs(conn, run_date=run_date, dry_run=dry_run)
+                if not dry_run:
+                    clear_read_caches()
                 st.session_state["maintenance_log"].append({
                     "Time": datetime.now().strftime("%H:%M:%S"),
                     "Job": "2-Month Roll-offs",
@@ -4462,6 +4513,8 @@ def system_updates_page(conn) -> None:
         if btn_perf and ok:
             try:
                 rows = services.advance_due_perfect_attendance_dates(conn, run_date=run_date, dry_run=dry_run)
+                if not dry_run:
+                    clear_read_caches()
                 st.session_state["maintenance_log"].append({
                     "Time": datetime.now().strftime("%H:%M:%S"),
                     "Job": "Perfect Attendance",
@@ -4481,6 +4534,8 @@ def system_updates_page(conn) -> None:
         if btn_ytd and ok:
             try:
                 rows = services.apply_ytd_rolloffs(conn, run_date=run_date, dry_run=dry_run)
+                if not dry_run:
+                    clear_read_caches()
                 st.session_state["maintenance_log"].append({
                     "Time": datetime.now().strftime("%H:%M:%S"),
                     "Job": "YTD Roll-offs",
@@ -4952,4 +5007,3 @@ if not is_authenticated():
     login_page()
 else:
     main()
-

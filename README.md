@@ -1,32 +1,34 @@
-# ATP Web (Streamlit) — Starter
+# ATP Web Migration Workspace
 
-This starter converts ATP Beta7 into a Streamlit web UI while keeping business logic in reusable modules (so FastAPI + React later is a UI swap, not a rewrite).
+This repo now supports the current Streamlit app and the first migration pass toward `FastAPI + Next.js`.
 
-## Local run
+## Current apps
 
-```bash
-pip install -r requirements.txt
-```
+- `atp_streamlit/`: current production fallback UI
+- `backend/`: FastAPI API layer reusing `atp_core`
+- `frontend/`: Next.js app-router shell for the new UI
+- `atp_core/`: shared attendance rules, data access, and recalculation logic
 
-Set the DB path (recommended):
+## Streamlit fallback
 
-**Windows CMD**
-```bat
-set ATP_DB_PATH=/mnt/data/employeeroster.db
-```
-
-**PowerShell**
 ```powershell
-$env:ATP_DB_PATH="/mnt/data/employeeroster.db"
+python -m streamlit run atp_streamlit/app.py
 ```
 
-Run:
+## FastAPI backend
 
-```bash
-streamlit run atp_streamlit/app.py
+```powershell
+python -m uvicorn backend.app.main:app --reload --port 8000
 ```
 
-## Deployment notes
+## Next.js frontend
 
-- Keep your database **out of git** (see `.gitignore`).
-- If you deploy somewhere like Streamlit Cloud, you need a company-approved, secured database location and you’ll set `ATP_DB_PATH` via secrets/environment variables.
+```powershell
+cd frontend
+npm.cmd install
+npm.cmd run dev
+```
+
+## Deployment approach
+
+Keep Streamlit operational while the new stack grows in parallel. The migration should be additive until the new frontend reaches feature parity.
