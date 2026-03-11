@@ -41,6 +41,11 @@ from atp_core import repo, services
 from atp_core.rules import REASON_OPTIONS
 
 BUILDINGS = ["APIM", "APIS", "AAP"]
+POINT_BALANCE_REPAIR_VERSION = 2
+EMPLOYEE_CACHE_TTL_SECONDS = 60
+DASHBOARD_CACHE_TTL_SECONDS = 45
+LEDGER_HISTORY_DEFAULT_LIMIT = 500
+LEDGER_HISTORY_FULL_LIMIT = 5000
 
 
 # ── Theme ─────────────────────────────────────────────────────────────────────
@@ -138,24 +143,6 @@ footer, #MainMenu { visibility: hidden; }
     pointer-events: none; z-index: 2;
 }
 
-/* CRT scanlines (injected div) */
-@keyframes scanline-drift {
-  0%   { background-position: 0 0; }
-  100% { background-position: 0 100px; }
-}
-.scanlines {
-    position: fixed; inset: 0;
-    background: repeating-linear-gradient(
-        0deg,
-        transparent,
-        transparent 2px,
-        rgba(0,0,0,.055) 2px,
-        rgba(0,0,0,.055) 4px
-    );
-    animation: scanline-drift 8s linear infinite;
-    pointer-events: none; z-index: 3;
-}
-
 /* Corner brackets (HUD decorators) */
 .hud-corner {
     position: fixed; width: 22px; height: 22px;
@@ -171,23 +158,48 @@ footer, #MainMenu { visibility: hidden; }
    SIDEBAR
 ══════════════════════════════════════════════════════════════ */
 section[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #010407 0%, #02060e 55%, #030a18 100%) !important;
-    border-right: 1px solid rgba(0,120,255,.10) !important;
+    background: linear-gradient(180deg, rgba(8,18,42,.84) 0%, rgba(5,13,31,.78) 55%, rgba(4,10,24,.80) 100%) !important;
+    border-right: 1px solid rgba(0,200,240,.20) !important;
     width: 272px !important;
-    box-shadow: 6px 0 48px rgba(0,0,0,.80), inset -1px 0 0 rgba(0,200,240,.04);
+    box-shadow: 0 0 0 1px rgba(0,200,240,.06), 6px 0 42px rgba(0,0,0,.62), inset -1px 0 0 rgba(0,200,240,.12), inset 0 1px 0 rgba(255,255,255,.08);
+    backdrop-filter: blur(14px) saturate(1.08);
+    -webkit-backdrop-filter: blur(14px) saturate(1.08);
+    position: relative;
+    overflow: hidden;
 }
-section[data-testid="stSidebar"] * { color: #7ab8d4 !important; }
-
-/* Top edge glow on sidebar */
+section[data-testid="stSidebar"] > div {
+    position: relative;
+    z-index: 1;
+}
 section[data-testid="stSidebar"]::before {
     content: '';
-    display: block; height: 2px;
-    background: linear-gradient(90deg, transparent 10%, var(--cyan) 50%, transparent 90%);
+    position: absolute;
+    top: 0;
+    left: 10%;
+    right: 10%;
+    height: 2px;
+    background: linear-gradient(90deg, transparent 0%, var(--cyan) 52%, transparent 100%);
     animation: sidebar-top-glow 5s ease-in-out infinite;
+    pointer-events: none;
+    z-index: 2;
 }
+section[data-testid="stSidebar"]::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+        radial-gradient(80% 36% at 14% 0%, rgba(0,200,240,.10) 0%, transparent 70%),
+        radial-gradient(72% 42% at 88% 100%, rgba(255,48,80,.08) 0%, transparent 72%),
+        linear-gradient(135deg, rgba(255,255,255,.05) 0%, rgba(255,255,255,0) 45%);
+    opacity: .88;
+    pointer-events: none;
+}
+section[data-testid="stSidebar"] * { color: #8bc2dd !important; }
+
+/* Top edge glow on sidebar */
 @keyframes sidebar-top-glow {
     0%,100% { opacity: .35; }
-    50%      { opacity: .85; box-shadow: 0 0 14px var(--cyan); }
+    50%      { opacity: .92; box-shadow: 0 0 16px rgba(0,200,240,.55); }
 }
 
 /* Sidebar selectbox */
@@ -235,22 +247,6 @@ div[data-testid="stMetric"]::before {
     content: ''; position: absolute; inset: 0;
     background: linear-gradient(135deg, rgba(0,120,255,.07) 0%, transparent 50%);
     pointer-events: none;
-}
-/* Horizontal scan sweep */
-div[data-testid="stMetric"]::after {
-    content: ''; position: absolute;
-    top: 0; left: -100%; width: 55%; height: 100%;
-    background: linear-gradient(90deg,
-        transparent 0%,
-        rgba(0,200,240,.04) 40%,
-        rgba(0,200,240,.07) 50%,
-        rgba(0,200,240,.04) 60%,
-        transparent 100%);
-    animation: metric-scan 9s ease-in-out infinite;
-}
-@keyframes metric-scan {
-    0%   { left: -100%; }
-    100% { left: 200%;  }
 }
 div[data-testid="stMetric"] label {
     color: var(--muted) !important;
@@ -354,15 +350,63 @@ div[data-testid="stMetric"] [data-testid="stMetricDelta"] {
     border-radius: 7px !important; color: var(--text) !important;
 }
 
+/* High-contrast text + caret across all editable fields */
+.stApp input,
+.stApp textarea {
+    color: var(--text-hi) !important;
+    -webkit-text-fill-color: var(--text-hi) !important;
+    caret-color: var(--cyan) !important;
+}
+.stApp input::placeholder,
+.stApp textarea::placeholder {
+    color: #6d8db2 !important;
+    opacity: 1 !important;
+}
+.stApp input::selection,
+.stApp textarea::selection {
+    background: rgba(0,200,240,.35);
+    color: #f2f8ff;
+}
+.stApp input::-moz-selection,
+.stApp textarea::-moz-selection {
+    background: rgba(0,200,240,.35);
+    color: #f2f8ff;
+}
+.stApp div[data-baseweb="input"] > div {
+    background: rgba(2,8,20,.92) !important;
+    border-color: rgba(0,120,255,.20) !important;
+}
+.stApp div[data-baseweb="input"] input {
+    background: transparent !important;
+    color: var(--text-hi) !important;
+    -webkit-text-fill-color: var(--text-hi) !important;
+    caret-color: var(--cyan) !important;
+}
+.stApp div[data-baseweb="input"] input:focus,
+.stApp div[data-baseweb="textarea"] textarea:focus,
+.stDateInput input:focus {
+    color: var(--text-hi) !important;
+    -webkit-text-fill-color: var(--text-hi) !important;
+    caret-color: var(--cyan) !important;
+}
+
 /* ══════════════════════════════════════════════════════════════
    DATA FRAMES & CHARTS
 ══════════════════════════════════════════════════════════════ */
-.stDataFrame {
-    border: none !important;
+
+    border: 1px solid rgba(0,120,255,.15) !important;
     border-radius: 10px !important;
     overflow: hidden;
     box-shadow: none !important;
-    background: transparent !important;
+    background: rgba(2,8,18,.85) !important;
+    /* Keep tabular content above atmospheric background layers for readability. */
+    position: relative;
+    z-index: 4;
+}
+[data-testid="stDataFrame"] {
+    position: relative;
+    z-index: 4;
+
 }
 [data-testid="stArrowVegaLiteChart"] {
     border-radius: 12px !important; overflow: hidden;
@@ -463,6 +507,90 @@ p, label { color: var(--muted) !important; }
     transition: border-color .18s ease;
 }
 .list-row:hover { border-color: rgba(0,120,255,.26); }
+/* Dashboard hero + filter chips */
+.dashboard-hero {
+    background: linear-gradient(120deg, rgba(10, 26, 60, .78), rgba(8, 20, 45, .68));
+    border: 1px solid rgba(0, 200, 240, .24);
+    border-radius: 14px;
+    padding: .95rem 1.05rem;
+    margin: .25rem 0 .75rem 0;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, .38), inset 0 1px 0 rgba(255,255,255,.04);
+}
+.dashboard-hero-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: .6rem;
+}
+.dashboard-hero-stat {
+    background: rgba(4, 14, 34, .72);
+    border: 1px solid rgba(0, 120, 255, .20);
+    border-radius: 11px;
+    padding: .62rem .72rem;
+}
+.dashboard-hero-stat .k {
+    font-size: .62rem;
+    text-transform: uppercase;
+    letter-spacing: .14em;
+    color: #66ddf5;
+    font-family: 'Space Mono', monospace;
+}
+.dashboard-hero-stat .v {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #e6f1ff;
+    margin-top: .22rem;
+}
+.dashboard-filter-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: .35rem;
+    margin-top: .65rem;
+    font-size: .72rem;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: #77d8ee;
+    border: 1px solid rgba(0, 200, 240, .32);
+    border-radius: 999px;
+    padding: .28rem .62rem;
+    background: rgba(0, 200, 240, .08);
+    font-family: 'Space Mono', monospace;
+}
+
+/* Dashboard threshold tiles */
+.dashboard-threshold-card {
+    margin-bottom: .45rem;
+    padding: .74rem .92rem;
+    border-radius: 12px;
+    border: 1px solid rgba(20, 40, 80, .28);
+    background: linear-gradient(145deg, rgba(10,20,52,.76), rgba(7,17,39,.72));
+    backdrop-filter: blur(12px);
+    box-shadow: 0 4px 14px rgba(15,32,68,.10);
+    pointer-events: none;
+}
+.dashboard-threshold-card .title {
+    font-size: .65rem;
+    letter-spacing: .10em;
+    text-transform: uppercase;
+    font-weight: 700;
+}
+.dashboard-threshold-card .meta {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-top: .18rem;
+}
+.dashboard-threshold-card .count {
+    font-size: 1.95rem;
+    font-weight: 800;
+    color: #e8f1ff;
+    line-height: 1;
+}
+.dashboard-threshold-card .hint {
+    font-size: .67rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .07em;
+}
 
 /* ── Sidebar brand ── */
 .sidebar-brand {
@@ -484,26 +612,28 @@ p, label { color: var(--muted) !important; }
 /* ── Employee spotlight card ── */
 section[data-testid="stSidebar"] .sidebar-employee-card {
     margin-top: 1rem; padding: 1rem .9rem .85rem;
-    border-radius: 14px; border: 1px solid rgba(0,200,240,.26);
+    border-radius: 14px; border: 1px solid rgba(0,200,240,.20);
     background: rgba(4,6,18,0.92); backdrop-filter: blur(14px);
     box-shadow: 0 12px 36px rgba(0,0,0,.65), inset 0 1px 0 rgba(255,255,255,.025);
     position: relative; overflow: hidden;
 }
 section[data-testid="stSidebar"] .sidebar-employee-card::before {
     content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
-    background: linear-gradient(90deg, #00c8f0, #0078ff, #00c8f0);
+    background: linear-gradient(90deg, #00c8f0, #009ac8, #00e4ff);
     animation: card-top-border-glow 3s ease-in-out infinite;
 }
 @keyframes card-top-border-glow {
     0%,100% { opacity: .75; }
-    50% { opacity: 1; box-shadow: 0 0 16px rgba(0,200,240,.55); }
+    50% { opacity: 1; box-shadow: 0 0 16px rgba(0,200,240,.45); }
 }
 section[data-testid="stSidebar"] .sidebar-employee-title {
     font-size: .65rem; letter-spacing: .18em; text-transform: uppercase; font-weight: 700;
     color: var(--cyan) !important; -webkit-text-fill-color: var(--cyan) !important;
     font-family: 'Space Mono', monospace !important;
     text-shadow: 0 0 10px rgba(0,200,240,.45); margin-bottom: .42rem;
+    50% { opacity: 1; box-shadow: 0 0 16px rgba(0,200,240,.45); }
 }
+
 section[data-testid="stSidebar"] .sidebar-employee-name {
     font-size: 1.26rem; font-weight: 700;
     color: var(--text-hi) !important; -webkit-text-fill-color: var(--text-hi) !important;
@@ -666,14 +796,21 @@ div[data-testid="stMetric"]:nth-child(6) { animation-delay: 3.5s; }
 </style>""",
         unsafe_allow_html=True,
     )
-    # Atmospheric overlays disabled to keep table views clean and static.
-
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
-def get_conn():
-    conn = db.connect()
+def _db_cache_key() -> str:
+    return db.get_db_path()
+
+
+@st.cache_resource(show_spinner=False)
+def _get_cached_conn(db_key: str):
+    return db.connect()
+
+
+@st.cache_resource(show_spinner=False)
+def _initialize_database(db_key: str, repair_version: int) -> None:
+    conn = _get_cached_conn(db_key)
     ensure_schema(conn)
-    # ── Additive migration: point_warning_date column ─────────────────────────
     try:
         if is_pg(conn):
             exec_sql(conn, "ALTER TABLE employees ADD COLUMN IF NOT EXISTS point_warning_date DATE")
@@ -685,8 +822,42 @@ def get_conn():
                 conn.commit()
     except Exception:
         pass
-    return conn
 
+    bulk_recalc = getattr(services, "recalculate_all_employee_dates", None)
+    single_recalc = getattr(services, "recalculate_employee_dates", None)
+    if callable(bulk_recalc):
+        bulk_recalc(conn)
+    elif callable(single_recalc):
+        employee_rows = fetchall(conn, "SELECT employee_id FROM employees")
+        with db.tx(conn):
+            for row in employee_rows:
+                single_recalc(conn, int(row["employee_id"]))
+
+
+@st.cache_data(ttl=EMPLOYEE_CACHE_TTL_SECONDS, show_spinner=False)
+def _load_employees_cached(db_key: str, q: str, building: str) -> list[dict]:
+    conn = _get_cached_conn(db_key)
+    rows = [dict(r) for r in repo.search_employees(conn, q=q, limit=3000)]
+    if building != "All":
+        rows = [r for r in rows if (r.get("location") or "") == building]
+    return rows
+
+
+@st.cache_data(ttl=DASHBOARD_CACHE_TTL_SECONDS, show_spinner=False)
+def _fetchall_cached(db_key: str, sql: str, params: tuple = ()) -> list[dict]:
+    conn = _get_cached_conn(db_key)
+    return [dict(r) for r in fetchall(conn, sql, params)]
+
+
+def clear_read_caches() -> None:
+    _load_employees_cached.clear()
+    _fetchall_cached.clear()
+
+
+def get_conn():
+    db_key = _db_cache_key()
+    _initialize_database(db_key, POINT_BALANCE_REPAIR_VERSION)
+    return _get_cached_conn(db_key)
 
 def is_pg(conn) -> bool:
     return conn.__class__.__module__.startswith("psycopg2")
@@ -828,22 +999,23 @@ def is_authenticated() -> bool:
     """Auth requires the in-session auth flag plus token validation.
 
     During login submit, query params can lag one rerun behind session_state.
-    To avoid a flash of the login screen, allow a one-rerun grace period while
-    the URL token is being written.
+    To avoid a flash of the login screen, trust the in-session auth state while
+    the URL token handoff is still in progress.
     """
     session_token = st.session_state.get("_auth_token")
     url_token = st.query_params.get("_s")
     if not st.session_state.get("authenticated", False) or session_token is None:
         return False
 
-    if session_token == url_token:
-        st.session_state["_auth_redirect_pending"] = False
+    if st.session_state.get("_auth_redirect_pending"):
+        # Keep login transition seamless even when a stale URL token is present.
+        if session_token != url_token:
+            st.query_params["_s"] = session_token
+        else:
+            st.session_state["_auth_redirect_pending"] = False
         return True
 
-    if st.session_state.get("_auth_redirect_pending") and not url_token:
-        return True
-
-    return False
+    return session_token == url_token
 
 def _clamp(x: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, x))
@@ -1712,9 +1884,7 @@ def get_employee_spotlight(conn, employee_id: int | None) -> dict | None:
                    e.first_name,
                    e.last_name,
                    COALESCE(e."Location", '') AS building,
-                   GREATEST(0.0, ROUND(COALESCE((
-                       SELECT SUM(ph.points) FROM points_history ph WHERE ph.employee_id = e.employee_id
-                   ), 0.0)::numeric, 1)::float8) AS point_total,
+                   COALESCE(e.point_total, 0.0) AS point_total,
                    (
                        SELECT MAX(ph2.point_date::date)
                          FROM points_history ph2
@@ -1734,9 +1904,7 @@ def get_employee_spotlight(conn, employee_id: int | None) -> dict | None:
                    e.first_name,
                    e.last_name,
                    COALESCE(e."Location", '') AS building,
-                   MAX(0.0, ROUND(COALESCE((
-                       SELECT SUM(ph.points) FROM points_history ph WHERE ph.employee_id = e.employee_id
-                   ), 0.0), 1)) AS point_total,
+                   COALESCE(e.point_total, 0.0) AS point_total,
                    (
                        SELECT MAX(date(ph2.point_date))
                          FROM points_history ph2
@@ -1808,17 +1976,14 @@ def selected_employee_sidebar(conn, employee_id: int | None) -> None:
 
 
 def load_employees(conn, q: str = "", building: str = "All") -> list[dict]:
-    rows = [dict(r) for r in repo.search_employees(conn, q=q, limit=3000)]
-    if building != "All":
-        rows = [r for r in rows if (r.get("location") or "") == building]
-    return rows
+    return _load_employees_cached(_db_cache_key(), q, building)
 
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 def dashboard_page(conn, building: str) -> None:
     page_heading(
-        '<span class="live-dot"></span>Dashboard',
-        "Real-time overview of attendance activity, thresholds, and upcoming actions.",
+        '<span class="live-dot"></span>Active',
+        "Track attendance momentum, risk thresholds, and next actions in one polished workspace.",
     )
 
     today = date.today()
@@ -1831,13 +1996,16 @@ def dashboard_page(conn, building: str) -> None:
         info_box("No employees found for this building filter.")
         return
     ph = ",".join(["?" if not is_pg(conn) else "%s"] * len(emp_ids))
+    db_key = _db_cache_key()
 
-    def _scalar_n(conn, sql: str, params: tuple) -> int:
-        rows = fetchall(conn, sql, params)
+    def _read_rows(sql: str, params: tuple) -> list[dict]:
+        return _fetchall_cached(db_key, sql, tuple(params))
+
+    def _scalar_n(sql: str, params: tuple) -> int:
+        rows = _read_rows(sql, params)
         if not rows:
             return 0
-        r0 = dict(rows[0])
-        return int(r0.get("n") or 0)
+        return int(rows[0].get("n") or 0)
 
     # ── HR Live Monitor data ──────────────────────────────────────────────────
     since_24h = (today - timedelta(days=1)).isoformat()
@@ -1869,10 +2037,10 @@ def dashboard_page(conn, building: str) -> None:
                AND (perfect_attendance::date) <= (%s::date)
         """
 
-        points_24h = _scalar_n(conn, sql_points_since, (*emp_ids, since_24h))
-        points_7d = _scalar_n(conn, sql_points_since, (*emp_ids, since_7d))
-        rolloffs_due_7d = _scalar_n(conn, sql_roll_due_7d, (*emp_ids, today.isoformat(), due_7d))
-        perfect_due_7d = _scalar_n(conn, sql_perf_due_7d, (*emp_ids, today.isoformat(), due_7d))
+        points_24h = _scalar_n(sql_points_since, (*emp_ids, since_24h))
+        points_7d = _scalar_n(sql_points_since, (*emp_ids, since_7d))
+        rolloffs_due_7d = _scalar_n(sql_roll_due_7d, (*emp_ids, today.isoformat(), due_7d))
+        perfect_due_7d = _scalar_n(sql_perf_due_7d, (*emp_ids, today.isoformat(), due_7d))
 
     else:
         sql_points_since = f"""
@@ -1900,16 +2068,16 @@ def dashboard_page(conn, building: str) -> None:
                AND date(perfect_attendance) <= date(?)
         """
 
-        points_24h = _scalar_n(conn, sql_points_since, (*emp_ids, since_24h))
-        points_7d = _scalar_n(conn, sql_points_since, (*emp_ids, since_7d))
-        rolloffs_due_7d = _scalar_n(conn, sql_roll_due_7d, (*emp_ids, today.isoformat(), due_7d))
-        perfect_due_7d = _scalar_n(conn, sql_perf_due_7d, (*emp_ids, today.isoformat(), due_7d))
+        points_24h = _scalar_n(sql_points_since, (*emp_ids, since_24h))
+        points_7d = _scalar_n(sql_points_since, (*emp_ids, since_7d))
+        rolloffs_due_7d = _scalar_n(sql_roll_due_7d, (*emp_ids, today.isoformat(), due_7d))
+        perfect_due_7d = _scalar_n(sql_perf_due_7d, (*emp_ids, today.isoformat(), due_7d))
 
     if is_pg(conn):
         sql_emp_detail = f'''
             SELECT e.employee_id, e.last_name, e.first_name,
                    COALESCE(e."Location",'') AS building,
-                   GREATEST(0.0, ROUND(COALESCE(SUM(ph.points), 0.0)::numeric, 1)::float8) AS point_total,
+                   COALESCE(e.point_total, 0.0) AS point_total,
                    e.last_point_date, e.rolloff_date, e.perfect_attendance
               FROM employees e
               LEFT JOIN points_history ph ON ph.employee_id = e.employee_id
@@ -1954,7 +2122,7 @@ def dashboard_page(conn, building: str) -> None:
         sql_active_emp_points = '''
             SELECT e.employee_id,
                    COALESCE(e."Location", '') AS building,
-                   GREATEST(0.0, ROUND(COALESCE(SUM(ph.points), 0.0)::numeric, 1)::float8) AS point_total
+                   COALESCE(e.point_total, 0.0) AS point_total
               FROM employees e
               LEFT JOIN points_history ph ON ph.employee_id = e.employee_id
              WHERE COALESCE(e.is_active, 1) = 1
@@ -2090,9 +2258,7 @@ def dashboard_page(conn, building: str) -> None:
         sql_emp_detail = f'''
             SELECT e.employee_id, e.last_name, e.first_name,
                    COALESCE(e."Location",'') AS building,
-                   MAX(0.0, ROUND(COALESCE((
-                       SELECT SUM(ph.points) FROM points_history ph WHERE ph.employee_id = e.employee_id
-                   ), 0.0), 1)) AS point_total,
+                   COALESCE(e.point_total, 0.0) AS point_total,
                    e.last_point_date, e.rolloff_date, e.perfect_attendance
               FROM employees e
              WHERE e.employee_id IN ({ph})
@@ -2134,9 +2300,7 @@ def dashboard_page(conn, building: str) -> None:
         sql_active_emp_points = '''
             SELECT e.employee_id,
                    COALESCE(e."Location", '') AS building,
-                   MAX(0.0, ROUND(COALESCE((
-                       SELECT SUM(ph.points) FROM points_history ph WHERE ph.employee_id = e.employee_id
-                   ), 0.0), 1)) AS point_total
+                   COALESCE(e.point_total, 0.0) AS point_total
               FROM employees e
              WHERE COALESCE(e.is_active, 1) = 1
              GROUP BY e.employee_id, e."Location"
@@ -2268,15 +2432,15 @@ def dashboard_page(conn, building: str) -> None:
              ORDER BY total_points DESC, lower(e.last_name), lower(e.first_name)
         '''
 
-    emp_detail_rows = [dict(r) for r in fetchall(conn, sql_emp_detail, tuple(emp_ids))]
-    roll_due_rows = [dict(r) for r in fetchall(conn, sql_roll_due, (*emp_ids, today.isoformat(), in_30_days.isoformat()))]
-    perf_due_rows = [dict(r) for r in fetchall(conn, sql_perf_due, (*emp_ids, today.isoformat(), in_30_days.isoformat()))]
+    emp_detail_rows = _read_rows(sql_emp_detail, tuple(emp_ids))
+    roll_due_rows = _read_rows(sql_roll_due, (*emp_ids, today.isoformat(), in_30_days.isoformat()))
+    perf_due_rows = _read_rows(sql_perf_due, (*emp_ids, today.isoformat(), in_30_days.isoformat()))
 
     bucket_defs = {
-        "0": lambda pts: pts == 0,
-        "1-4": lambda pts: 1 <= pts <= 4.5,
-        "5-6": lambda pts: 5 <= pts <= 6.5,
-        "7": lambda pts: pts >= 7,
+        "gt1": lambda pts: pts > 1.0,
+        "1-4": lambda pts: 1.0 <= pts <= 4.5,
+        "5-6": lambda pts: 5.0 <= pts <= 6.5,
+        "7": lambda pts: pts >= 7.0,
     }
     bucket_counts = {
         key: sum(1 for r in emp_detail_rows if fn(float(r.get("point_total") or 0)))
@@ -2293,11 +2457,33 @@ def dashboard_page(conn, building: str) -> None:
         total_employees=total_active,
     )
 
+    active_bucket_label = "All Employees"
+    _bucket_label_map = {
+        "gt1": ">1.0 Point",
+        "1-4": "1.0-4.5 Pts",
+        "5-6": "5.0-6.5 Pts",
+        "7": "7.0+ Pts",
+    }
+    if st.session_state.get("dashboard_bucket") in _bucket_label_map:
+        active_bucket_label = _bucket_label_map[st.session_state["dashboard_bucket"]]
+
+    st.markdown(
+        f"""<div class='dashboard-hero'>
+                <div class='dashboard-hero-grid'>
+                    <div class='dashboard-hero-stat'><div class='k'>Active Employees</div><div class='v'>{total_active}</div></div>
+                    <div class='dashboard-hero-stat'><div class='k'>At Risk (5+)</div><div class='v'>{at_risk_5plus}</div></div>
+                    <div class='dashboard-hero-stat'><div class='k'>Rolloffs Due 7d</div><div class='v'>{rolloffs_due_7d}</div></div>
+                    <div class='dashboard-hero-stat'><div class='k'>Perfect Due 7d</div><div class='v'>{perfect_due_7d}</div></div>
+                </div>
+                <div class='dashboard-filter-pill'>Active threshold view: {active_bucket_label}</div>
+            </div>""",
+        unsafe_allow_html=True,
+    )
 
     st.markdown(
         """<style>
         .st-key-dashboard_bucket_all div[data-testid="stButton"],
-        .st-key-dashboard_bucket_0 div[data-testid="stButton"],
+        .st-key-dashboard_bucket_gt1 div[data-testid="stButton"],
         .st-key-dashboard_bucket_1-4 div[data-testid="stButton"],
         .st-key-dashboard_bucket_5-6 div[data-testid="stButton"],
         .st-key-dashboard_bucket_7 div[data-testid="stButton"] {
@@ -2306,7 +2492,7 @@ def dashboard_page(conn, building: str) -> None:
             z-index: 30;
         }
         .st-key-dashboard_bucket_all div[data-testid="stButton"] > button,
-        .st-key-dashboard_bucket_0 div[data-testid="stButton"] > button,
+        .st-key-dashboard_bucket_gt1 div[data-testid="stButton"] > button,
         .st-key-dashboard_bucket_1-4 div[data-testid="stButton"] > button,
         .st-key-dashboard_bucket_5-6 div[data-testid="stButton"] > button,
         .st-key-dashboard_bucket_7 div[data-testid="stButton"] > button {
@@ -2318,7 +2504,7 @@ def dashboard_page(conn, building: str) -> None:
             padding: 0 !important;
         }
         .st-key-dashboard_bucket_all div[data-testid="stButton"] > button p,
-        .st-key-dashboard_bucket_0 div[data-testid="stButton"] > button p,
+        .st-key-dashboard_bucket_gt1 div[data-testid="stButton"] > button p,
         .st-key-dashboard_bucket_1-4 div[data-testid="stButton"] > button p,
         .st-key-dashboard_bucket_5-6 div[data-testid="stButton"] > button p,
         .st-key-dashboard_bucket_7 div[data-testid="stButton"] > button p {
@@ -2332,35 +2518,34 @@ def dashboard_page(conn, building: str) -> None:
     tile_cols = st.columns(5)
     tile_specs = [
         ("all", "All Employees"),
-        ("0", "0 Points"),
-        ("1-4", "1–4.5 Pts"),
-        ("5-6", "5–6.5 Pts"),
-        ("7", "7+ Pts"),
+        ("gt1", ">1.0 Point"),
+        ("1-4", "1.0-4.5 Pts"),
+        ("5-6", "5.0-6.5 Pts"),
+        ("7", "7.0+ Pts"),
     ]
     active_bucket = st.session_state.get("dashboard_bucket")
 
     for col, (key, label) in zip(tile_cols, tile_specs):
         selected = (active_bucket == key) if key != "all" else (active_bucket not in bucket_defs)
         accent, glow = {
-            "all": ("#5c6f8c", "rgba(92,111,140,.22)"),
-            "0": ("#00a87a", "rgba(0,168,122,.25)"),
-            "1-4": ("#4f8ef7", "rgba(79,142,247,.25)"),
-            "5-6": ("#e6960a", "rgba(230,150,10,.28)"),
-            "7": ("#e0394a", "rgba(224,57,74,.32)"),
-        }.get(key, ("#5c6f8c", "rgba(92,111,140,.22)"))
-        # Keep style vars local and explicit to avoid NameError in f-string interpolation.
-        card_border = "rgba(26,39,68,.16)" if not selected else accent
-        card_shadow = f"0 0 0 2px {glow}, 0 8px 18px rgba(15,32,68,.12)" if selected else "0 4px 14px rgba(15,32,68,.08)"
+            "all": ("#87a4c6", "rgba(135,164,198,.22)"),
+            "gt1": ("#00d4ff", "rgba(0,212,255,.24)"),
+            "1-4": ("#2da8e8", "rgba(45,168,232,.24)"),
+            "5-6": ("#ff6a7f", "rgba(255,106,127,.30)"),
+            "7": ("#ff304f", "rgba(255,48,79,.34)"),
+        }.get(key, ("#87a4c6", "rgba(135,164,198,.22)"))
+        card_border = "rgba(24,49,92,.22)" if not selected else accent
+        card_shadow = f"0 0 0 2px {glow}, 0 10px 20px rgba(8,22,52,.22)" if selected else "0 6px 14px rgba(8,22,52,.18)"
         employees_count = len(emp_detail_rows) if key == "all" else bucket_counts[key]
+        hint = "selected" if selected else "tap to filter"
 
         col.markdown(
-            f"<div class='card-sm' style='margin-bottom:.45rem;padding:.72rem .9rem;"
-            f"background:rgba(10,20,52,0.65);border:1px solid {card_border};box-shadow:{card_shadow};cursor:pointer;pointer-events:none;backdrop-filter:blur(12px);'>"
-            f"<div style='height:4px;border-radius:999px;background:{accent};margin:-.2rem 0 .6rem 0'></div>"
-            f"<div style='font-size:.68rem;letter-spacing:.09em;text-transform:uppercase;color:{accent};font-weight:700'>{label}</div>"
-            f"<div style='display:flex;align-items:baseline;justify-content:space-between;margin-top:.18rem'>"
-            f"<span style='font-size:1.95rem;font-weight:800;color:#e8f1ff;line-height:1;text-shadow:0 0 18px rgba(79,142,247,.3)'>{employees_count}</span>"
-            f"<span style='font-size:.72rem;font-weight:700;color:{accent};text-transform:uppercase;letter-spacing:.05em'>&nbsp;employees</span>"
+            f"<div class='dashboard-threshold-card' style='border-color:{card_border};box-shadow:{card_shadow};'>"
+            f"<div style='height:4px;border-radius:999px;background:{accent};margin:-.2rem 0 .55rem 0;'></div>"
+            f"<div class='title' style='color:{accent}'>{label}</div>"
+            f"<div class='meta'>"
+            f"<span class='count'>{employees_count}</span>"
+            f"<span class='hint' style='color:{accent};'>{hint}</span>"
             f"</div></div>",
             unsafe_allow_html=True,
         )
@@ -2380,8 +2565,6 @@ def dashboard_page(conn, building: str) -> None:
         source_rows = list(emp_detail_rows)
         if bucket_key in bucket_defs:
             source_rows = [r for r in emp_detail_rows if bucket_defs[bucket_key](float(r.get("point_total") or 0))]
-            bucket_label_map = dict(tile_specs)
-            st.caption(f"Filtered by threshold tile: {bucket_label_map.get(bucket_key, bucket_key)}")
 
         source_rows = sorted(
             source_rows,
@@ -2421,7 +2604,7 @@ def dashboard_page(conn, building: str) -> None:
                     st.session_state["selected_employee_id"] = int(df_emps.iloc[idx]["employee_id"])
 
         else:
-            info_box("None 🎉")
+            info_box("No employees match the selected threshold.")
 
 
     with col_right:
@@ -2465,27 +2648,21 @@ def dashboard_page(conn, building: str) -> None:
     divider()
     section_label("Building Snapshot (Average Points per Employee)")
 
-    active_rows = [
-        dict(r)
-        for r in fetchall(
-            conn,
-            """SELECT COALESCE("Location", '') AS building, COUNT(*) AS n
-               FROM employees
-              WHERE COALESCE(is_active,1)=1
-              GROUP BY COALESCE("Location", '')""",
-        )
-    ]
-    avg_total_rows = [
-        dict(r)
-        for r in fetchall(
-            conn,
-            """SELECT COALESCE("Location", '') AS building,
-                      AVG(COALESCE(point_total, 0.0)) AS avg_point_total
-               FROM employees
-              WHERE COALESCE(is_active,1)=1
-              GROUP BY COALESCE("Location", '')""",
-        )
-    ]
+    active_rows = _read_rows(
+        """SELECT COALESCE("Location", '') AS building, COUNT(*) AS n
+           FROM employees
+          WHERE COALESCE(is_active,1)=1
+          GROUP BY COALESCE("Location", '')""",
+        (),
+    )
+    avg_total_rows = _read_rows(
+        """SELECT COALESCE("Location", '') AS building,
+                  AVG(COALESCE(point_total, 0.0)) AS avg_point_total
+           FROM employees
+          WHERE COALESCE(is_active,1)=1
+          GROUP BY COALESCE("Location", '')""",
+        (),
+    )
     active_by_build = {b: 0 for b in BUILDINGS}
     avg_total_by_build = {b: 0.0 for b in BUILDINGS}
     for r in active_rows:
@@ -2499,8 +2676,8 @@ def dashboard_page(conn, building: str) -> None:
     since_60 = (today - timedelta(days=60)).isoformat()
     tomorrow = (today + timedelta(days=1)).isoformat()
 
-    current_rows = [dict(r) for r in fetchall(conn, sql_build_points_window, (*emp_ids, since_30, tomorrow))]
-    prior_rows = [dict(r) for r in fetchall(conn, sql_build_points_window, (*emp_ids, since_60, since_30))]
+    current_rows = _read_rows(sql_build_points_window, (*emp_ids, since_30, tomorrow))
+    prior_rows = _read_rows(sql_build_points_window, (*emp_ids, since_60, since_30))
     current_points = {r.get("building") or "": float(r.get("pts") or 0.0) for r in current_rows}
     prior_points = {r.get("building") or "": float(r.get("pts") or 0.0) for r in prior_rows}
 
@@ -2517,7 +2694,7 @@ def dashboard_page(conn, building: str) -> None:
             pct_txt = f"{pct_change:+.1f}%"
         else:
             pct_txt = "—"
-        reason_rows = [dict(r) for r in fetchall(conn, sql_build_reasons, (since_30, b))]
+        reason_rows = _read_rows(sql_build_reasons, (since_30, b))
         most_common_reason = (reason_rows[0].get("reason") if reason_rows else None) or "—"
         snap_rows.append(
             {
@@ -2535,7 +2712,7 @@ def dashboard_page(conn, building: str) -> None:
     section_label("Forecasting")
 
     st.markdown("#### Employees > 1.0 Point (Last 30 Days)")
-    gt1_rows = [dict(r) for r in fetchall(conn, sql_insights_gt1, (since_30, *emp_ids, since_30))]
+    gt1_rows = _read_rows(sql_insights_gt1, (since_30, *emp_ids, since_30))
     if gt1_rows:
         df_gt1 = pd.DataFrame(
             [
@@ -2558,7 +2735,7 @@ def dashboard_page(conn, building: str) -> None:
         info_box("No employees over 1.0 points in the last 30 days.")
 
     st.markdown("#### Trending Risks  — On track to exceed 8 points")
-    pts60_rows = [dict(r) for r in fetchall(conn, sql_points_60d, (*emp_ids, since_60))]
+    pts60_rows = _read_rows(sql_points_60d, (*emp_ids, since_60))
     points60_by_emp = {int(r.get("employee_id")): float(r.get("points_60d") or 0.0) for r in pts60_rows}
     weekdays_60 = max(len(pd.bdate_range(start=today - timedelta(days=60), end=today)), 1)
     weekdays_30 = len(pd.bdate_range(start=today + timedelta(days=1), end=today + timedelta(days=30)))
@@ -2590,7 +2767,7 @@ def dashboard_page(conn, building: str) -> None:
         info_box("No active employees currently trend to 8.0+ points in the next 30 days.")
 
     st.markdown("#### Absenteeism Trend (90 Days)")
-    trend_rows = [dict(r) for r in fetchall(conn, sql_trend_90d, (*emp_ids, (today - timedelta(days=90)).isoformat()))]
+    trend_rows = _read_rows(sql_trend_90d, (*emp_ids, (today - timedelta(days=90)).isoformat()))
     # Merge on plain string dates to avoid pandas datetime-resolution mismatches
     # (bdate_range may return datetime64[ns] while pd.to_datetime from SQL strings
     #  returns datetime64[us] in newer pandas, causing silent merge failures).
@@ -2630,11 +2807,11 @@ def dashboard_page(conn, building: str) -> None:
 
     current_rows = [
         dict(r)
-        for r in fetchall(conn, sql_weekday_window, (*emp_ids, window_start.isoformat(), window_end.isoformat(), *emp_ids, window_start.isoformat(), window_end.isoformat()))
+        for r in _read_rows(sql_weekday_window, (*emp_ids, window_start.isoformat(), window_end.isoformat(), *emp_ids, window_start.isoformat(), window_end.isoformat()))
     ]
     prior_rows = [
         dict(r)
-        for r in fetchall(conn, sql_weekday_window, (*emp_ids, prior_start.isoformat(), prior_end.isoformat(), *emp_ids, prior_start.isoformat(), prior_end.isoformat()))
+        for r in _read_rows(sql_weekday_window, (*emp_ids, prior_start.isoformat(), prior_end.isoformat(), *emp_ids, prior_start.isoformat(), prior_end.isoformat()))
     ]
 
     current_by_dow = {
@@ -2681,14 +2858,10 @@ def dashboard_page(conn, building: str) -> None:
         selected_val = metric_value(stats, metric_choice)
         metric_values[dow] = selected_val
 
-        weekday_reason_rows = [
-            dict(r)
-            for r in fetchall(
-                conn,
-                sql_weekday_reason,
-                (*emp_ids, window_start.isoformat(), window_end.isoformat(), dow),
-            )
-        ]
+        weekday_reason_rows = _read_rows(
+            sql_weekday_reason,
+            (*emp_ids, window_start.isoformat(), window_end.isoformat(), dow),
+        )
         top_reason_day = (weekday_reason_rows[0].get("reason") if weekday_reason_rows else None) or "—"
 
         table_rows.append(
@@ -2714,14 +2887,10 @@ def dashboard_page(conn, building: str) -> None:
         sel_idx = selected_rows[0]
         sel_dow = dow_order[sel_idx]
         sel_label = dow_labels[sel_dow]
-        emp_rows = [
-            dict(r)
-            for r in fetchall(
-                conn,
-                sql_weekday_employees,
-                (*emp_ids, window_start.isoformat(), window_end.isoformat(), sel_dow),
-            )
-        ]
+        emp_rows = _read_rows(
+            sql_weekday_employees,
+            (*emp_ids, window_start.isoformat(), window_end.isoformat(), sel_dow),
+        )
         if emp_rows:
             st.markdown(f"**Employees pointed on {sel_label}s** ({window_start.strftime('%b %d')} – {window_end.strftime('%b %d, %Y')})")
             emp_display = pd.DataFrame([
@@ -2765,14 +2934,10 @@ def dashboard_page(conn, building: str) -> None:
         ch_dow, _, pct_txt = max(delta_rows, key=lambda x: x[1])
         st.markdown(f"• Biggest change vs prior matching window: **{dow_labels[ch_dow]}** — **{pct_txt}**")
 
-    reason_rows = [
-        dict(r)
-        for r in fetchall(
-            conn,
-            sql_weekday_reason,
-            (*emp_ids, window_start.isoformat(), window_end.isoformat(), worst_dow),
-        )
-    ]
+    reason_rows = _read_rows(
+        sql_weekday_reason,
+        (*emp_ids, window_start.isoformat(), window_end.isoformat(), worst_dow),
+    )
     top_reason = (reason_rows[0].get("reason") if reason_rows else None) or "—"
     if top_reason != "—":
         st.markdown(f"• Most common reason on {worst_label}: **{top_reason}**")
@@ -2816,6 +2981,17 @@ def _pto_metric(label: str, value: str, sub: str = "") -> None:
     )
 
 
+def _weekday_date_range(start_val, end_val):
+    """Inclusive weekday-only date range (Mon-Fri) for a PTO interval."""
+    if pd.isna(start_val) or pd.isna(end_val):
+        return []
+    start_ts = pd.Timestamp(start_val).normalize()
+    end_ts = pd.Timestamp(end_val).normalize()
+    if end_ts < start_ts:
+        start_ts, end_ts = end_ts, start_ts
+    return pd.bdate_range(start=start_ts, end=end_ts)
+
+
 def pto_page(conn, building: str) -> None:
     page_heading("PTO Usage Analytics", "Upload a CSV export to analyze PTO patterns by type, building, and employee.")
 
@@ -2833,20 +3009,23 @@ def pto_page(conn, building: str) -> None:
         active_count_in_scope = len(active_db)
 
     # ── Load persisted PTO data from DB into session state if not already loaded ──
+    def _set_session_pto_df(rows: list[dict]) -> bool:
+        if not rows:
+            return False
+        _df = pd.DataFrame([dict(r) for r in rows])
+        _df["start_date"] = pd.to_datetime(_df["start_date"], errors="coerce")
+        _df["end_date"] = pd.to_datetime(_df["end_date"], errors="coerce")
+        _df["hours"] = pd.to_numeric(_df["hours"], errors="coerce").fillna(0)
+        _df["building"] = _df["building"].astype(str).str.strip()
+        _df["pto_type"] = _df["pto_type"].astype(str).str.strip()
+        _df["employee"] = _df["last_name"].str.strip() + ", " + _df["first_name"].str.strip()
+        _df["days"] = (_df["hours"] / 8).round(2)
+        st.session_state["pto_df"] = _df
+        return True
+
     if "pto_df" not in st.session_state:
         try:
-            db_rows = repo.load_pto_data(conn)
-            if db_rows:
-                import pandas as _pd
-                _df = _pd.DataFrame([dict(r) for r in db_rows])
-                _df["start_date"] = _pd.to_datetime(_df["start_date"], errors="coerce")
-                _df["end_date"] = _pd.to_datetime(_df["end_date"], errors="coerce")
-                _df["hours"] = _pd.to_numeric(_df["hours"], errors="coerce").fillna(0)
-                _df["building"] = _df["building"].astype(str).str.strip()
-                _df["pto_type"] = _df["pto_type"].astype(str).str.strip()
-                _df["employee"] = _df["last_name"].str.strip() + ", " + _df["first_name"].str.strip()
-                _df["days"] = (_df["hours"] / 8).round(2)
-                st.session_state["pto_df"] = _df
+            _set_session_pto_df(repo.load_pto_data(conn))
         except Exception:
             pass  # No persisted data or schema not yet migrated
 
@@ -2932,14 +3111,17 @@ def pto_page(conn, building: str) -> None:
                         raw["end_date"] = pd.to_datetime(raw["end_date"], errors="coerce")
                         raw = raw.dropna(subset=["start_date", "end_date"])
                         raw = _normalize_and_filter(raw)
-                        st.session_state["pto_df"] = raw
-                        st.session_state.pop("pto_type_toggles", None)
                         try:
                             with db.tx(conn):
-                                repo.save_pto_data(conn, raw.to_dict("records"))
+                                stats = repo.save_pto_data(conn, raw.to_dict("records"))
+                            _set_session_pto_df(repo.load_pto_data(conn))
+                            st.session_state.pop("pto_type_toggles", None)
+                            st.success(
+                                f"Imported {stats['inserted']:,} new PTO record(s), skipped {stats['duplicate']:,} exact duplicate(s). "
+                                f"Total stored: {stats['total']:,}."
+                            )
                         except Exception as _save_err:
-                            st.warning(f"PTO data loaded but could not be saved to database: {_save_err}")
-                        st.success(f"Loaded {len(raw):,} PTO records for active employees.")
+                            st.warning(f"PTO data parsed but could not be saved to database: {_save_err}")
                 elif "date" in cols:
                     # Legacy single-day format — convert to range format
                     required = {"last_name", "first_name", "building", "pto_type", "date", "hours"}
@@ -2951,14 +3133,17 @@ def pto_page(conn, building: str) -> None:
                         raw["end_date"] = raw["start_date"]
                         raw = raw.dropna(subset=["start_date"])
                         raw = _normalize_and_filter(raw)
-                        st.session_state["pto_df"] = raw
-                        st.session_state.pop("pto_type_toggles", None)
                         try:
                             with db.tx(conn):
-                                repo.save_pto_data(conn, raw.to_dict("records"))
+                                stats = repo.save_pto_data(conn, raw.to_dict("records"))
+                            _set_session_pto_df(repo.load_pto_data(conn))
+                            st.session_state.pop("pto_type_toggles", None)
+                            st.success(
+                                f"Imported {stats['inserted']:,} new PTO record(s), skipped {stats['duplicate']:,} exact duplicate(s). "
+                                f"Total stored: {stats['total']:,} (legacy format upload)."
+                            )
                         except Exception as _save_err:
-                            st.warning(f"PTO data loaded but could not be saved to database: {_save_err}")
-                        st.success(f"Loaded {len(raw):,} PTO records for active employees (legacy format).")
+                            st.warning(f"PTO data parsed but could not be saved to database: {_save_err}")
                 else:
                     st.error("CSV must contain either `start_date`/`end_date` columns or a `date` column.")
             except Exception as exc:
@@ -3076,17 +3261,13 @@ def pto_page(conn, building: str) -> None:
     section_header("Summary")
     k1, k2, k3, k4 = st.columns(4)
     total_hours = df["hours"].sum()
-    # Count distinct calendar dates where ANY employee had PTO.
-    # Expand every record's start_date..end_date into individual dates,
+    # Count distinct weekday dates (Mon-Fri) where ANY employee had PTO.
+    # Expand every record's start_date..end_date into business days,
     # union across all employees, then count unique dates.
-    # Result is bounded by the filter range — 50 people on the same Monday = 1 day.
     _pto_date_set: set = set()
     for _sd, _ed in zip(df["start_date"], df["end_date"]):
-        if _sd == _ed:
-            _pto_date_set.add(_sd)
-        else:
-            for _d in pd.date_range(_sd, _ed):
-                _pto_date_set.add(_d)
+        for _d in _weekday_date_range(_sd, _ed):
+            _pto_date_set.add(pd.Timestamp(_d).normalize())
     total_dates_impacted = len(_pto_date_set)
     unique_emps = df["employee"].nunique()
     # Denominator is active DB headcount for the selected building — not the CSV
@@ -3192,14 +3373,27 @@ def pto_page(conn, building: str) -> None:
 
             # Aggregate per employee + PTO type:
             #   Hours Used   = sum of all hours for that employee+type
-            #   Days Impacted = count of individual PTO records (separate usage events)
+            #   Days Impacted = unique weekdays touched by PTO ranges (Mon-Fri only)
+            hours_agg = (
+                drill_src.groupby(["employee", "pto_type", "building"])["hours"]
+                .sum()
+                .reset_index(name="hours_used")
+            )
+            days_src = drill_src[["employee", "pto_type", "building", "start_date", "end_date"]].copy()
+            days_src["impact_date"] = days_src.apply(
+                lambda r: _weekday_date_range(r["start_date"], r["end_date"]),
+                axis=1,
+            )
+            days_src = days_src.explode("impact_date")
+            days_agg = (
+                days_src.groupby(["employee", "pto_type", "building"])["impact_date"]
+                .nunique()
+                .reset_index(name="days_impacted")
+            )
+
             drill = (
-                drill_src.groupby(["employee", "pto_type", "building"])
-                .agg(
-                    hours_used=("hours", "sum"),
-                    days_impacted=("hours", "count"),
-                )
-                .reset_index()
+                hours_agg.merge(days_agg, on=["employee", "pto_type", "building"], how="left")
+                .fillna({"days_impacted": 0})
                 .sort_values("hours_used", ascending=False)
                 .rename(columns={
                     "employee":      "Employee",
@@ -3210,6 +3404,7 @@ def pto_page(conn, building: str) -> None:
                 })
             )
             drill["Hours Used"] = drill["Hours Used"].round(1)
+            drill["Days Impacted"] = drill["Days Impacted"].astype(int)
 
             col_order = ["Employee", "PTO Type", "Hours Used", "Days Impacted", "Building"]
             st.dataframe(drill[col_order], use_container_width=True, hide_index=True)
@@ -3385,7 +3580,7 @@ def pto_page(conn, building: str) -> None:
     _pu_trace_cats: list[str] = []
     with pv_l:
         if not mcat.empty:
-            _CAT_CLR = {"Planned": "#7C5CFC", "Unplanned": "#D97706"}
+            _CAT_CLR = {"Planned": "#2684F0", "Unplanned": "#26F0DA"}
             pu_fig = go.Figure()
             for cat in ["Planned", "Unplanned"]:
                 sub = mcat[mcat["category"] == cat]
@@ -3519,17 +3714,54 @@ def pto_page(conn, building: str) -> None:
             _group = emp_hrs.head(10) if bar_label == "Top 10 Users" else emp_hrs.iloc[10:]
             _grp_names = set(_group["employee"])
             _grp_df = df[df["employee"].isin(_grp_names)]
-            _grp_agg = (
-                _grp_df.groupby("pto_type")["hours"].sum()
-                .reset_index()
-                .rename(columns={"pto_type": "PTO Type", "hours": "Hours"})
-                .sort_values("Hours", ascending=False)
+
+            if {"first_name", "last_name"}.issubset(_grp_df.columns):
+                _grp_df = _grp_df.copy()
+                _grp_df["First Name"] = _grp_df["first_name"].astype(str).str.strip()
+                _grp_df["Last Name"] = _grp_df["last_name"].astype(str).str.strip()
+            else:
+                _grp_df = _grp_df.copy()
+                _name_split = _grp_df["employee"].astype(str).str.split(",", n=1, expand=True)
+                _grp_df["Last Name"] = _name_split[0].fillna("").str.strip()
+                _grp_df["First Name"] = _name_split[1].fillna("").str.strip()
+
+            _hours_agg = (
+                _grp_df.groupby(["First Name", "Last Name", "pto_type"], as_index=False)["hours"]
+                .sum()
+                .rename(columns={"pto_type": "PTO Type", "hours": "Total Hours"})
             )
-            _grp_agg["Hours"] = _grp_agg["Hours"].round(1)
-            _grp_agg["Days"] = (_grp_agg["Hours"] / 8).round(1)
+
+            _days_df = _grp_df[["First Name", "Last Name", "pto_type", "start_date", "end_date"]].copy()
+            _days_df["impact_date"] = _days_df.apply(
+                lambda r: _weekday_date_range(r["start_date"], r["end_date"]),
+                axis=1,
+            )
+            _days_df = _days_df.explode("impact_date")
+            _days_agg = (
+                _days_df.groupby(["First Name", "Last Name", "pto_type"])["impact_date"]
+                .nunique()
+                .reset_index(name="Days Impacted")
+                .rename(columns={"pto_type": "PTO Type"})
+            )
+
+            _grp_agg = _hours_agg.merge(
+                _days_agg,
+                on=["First Name", "Last Name", "PTO Type"],
+                how="left",
+            )
+            _grp_agg["Total Hours"] = _grp_agg["Total Hours"].round(1)
+            _grp_agg["Days Impacted"] = _grp_agg["Days Impacted"].fillna(0).astype(int)
+            _grp_agg = _grp_agg.sort_values(
+                ["Total Hours", "Last Name", "First Name", "PTO Type"],
+                ascending=[False, True, True, True],
+            )
             divider()
-            section_label(f"PTO Breakdown — {bar_label}")
-            st.dataframe(_grp_agg, use_container_width=True, hide_index=True)
+            section_label(f"PTO Breakdown - {bar_label}")
+            st.dataframe(
+                _grp_agg[["First Name", "Last Name", "PTO Type", "Total Hours", "Days Impacted"]],
+                use_container_width=True,
+                hide_index=True,
+            )
 
     hist_pts = hist_event.selection.get("points", []) if (hist_event and hist_event.selection) else []
     if hist_pts:
@@ -3671,6 +3903,15 @@ def pto_page(conn, building: str) -> None:
         file_name=f"pto_export_{date_start}_{date_end}.csv",
         mime="text/csv",
     )
+    if st.button("Clear PTO Data", key="pto_clear_btn"):
+        st.session_state.pop("pto_df", None)
+        st.session_state.pop("pto_type_toggles", None)
+        try:
+            with db.tx(conn):
+                repo.clear_pto_data(conn)
+        except Exception:
+            pass
+        st.rerun()
 
     # ── Clear data ──────────────────────────────────────────────────────────
     divider()
@@ -3768,18 +4009,20 @@ def employees_page(conn, building: str) -> None:
 def points_ledger_page(conn, building: str) -> None:
     page_heading("Points Ledger", "Record attendance transactions and maintain a complete audit trail.")
 
+    notice = st.session_state.pop("ledger_notice", None)
+    if notice:
+        st.success(notice)
+
     employees = load_employees(conn, building=building)
     if not employees:
         warn_box("No active employees found for this building filter.")
         return
 
     opts = [
-        (int(e["employee_id"]), f"#{e['employee_id']} — {e['last_name']}, {e['first_name']}")
+        (int(e["employee_id"]), f"#{e['employee_id']} - {e['last_name']}, {e['first_name']}")
         for e in employees
     ]
 
-    # Employee picker (Streamlit selectbox has built-in type-to-search: focus it and start typing)
-    # Kept keyboard-friendly: Tab into the dropdown, type a few letters, use arrows + Enter.
     prev_emp = st.session_state.get("ledger_emp_id")
     default_idx = 0
     if prev_emp is not None:
@@ -3798,24 +4041,65 @@ def points_ledger_page(conn, building: str) -> None:
     emp_id = int(selected[0])
     st.session_state["ledger_emp_id"] = emp_id
 
-    # When the employee changes, nudge keyboard focus to the Date field (best-effort).
-    prev_focus_emp = st.session_state.get("_focus_emp_id")
-    if prev_focus_emp != emp_id:
-        st.session_state["_focus_emp_id"] = emp_id
+    ledger_date_key = f"ledger_date_str_{emp_id}"
+    ledger_points_key = f"ledger_points_{emp_id}"
+    ledger_reason_key = f"ledger_reason_{emp_id}"
+    ledger_note_key = f"ledger_note_{emp_id}"
+    ledger_flag_key = f"ledger_flag_{emp_id}"
+
+    def focus_ledger_date_field() -> None:
         components.html(
             """<script>
-            // best-effort focus: Streamlit renders inputs with aria-labels
-            const sel = () => document.querySelector('input[aria-label="Date (MM/DD/YYYY)"]');
-            const tryFocus = () => { const el = sel(); if (el) { el.focus(); el.select?.(); return true; } return false; };
+            const rootDoc = (window.parent && window.parent.document) ? window.parent.document : document;
+            const selectors = [
+              'input[aria-label="Date (MM/DD/YYYY)"]',
+              'input[placeholder="MM/DD/YYYY"]',
+              'div[data-testid="stTextInput"] input'
+            ];
+            const sel = () => {
+              for (const s of selectors) {
+                const el = rootDoc.querySelector(s);
+                if (el && !el.disabled) return el;
+              }
+              return null;
+            };
+            const tryFocus = () => {
+              const el = sel();
+              if (!el) return false;
+              el.focus({ preventScroll: true });
+              if (typeof el.select === "function") el.select();
+              return true;
+            };
             let tries = 0;
-            const t = setInterval(() => { tries++; if (tryFocus() || tries > 20) clearInterval(t); }, 100);
+            if (!tryFocus()) {
+              const t = setInterval(() => {
+                tries += 1;
+                if (tryFocus() || tries > 40) clearInterval(t);
+              }, 75);
+            }
             </script>""",
             height=0,
         )
+
+    def set_ledger_notice(message: str) -> None:
+        st.session_state["ledger_notice"] = message
+
+    def parse_mdy(value: str) -> date:
+        return datetime.strptime(value.strip(), "%m/%d/%Y").date()
+
+    def format_mdy(value: str | None) -> str:
+        if not value:
+            return date.today().strftime("%m/%d/%Y")
+        return datetime.strptime(str(value)[:10], "%Y-%m-%d").strftime("%m/%d/%Y")
+
+    prev_focus_emp = st.session_state.get("_focus_emp_id")
+    if prev_focus_emp != emp_id:
+        st.session_state["_focus_emp_id"] = emp_id
+        focus_ledger_date_field()
+
     emp = dict(repo.get_employee(conn, emp_id))
     pts = float(emp.get("point_total") or 0)
 
-    # Status strip
     st.markdown(
         f"<div style='display:grid;grid-template-columns:repeat(4,1fr);gap:.7rem;margin:.55rem 0 1.2rem 0'>"
         f"<div class='card-sm'>"
@@ -3842,38 +4126,35 @@ def points_ledger_page(conn, building: str) -> None:
     with col_form:
         section_label("New Transaction")
         with st.form("ledger_entry", clear_on_submit=False):
-            # Keyboard-first entry order (Tab works naturally in this top-to-bottom layout)
-            # Date in MM/DD/YYYY (text input is faster than clicking a date picker for batch work)
             date_str = st.text_input(
                 "Date (MM/DD/YYYY)",
                 value=date.today().strftime("%m/%d/%Y"),
                 placeholder="MM/DD/YYYY",
-                key="ledger_date_str",
+                key=ledger_date_key,
             )
 
             points = st.selectbox(
                 "Points",
                 [0.5, 1.0, 1.5],
                 index=0,
-                key="ledger_points",
+                key=ledger_points_key,
             )
 
             reason = st.selectbox(
                 "Reason",
-                ["Tardy/Early Leave", "Absence", "No Call/No Show"],
+                REASON_OPTIONS,
                 index=0,
-                key="ledger_reason",
+                key=ledger_reason_key,
             )
 
-            note = st.text_input("Note (optional)", key="ledger_note")
-            flag_code = st.text_input("Flag code (optional)", key="ledger_flag")
+            note = st.text_input("Note (optional)", key=ledger_note_key)
+            flag_code = st.text_input("Flag code (optional)", key=ledger_flag_key)
 
             submit = st.form_submit_button("Add Point", use_container_width=True)
 
         if submit:
-            # Parse MM/DD/YYYY
             try:
-                p_date = datetime.strptime(date_str.strip(), "%m/%d/%Y").date()
+                p_date = parse_mdy(date_str)
             except Exception:
                 st.error("Invalid date. Use MM/DD/YYYY (example: 03/02/2026).")
             else:
@@ -3883,15 +4164,40 @@ def points_ledger_page(conn, building: str) -> None:
                     try:
                         preview = services.preview_add_point(emp_id, p_date, float(points), reason, note)
                         services.add_point(conn, preview, flag_code=(flag_code or "").strip() or None)
-                        st.success(f"Added {float(points):.1f} pts on {fmt_date(p_date)}.")
+                        clear_read_caches()
+                        set_ledger_notice(f"Added {float(points):.1f} pts on {fmt_date(p_date)}.")
                         st.rerun()
                     except Exception as exc:
                         st.error(str(exc))
 
+        section_label("Repair Totals")
+        st.caption("Employee totals are calculated from transaction history. Recalculate after correcting a bad roll-off or manual entry.")
+        repair_col1, repair_col2 = st.columns(2)
+        with repair_col1:
+            if st.button("Recalculate Employee", key=f"repair_emp_{emp_id}", use_container_width=True):
+                try:
+                    with db.tx(conn):
+                        services.recalculate_employee_dates(conn, emp_id)
+                    clear_read_caches()
+                    set_ledger_notice(f"Recalculated point totals for employee #{emp_id}.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+        with repair_col2:
+            if st.button("Recalculate Everyone", key="repair_all_employees", use_container_width=True):
+                try:
+                    services.recalculate_all_employee_dates(conn)
+                    clear_read_caches()
+                    set_ledger_notice("Recalculated point totals for all employees.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
 
     with col_hist:
         section_label("Transaction History (all events)")
-        hist = [dict(r) for r in repo.get_points_history(conn, emp_id, limit=5000)]
+        history_limit_key = f"ledger_history_limit_{emp_id}"
+        current_history_limit = int(st.session_state.get(history_limit_key, LEDGER_HISTORY_DEFAULT_LIMIT))
+        hist = [dict(r) for r in repo.get_points_history(conn, emp_id, limit=current_history_limit)]
         if hist:
             df_h = pd.DataFrame(hist)[["id", "point_date", "points", "reason", "note", "point_total"]]
             df_h["point_date"] = df_h["point_date"].apply(fmt_date)
@@ -3899,10 +4205,104 @@ def points_ledger_page(conn, building: str) -> None:
             df_h["point_total"] = df_h["point_total"].apply(lambda v: f"{float(v or 0):.1f}")
             df_h.columns = ["ID", "Date", "Pts", "Reason", "Note", "Running Total"]
             st.dataframe(df_h.drop(columns=["ID"]), use_container_width=True, hide_index=True, height=430)
+
+            if len(hist) >= current_history_limit and current_history_limit < LEDGER_HISTORY_FULL_LIMIT:
+                if st.button("Load Full History", key=f"load_full_history_{emp_id}"):
+                    st.session_state[history_limit_key] = LEDGER_HISTORY_FULL_LIMIT
+                    st.rerun()
+
             if st.button("Undo Last Entry", key="undo_last"):
                 try:
                     services.delete_point_history_entry(conn, point_id=int(df_h.iloc[0]["ID"]), employee_id=emp_id)
-                    st.success("Last entry removed.")
+                    clear_read_caches()
+                    set_ledger_notice("Last entry removed.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+
+            section_label("Edit Transaction")
+            entry_options = [
+                (
+                    int(row["id"]),
+                    f"{fmt_date(row.get('point_date'))} | {float(row.get('points') or 0):+.1f} | {row.get('reason') or 'No reason'}",
+                )
+                for row in hist
+            ]
+            selected_entry = st.selectbox(
+                "Select transaction",
+                entry_options,
+                format_func=lambda x: x[1],
+                key=f"ledger_edit_entry_{emp_id}",
+            )
+            selected_point_id = int(selected_entry[0])
+            selected_row = next(row for row in hist if int(row["id"]) == selected_point_id)
+
+            with st.form(f"ledger_edit_form_{emp_id}_{selected_point_id}", clear_on_submit=False):
+                edit_date_str = st.text_input(
+                    "Date (MM/DD/YYYY)",
+                    value=format_mdy(selected_row.get("point_date")),
+                    key=f"ledger_edit_date_{selected_point_id}",
+                )
+                edit_points = st.number_input(
+                    "Points",
+                    value=float(selected_row.get("points") or 0.0),
+                    step=0.5,
+                    format="%.1f",
+                    key=f"ledger_edit_points_{selected_point_id}",
+                )
+                edit_reason = st.text_input(
+                    "Reason",
+                    value=str(selected_row.get("reason") or ""),
+                    key=f"ledger_edit_reason_{selected_point_id}",
+                )
+                edit_note = st.text_input(
+                    "Note",
+                    value=str(selected_row.get("note") or ""),
+                    key=f"ledger_edit_note_{selected_point_id}",
+                )
+                edit_flag_code = st.text_input(
+                    "Flag code",
+                    value=str(selected_row.get("flag_code") or ""),
+                    key=f"ledger_edit_flag_{selected_point_id}",
+                )
+
+                save_col, delete_col = st.columns(2)
+                save_entry = save_col.form_submit_button("Save Entry", use_container_width=True)
+                delete_entry = delete_col.form_submit_button("Delete Entry", use_container_width=True)
+
+            st.caption(f"Running total after this entry: {float(selected_row.get('point_total') or 0):.1f} pts")
+
+            if save_entry:
+                try:
+                    edit_date = parse_mdy(edit_date_str)
+                except Exception:
+                    st.error("Invalid date. Use MM/DD/YYYY (example: 03/02/2026).")
+                else:
+                    if edit_date > date.today():
+                        st.error("Date cannot be in the future.")
+                    else:
+                        try:
+                            services.update_point_history_entry(
+                                conn,
+                                point_id=selected_point_id,
+                                employee_id=emp_id,
+                                point_date=edit_date,
+                                points=float(edit_points),
+                                reason=edit_reason,
+                                note=edit_note,
+                                flag_code=(edit_flag_code or "").strip() or None,
+                            )
+                            clear_read_caches()
+                            set_ledger_notice(f"Updated transaction #{selected_point_id}.")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(str(exc))
+
+            if delete_entry:
+                try:
+                    services.delete_point_history_entry(conn, point_id=selected_point_id, employee_id=emp_id)
+                    clear_read_caches()
+                    set_ledger_notice(f"Deleted transaction #{selected_point_id}.")
                     st.rerun()
                 except Exception as exc:
                     st.error(str(exc))
@@ -3910,7 +4310,7 @@ def points_ledger_page(conn, building: str) -> None:
             info_box("No history entries for this employee yet.")
 
 
-# ── Manage Employees ──────────────────────────────────────────────────────────
+
 def manage_employees_page(conn) -> None:
     page_heading("Manage Employees", "Onboard new employees, update details, archive, or permanently delete records.")
 
@@ -3924,19 +4324,28 @@ def manage_employees_page(conn) -> None:
 
         with col_form:
             with st.form("add_employee", clear_on_submit=True):
-                emp_id   = st.number_input("Employee #", min_value=1, step=1)
-                first    = st.text_input("First Name")
-                last     = st.text_input("Last Name")
-                location = st.selectbox("Building", BLDG_OPTS)
-                added    = st.form_submit_button("Add Employee", use_container_width=True)
+                emp_id     = st.number_input("Employee #", min_value=1, step=1)
+                first      = st.text_input("First Name")
+                last       = st.text_input("Last Name")
+                start_date = st.date_input("Hire / Start Date", value=date.today())
+                location   = st.selectbox("Building", BLDG_OPTS)
+                added      = st.form_submit_button("Add Employee", use_container_width=True)
 
             if added:
                 if not first.strip() or not last.strip():
                     st.error("First and last name are required.")
                 else:
                     try:
-                        services.create_employee(conn, int(emp_id), last.strip(), first.strip(), location or None)
+                        services.create_employee(
+                            conn,
+                            int(emp_id),
+                            last.strip(),
+                            first.strip(),
+                            start_date,
+                            location or None,
+                        )
                         conn.commit()
+                        clear_read_caches()
                         st.success(f"Employee #{int(emp_id)} — {last}, {first} added.")
                     except Exception as exc:
                         st.error(str(exc))
@@ -3971,6 +4380,11 @@ def manage_employees_page(conn) -> None:
         emp = dict(repo.get_employee(conn, sel[0]))
         loc_val = emp.get("Location") or emp.get("location") or ""
         loc_idx = BLDG_OPTS.index(loc_val) if loc_val in BLDG_OPTS else 0
+        start_raw = str(emp.get("start_date") or "")[:10]
+        try:
+            start_val = date.fromisoformat(start_raw) if start_raw else date.today()
+        except ValueError:
+            start_val = date.today()
 
         col_edit, col_del = st.columns([1, 1], gap="large")
 
@@ -3979,6 +4393,7 @@ def manage_employees_page(conn) -> None:
             with st.form("edit_employee"):
                 first_e = st.text_input("First Name", value=emp.get("first_name") or "")
                 last_e  = st.text_input("Last Name",  value=emp.get("last_name") or "")
+                start_e = st.date_input("Hire / Start Date", value=start_val)
                 bldg_e  = st.selectbox("Building", BLDG_OPTS, index=loc_idx)
                 act_e   = st.checkbox("Active", value=bool(emp.get("is_active", 1)))
                 saved   = st.form_submit_button("Save Changes", use_container_width=True)
@@ -3987,10 +4402,14 @@ def manage_employees_page(conn) -> None:
                 try:
                     exec_sql(
                         conn,
-                        'UPDATE employees SET first_name=?, last_name=?, "Location"=?, is_active=? WHERE employee_id=?',
-                        (first_e.strip(), last_e.strip(), bldg_e or None, 1 if act_e else 0, sel[0]),
+                        'UPDATE employees SET first_name=?, last_name=?, start_date=?, "Location"=?, is_active=? WHERE employee_id=?',
+                        (first_e.strip(), last_e.strip(), start_e.isoformat(), bldg_e or None, 1 if act_e else 0, sel[0]),
                     )
+                    if start_raw != start_e.isoformat():
+                        exec_sql(conn, 'UPDATE employees SET perfect_attendance=NULL WHERE employee_id=?', (sel[0],))
+                    services.recalculate_employee_dates(conn, sel[0])
                     conn.commit()
+                    clear_read_caches()
                     st.success("Changes saved.")
                     st.rerun()
                 except Exception as exc:
@@ -4010,6 +4429,7 @@ def manage_employees_page(conn) -> None:
                     try:
                         services.delete_employee(conn, sel[0])
                         conn.commit()
+                        clear_read_caches()
                         st.success(f"Employee #{sel[0]} deleted.")
                         st.rerun()
                     except Exception as exc:
@@ -4030,16 +4450,71 @@ def run_export_query(conn, export_type: str, building: str, start_date: date, en
 
     if export_type == "30-day point history":
         if pg:
-            sql = """SELECT e.employee_id, e.last_name, e.first_name, COALESCE(e."Location",'') AS location,
-                            p.point_date, p.points, p.reason, COALESCE(p.note,'') AS note
-                       FROM points_history p JOIN employees e ON e.employee_id=p.employee_id
-                      WHERE (p.point_date::date) BETWEEN (%s::date) AND (%s::date)"""
+            sql = """
+                SELECT e.employee_id AS "Employee #",
+                       e.last_name AS "Last Name",
+                       e.first_name AS "First Name",
+                       COALESCE(e."Location", '') AS "Location",
+                       ph.id AS "_History ID",
+                       ph.point_date AS "Point Date",
+                       ph.points AS "Point",
+                       ph.reason AS "Reason",
+                       COALESCE(ph.note, '') AS "Note"
+                  FROM points_history ph
+                  JOIN employees e ON e.employee_id = ph.employee_id
+            """
         else:
-            sql = """SELECT e.employee_id, e.last_name, e.first_name, COALESCE(e."Location",'') AS location,
-                            p.point_date, p.points, p.reason, COALESCE(p.note,'') AS note
-                       FROM points_history p JOIN employees e ON e.employee_id=p.employee_id
-                      WHERE date(p.point_date) BETWEEN date(?) AND date(?)"""
-        params = [start_date.isoformat(), end_date.isoformat()]
+            sql = """
+                SELECT e.employee_id AS "Employee #",
+                       e.last_name AS "Last Name",
+                       e.first_name AS "First Name",
+                       COALESCE(e."Location", '') AS "Location",
+                       ph.id AS "_History ID",
+                       ph.point_date AS "Point Date",
+                       ph.points AS "Point",
+                       ph.reason AS "Reason",
+                       COALESCE(ph.note, '') AS "Note"
+                  FROM points_history ph
+                  JOIN employees e ON e.employee_id = ph.employee_id
+            """
+        params = []
+        if building != "All":
+            sql += " WHERE COALESCE(e.\"Location\", '') = ?"
+            params.append(building)
+        if pg:
+            sql += ' ORDER BY "Employee #", (ph.point_date::date), "_History ID"'
+        else:
+            sql += ' ORDER BY "Employee #", date(ph.point_date), "_History ID"'
+
+        rows = [dict(r) for r in fetchall(conn, sql, tuple(params))]
+        running_by_employee: dict[int, float] = {}
+        export_rows: list[dict] = []
+        start_iso = start_date.isoformat()
+        end_iso = end_date.isoformat()
+
+        for row in rows:
+            employee_id = int(row["Employee #"])
+            running_total = running_by_employee.get(employee_id, 0.0)
+            running_total = max(0.0, round(running_total + float(row.get("Point") or 0.0), 3))
+            running_by_employee[employee_id] = running_total
+
+            point_day = str(row.get("Point Date") or "")[:10]
+            if start_iso <= point_day <= end_iso:
+                row["Point Total"] = round(running_total, 1)
+                row.pop("_History ID", None)
+                export_rows.append(row)
+
+        df = pd.DataFrame(export_rows)
+        if not df.empty:
+            if "Point" in df.columns:
+                df["Point"] = pd.to_numeric(df["Point"], errors="coerce").map(
+                    lambda v: f"{v:.1f}" if pd.notna(v) else ""
+                )
+            if "Point Total" in df.columns:
+                df["Point Total"] = pd.to_numeric(df["Point Total"], errors="coerce").map(
+                    lambda v: f"{v:.1f}" if pd.notna(v) else ""
+                )
+        return df
 
     elif export_type == "upcoming 2-month roll-offs":
         if pg:
@@ -4091,7 +4566,19 @@ def run_export_query(conn, export_type: str, building: str, start_date: date, en
         params.append(building)
 
     sql += " ORDER BY last_name, first_name"
-    return pd.DataFrame([dict(r) for r in fetchall(conn, sql, tuple(params))])
+    df = pd.DataFrame([dict(r) for r in fetchall(conn, sql, tuple(params))])
+
+    if export_type == "30-day point history" and not df.empty:
+        if "Point" in df.columns:
+            df["Point"] = pd.to_numeric(df["Point"], errors="coerce").map(
+                lambda v: f"{v:.1f}" if pd.notna(v) else ""
+            )
+        if "Point Total" in df.columns:
+            df["Point Total"] = pd.to_numeric(df["Point Total"], errors="coerce").map(
+                lambda v: f"{v:.1f}" if pd.notna(v) else ""
+            )
+
+    return df
 
 
 def exports_page(conn, building: str) -> None:
@@ -4183,6 +4670,8 @@ def system_updates_page(conn) -> None:
         if btn_roll and ok:
             try:
                 rows = services.apply_2mo_rolloffs(conn, run_date=run_date, dry_run=dry_run)
+                if not dry_run:
+                    clear_read_caches()
                 st.session_state["maintenance_log"].append({
                     "Time": datetime.now().strftime("%H:%M:%S"),
                     "Job": "2-Month Roll-offs",
@@ -4202,6 +4691,8 @@ def system_updates_page(conn) -> None:
         if btn_perf and ok:
             try:
                 rows = services.advance_due_perfect_attendance_dates(conn, run_date=run_date, dry_run=dry_run)
+                if not dry_run:
+                    clear_read_caches()
                 st.session_state["maintenance_log"].append({
                     "Time": datetime.now().strftime("%H:%M:%S"),
                     "Job": "Perfect Attendance",
@@ -4221,6 +4712,8 @@ def system_updates_page(conn) -> None:
         if btn_ytd and ok:
             try:
                 rows = services.apply_ytd_rolloffs(conn, run_date=run_date, dry_run=dry_run)
+                if not dry_run:
+                    clear_read_caches()
                 st.session_state["maintenance_log"].append({
                     "Time": datetime.now().strftime("%H:%M:%S"),
                     "Job": "YTD Roll-offs",
@@ -4274,7 +4767,7 @@ def corrective_action_page(conn, building: str) -> None:
                    e.last_name,
                    e.first_name,
                    COALESCE(e."Location", '') AS building,
-                   GREATEST(0.0, ROUND(COALESCE(SUM(ph2.points), 0.0)::numeric, 1)::float8) AS point_total,
+                   COALESCE(e.point_total, 0.0) AS point_total,
                    MAX(ph2.point_date::date)::text AS last_point_date,
                    e.point_warning_date::text AS point_warning_date
               FROM employees e
@@ -4282,8 +4775,8 @@ def corrective_action_page(conn, building: str) -> None:
              WHERE e.employee_id IN ({ph})
                AND COALESCE(e.is_active, 1) = 1
              GROUP BY e.employee_id, e.last_name, e.first_name, e."Location", e.point_warning_date
-            HAVING GREATEST(0.0, ROUND(COALESCE(SUM(ph2.points), 0.0)::numeric, 1)::float8) >= 5.0
-             ORDER BY GREATEST(0.0, ROUND(COALESCE(SUM(ph2.points), 0.0)::numeric, 1)::float8) DESC,
+            HAVING COALESCE(e.point_total, 0.0) >= 5.0
+             ORDER BY COALESCE(e.point_total, 0.0) DESC,
                       lower(e.last_name), lower(e.first_name)
         """
     else:
@@ -4293,10 +4786,7 @@ def corrective_action_page(conn, building: str) -> None:
               FROM (
                 SELECT e.employee_id, e.last_name, e.first_name,
                        COALESCE(e."Location", '') AS building,
-                       MAX(0.0, ROUND(COALESCE((
-                           SELECT SUM(ph2.points) FROM points_history ph2
-                            WHERE ph2.employee_id = e.employee_id
-                       ), 0.0), 1)) AS point_total,
+                       COALESCE(e.point_total, 0.0) AS point_total,
                        (SELECT MAX(date(ph3.point_date)) FROM points_history ph3
                          WHERE ph3.employee_id = e.employee_id
                            AND COALESCE(ph3.points,0.0) > 0.0

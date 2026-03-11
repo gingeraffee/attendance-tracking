@@ -10,6 +10,10 @@ build/
 .venv/
 venv/
 .streamlit/
+backend/.venv/
+frontend/node_modules/
+frontend/.next/
+frontend/out/
 
 # DO NOT COMMIT HR DATA
 *.db

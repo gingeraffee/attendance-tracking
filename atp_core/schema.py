@@ -18,6 +18,7 @@ def ensure_schema(conn):
             employee_id BIGINT PRIMARY KEY,
             last_name TEXT NOT NULL,
             first_name TEXT NOT NULL,
+            start_date TEXT,
             point_total DOUBLE PRECISION DEFAULT 0.0,
             last_point_date TEXT,
             rolloff_date TEXT,
@@ -27,6 +28,8 @@ def ensure_schema(conn):
             "Location" TEXT
         );
         """)
+
+        cur.execute('ALTER TABLE employees ADD COLUMN IF NOT EXISTS start_date TEXT;')
 
         cur.execute("""
         CREATE TABLE IF NOT EXISTS points_history (
@@ -74,6 +77,7 @@ def ensure_schema(conn):
             employee_id INTEGER PRIMARY KEY,
             last_name TEXT NOT NULL,
             first_name TEXT NOT NULL,
+            start_date TEXT,
             point_total REAL DEFAULT 0,
             last_point_date TEXT,
             rolloff_date TEXT,
@@ -101,6 +105,8 @@ def ensure_schema(conn):
     cols = [r[1] for r in cur.fetchall()]
     if "Location" not in cols:
         cur.execute('ALTER TABLE employees ADD COLUMN "Location" TEXT;')
+    if "start_date" not in cols:
+        cur.execute('ALTER TABLE employees ADD COLUMN start_date TEXT;')
 
     cur.execute("""
         CREATE TABLE IF NOT EXISTS pto_uploads (
