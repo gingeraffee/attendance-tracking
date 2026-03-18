@@ -900,7 +900,7 @@ def first_value(rows, default=0):
 # â”€â”€ Format helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def fmt_date(val) -> str:
     if not val:
-        return "â€”"
+        return "-"
     if hasattr(val, "strftime"):
         return val.strftime("%m/%d/%Y")
     try:
@@ -939,7 +939,7 @@ def days_badge(days) -> str:
     """Colored HTML pill for days countdown."""
     s = "display:inline-block;padding:2px 8px;border-radius:6px;font-size:.78rem;font-weight:700;"
     if days is None:
-        return f"<span style='{s}color:#8fa0b8'>â€”</span>"
+        return f"<span style='{s}color:#8fa0b8'>-</span>"
     if days < 0:
         return f"<span style='{s}color:#e0394a;background:rgba(224,57,74,.09);border:1px solid rgba(224,57,74,.20)'>overdue {abs(days)}d</span>"
     if days == 0:
@@ -3946,7 +3946,7 @@ def employees_page(conn, building: str) -> None:
     emp = dict(repo.get_employee(conn, emp_id))
 
     pts = float(emp.get("point_total") or 0)
-    loc = emp.get("Location") or emp.get("location") or "â€”"
+    loc = emp.get("Location") or emp.get("location") or "-"
     active_flag = emp.get("is_active", 1)
 
     active_badge = (
@@ -3962,7 +3962,7 @@ def employees_page(conn, building: str) -> None:
         f"<div><h2 style='margin:0;font-size:1.3rem;font-weight:800;color:#d4e1f7'>"
         f"{emp.get('last_name')}, {emp.get('first_name')}</h2>"
         f"<div style='color:#6a8ab8;font-size:.85rem;margin-top:.2rem'>"
-        f"Employee #{emp_id} &nbsp;Â·&nbsp; {loc}</div></div>"
+        f"Employee #{emp_id} &nbsp;&middot;&nbsp; {loc}</div></div>"
         f"<div style='display:flex;gap:.4rem;align-items:center'>{pt_badge(pts)} {active_badge}</div>"
         f"</div></div>",
         unsafe_allow_html=True,
