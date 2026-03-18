@@ -4349,9 +4349,9 @@ def manage_employees_page(conn) -> None:
             st.markdown("<div style='height:2.5rem'></div>", unsafe_allow_html=True)
             st.markdown(
                 "<div class='info-box'><b>New employee checklist</b><br>"
-                "â€¢ Employee # must be unique across all locations<br>"
-                "â€¢ Building can be set now or updated later via the Edit tab<br>"
-                "â€¢ All policy dates are blank until the first point entry is posted</div>",
+                "&bull; Employee # must be unique across all locations<br>"
+                "&bull; Building can be set now or updated later via the Edit tab<br>"
+                "&bull; All policy dates are blank until the first point entry is posted</div>",
                 unsafe_allow_html=True,
             )
 
@@ -4395,11 +4395,11 @@ def manage_employees_page(conn) -> None:
                 act_e   = st.checkbox("Active", value=bool(emp.get("is_active", 1)))
                 rolloff_e = st.text_input(
                     "2-Month Roll-off Date (MM/DD/YYYY)",
-                    value=format_mdy(rolloff_raw) if rolloff_raw else "",
+                    value=(datetime.strptime(rolloff_raw, "%Y-%m-%d").strftime("%m/%d/%Y") if rolloff_raw else ""),
                 )
                 perfect_e = st.text_input(
                     "Perfect Attendance Date (MM/DD/YYYY)",
-                    value=format_mdy(perfect_raw) if perfect_raw else "",
+                    value=(datetime.strptime(perfect_raw, "%Y-%m-%d").strftime("%m/%d/%Y") if perfect_raw else ""),
                 )
                 st.caption("Leave either date blank to clear it.")
                 saved   = st.form_submit_button("Save Changes", use_container_width=True)
@@ -4408,8 +4408,8 @@ def manage_employees_page(conn) -> None:
                 try:
                     rolloff_clean = (rolloff_e or "").strip()
                     perfect_clean = (perfect_e or "").strip()
-                    rolloff_new_iso = parse_mdy(rolloff_clean).isoformat() if rolloff_clean else None
-                    perfect_new_iso = parse_mdy(perfect_clean).isoformat() if perfect_clean else None
+                    rolloff_new_iso = datetime.strptime(rolloff_clean, "%m/%d/%Y").date().isoformat() if rolloff_clean else None
+                    perfect_new_iso = datetime.strptime(perfect_clean, "%m/%d/%Y").date().isoformat() if perfect_clean else None
                     manual_dates_changed = (
                         (rolloff_new_iso != (rolloff_raw or None))
                         or (perfect_new_iso != (perfect_raw or None))
