@@ -1003,19 +1003,15 @@ def is_authenticated() -> bool:
     the URL token handoff is still in progress.
     """
     session_token = st.session_state.get("_auth_token")
-    url_token = st.query_params.get("_s")
     if not st.session_state.get("authenticated", False) or session_token is None:
         return False
 
+    # Keep the post-login transition seamless even if URL params lag by a rerun.
+    if st.query_params.get("_s") != session_token:
+        st.query_params["_s"] = session_token
     if st.session_state.get("_auth_redirect_pending"):
-        # Keep login transition seamless even when a stale URL token is present.
-        if session_token != url_token:
-            st.query_params["_s"] = session_token
-        else:
-            st.session_state["_auth_redirect_pending"] = False
-        return True
-
-    return session_token == url_token
+        st.session_state["_auth_redirect_pending"] = False
+    return True
 
 def _clamp(x: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, x))
