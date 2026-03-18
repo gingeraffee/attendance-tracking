@@ -1657,6 +1657,7 @@ def build_point_history_pdf(employee: dict, history: list[dict]) -> bytes:
     C_MUTED   = colors.HexColor("#64748B")   # secondary text
     C_DIVIDER = colors.HexColor("#E2E8F0")   # subtle border
     C_ROW_ALT = colors.HexColor("#F5F7FF")   # alternating row tint
+    C_STAT_BG = colors.HexColor("#F8FAFC")   # empty-state table background
     C_WHITE   = colors.white
 
     # â”€â”€ Page geometry â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -3937,7 +3938,7 @@ def employees_page(conn, building: str) -> None:
 
     # Detail view
     opts = [
-        (int(r["employee_id"]), f"#{r['employee_id']} â€” {r['last_name']}, {r['first_name']}")
+        (int(r["employee_id"]), f"#{r['employee_id']} - {r['last_name']}, {r['first_name']}")
         for r in rows
     ]
     selected = st.selectbox("View details for", opts, format_func=lambda x: x[1], label_visibility="collapsed")
@@ -4366,7 +4367,7 @@ def manage_employees_page(conn) -> None:
         opts = [
             (
                 int(r["employee_id"]),
-                f"#{r['employee_id']} â€” {r['last_name']}, {r['first_name']}"
+                f"#{r['employee_id']} - {r['last_name']}, {r['first_name']}"
                 + (" (inactive)" if not r.get("is_active", 1) else ""),
             )
             for r in all_rows
