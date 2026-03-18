@@ -4376,6 +4376,8 @@ def manage_employees_page(conn) -> None:
         loc_val = emp.get("Location") or emp.get("location") or ""
         loc_idx = BLDG_OPTS.index(loc_val) if loc_val in BLDG_OPTS else 0
         start_raw = str(emp.get("start_date") or "")[:10]
+        rolloff_raw = str(emp.get("rolloff_date") or "")[:10]
+        perfect_raw = str(emp.get("perfect_attendance") or "")[:10]
         try:
             start_val = date.fromisoformat(start_raw) if start_raw else date.today()
         except ValueError:
@@ -4391,18 +4393,45 @@ def manage_employees_page(conn) -> None:
                 start_e = st.date_input("Hire / Start Date", value=start_val)
                 bldg_e  = st.selectbox("Building", BLDG_OPTS, index=loc_idx)
                 act_e   = st.checkbox("Active", value=bool(emp.get("is_active", 1)))
+                rolloff_e = st.text_input(
+                    "2-Month Roll-off Date (MM/DD/YYYY)",
+                    value=format_mdy(rolloff_raw) if rolloff_raw else "",
+                )
+                perfect_e = st.text_input(
+                    "Perfect Attendance Date (MM/DD/YYYY)",
+                    value=format_mdy(perfect_raw) if perfect_raw else "",
+                )
+                st.caption("Leave either date blank to clear it.")
                 saved   = st.form_submit_button("Save Changes", use_container_width=True)
 
             if saved:
                 try:
+                    rolloff_clean = (rolloff_e or "").strip()
+                    perfect_clean = (perfect_e or "").strip()
+                    rolloff_new_iso = parse_mdy(rolloff_clean).isoformat() if rolloff_clean else None
+                    perfect_new_iso = parse_mdy(perfect_clean).isoformat() if perfect_clean else None
+                    manual_dates_changed = (
+                        (rolloff_new_iso != (rolloff_raw or None))
+                        or (perfect_new_iso != (perfect_raw or None))
+                    )
                     exec_sql(
                         conn,
-                        'UPDATE employees SET first_name=?, last_name=?, start_date=?, "Location"=?, is_active=? WHERE employee_id=?',
-                        (first_e.strip(), last_e.strip(), start_e.isoformat(), bldg_e or None, 1 if act_e else 0, sel[0]),
+                        'UPDATE employees SET first_name=?, last_name=?, start_date=?, "Location"=?, is_active=?, rolloff_date=?, perfect_attendance=? WHERE employee_id=?',
+                        (
+                            first_e.strip(),
+                            last_e.strip(),
+                            start_e.isoformat(),
+                            bldg_e or None,
+                            1 if act_e else 0,
+                            rolloff_new_iso,
+                            perfect_new_iso,
+                            sel[0],
+                        ),
                     )
-                    if start_raw != start_e.isoformat():
+                    if (start_raw != start_e.isoformat()) and not manual_dates_changed:
                         exec_sql(conn, 'UPDATE employees SET perfect_attendance=NULL WHERE employee_id=?', (sel[0],))
-                    services.recalculate_employee_dates(conn, sel[0])
+                    if not manual_dates_changed:
+                        services.recalculate_employee_dates(conn, sel[0])
                     conn.commit()
                     clear_read_caches()
                     st.success("Changes saved.")
