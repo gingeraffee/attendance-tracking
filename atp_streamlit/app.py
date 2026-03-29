@@ -4,6 +4,7 @@ Full remodel: clean layout, status badges, live countdown, improved workflows.
 from __future__ import annotations
 
 import base64
+import html
 from io import BytesIO
 from datetime import date, datetime, timedelta
 import math
@@ -940,27 +941,40 @@ def days_badge(days) -> str:
 
 
 def info_box(msg: str) -> None:
-    st.markdown(f"<div class='info-box'>{msg}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='info-box'>{_html_inline(msg)}</div>", unsafe_allow_html=True)
 
 
 def warn_box(msg: str) -> None:
-    st.markdown(f"<div class='warn-box'>{msg}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='warn-box'>{_html_inline(msg)}</div>", unsafe_allow_html=True)
+
+
+def _html_inline(text: object) -> str:
+    """Normalize punctuation for Streamlit raw-HTML blocks to avoid mojibake."""
+    return (
+        html.escape("" if text is None else str(text))
+        .replace("—", "&mdash;")
+        .replace("–", "&ndash;")
+        .replace("·", "&middot;")
+        .replace("•", "&bull;")
+        .replace("✓", "&#10003;")
+        .replace("×", "&times;")
+    )
 
 
 def page_heading(title: str, sub: str) -> None:
     st.markdown(
-        f"<div class='page-heading'><h1>{title}</h1>"
-        f"<div class='accent-bar'></div><p>{sub}</p></div>",
+        f"<div class='page-heading'><h1>{_html_inline(title)}</h1>"
+        f"<div class='accent-bar'></div><p>{_html_inline(sub)}</p></div>",
         unsafe_allow_html=True,
     )
 
 
 def section_label(text: str) -> None:
-    st.markdown(f"<div class='section-label'>{text}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='section-label'>{_html_inline(text)}</div>", unsafe_allow_html=True)
 
 
 def section_header(text: str) -> None:
-    st.markdown(f"<div class='section-header'>{text}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='section-header'>{_html_inline(text)}</div>", unsafe_allow_html=True)
 
 
 def divider() -> None:
@@ -1033,6 +1047,7 @@ def render_hr_live_monitor(
       - Red   : 81 %+  (pulsing)
     """
     # ── PTO color override ────────────────────────────────────────────────────
+    safe_label = _html_inline(label)
     if pto_utilization_pct is not None:
         p = pto_utilization_pct
         if p <= 50.0:
@@ -1058,6 +1073,7 @@ def render_hr_live_monitor(
   0%,100% { opacity: 0.65; }
   50%      { opacity: 1.0;  }
 """ if pulse else ""
+        safe_status = _html_inline(status)
 
         st.markdown(
             f"""<style>
@@ -1090,8 +1106,8 @@ def render_hr_live_monitor(
 </style>
 <div class="hr-monitor-wrap">
   <div class="hr-monitor-top">
-    <div class="hr-monitor-label">{label}</div>
-    <div class="hr-monitor-status">{status}</div>
+    <div class="hr-monitor-label">{safe_label}</div>
+    <div class="hr-monitor-status">{safe_status}</div>
   </div>
   <div class="hr-live-monitor"></div>
 </div>""",
@@ -1133,6 +1149,7 @@ def render_hr_live_monitor(
         status = "Busy"
     else:
         status = "Hot"
+    safe_status = _html_inline(status)
 
     # Render
     st.markdown(
@@ -1205,8 +1222,8 @@ def render_hr_live_monitor(
 
 <div class="hr-monitor-wrap">
   <div class="hr-monitor-top">
-    <div class="hr-monitor-label">{label}</div>
-    <div class="hr-monitor-status">{status} · 24h:{points_24h} · 7d:{points_7d} · due7d:{rolloffs_due_7d + perfect_due_7d}</div>
+    <div class="hr-monitor-label">{safe_label}</div>
+    <div class="hr-monitor-status">{safe_status} &middot; 24h:{points_24h} &middot; 7d:{points_7d} &middot; due7d:{rolloffs_due_7d + perfect_due_7d}</div>
   </div>
   <div class="hr-live-monitor"></div>
 </div>
@@ -2804,12 +2821,16 @@ _PTO_SAMPLE_CSV = (
 
 
 def _pto_metric(label: str, value: str, sub: str = "") -> None:
-    sub_html = f"<div style='font-size:.75rem;color:#6b8cba;margin-top:.2rem'>{sub}</div>" if sub else ""
+    sub_html = (
+        f"<div style='font-size:.75rem;color:#6b8cba;margin-top:.2rem'>{_html_inline(sub)}</div>"
+        if sub
+        else ""
+    )
     st.markdown(
         f"<div style='background:#0d1b2e;border:1px solid #1a3a5c;border-radius:10px;"
         f"padding:1rem 1.25rem;text-align:center'>"
-        f"<div style='font-size:.78rem;color:#4a7fa5;text-transform:uppercase;letter-spacing:.08em'>{label}</div>"
-        f"<div style='font-size:1.8rem;font-weight:700;color:#e8f4fd;line-height:1.2;margin-top:.3rem'>{value}</div>"
+        f"<div style='font-size:.78rem;color:#4a7fa5;text-transform:uppercase;letter-spacing:.08em'>{_html_inline(label)}</div>"
+        f"<div style='font-size:1.8rem;font-weight:700;color:#e8f4fd;line-height:1.2;margin-top:.3rem'>{_html_inline(value)}</div>"
         f"{sub_html}</div>",
         unsafe_allow_html=True,
     )
