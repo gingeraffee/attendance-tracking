@@ -958,10 +958,34 @@ def warn_box(msg: str) -> None:
     st.markdown(f"<div class='warn-box'>{_html_inline(msg)}</div>", unsafe_allow_html=True)
 
 
+def _repair_mojibake(text: object) -> str:
+    repaired = "" if text is None else str(text)
+    replacements = {
+        "Ã¢â‚¬â€": "—",
+        "â€”": "—",
+        "Ã¢â‚¬â€œ": "–",
+        "â€“": "–",
+        "Ã¢â‚¬Â¢": "•",
+        "â€¢": "•",
+        "Ã¢Å“â€œ": "✓",
+        "âœ“": "✓",
+        "Ãƒâ€”": "×",
+        "Ã—": "×",
+        "ÃƒÂ·": "÷",
+        "Â·": "·",
+        "Ã¢Å â€¢": "⊕",
+        "Ã°Å¸Å½â€°": "🎉",
+    }
+    for bad, good in replacements.items():
+        repaired = repaired.replace(bad, good)
+    return repaired
+
+
 def _html_inline(text: object) -> str:
     """Normalize punctuation for Streamlit raw-HTML blocks to avoid mojibake."""
+    repaired = _repair_mojibake(text)
     return (
-        html.escape("" if text is None else str(text))
+        html.escape(repaired)
         .replace("—", "&mdash;")
         .replace("–", "&ndash;")
         .replace("·", "&middot;")
@@ -971,9 +995,11 @@ def _html_inline(text: object) -> str:
     )
 
 
-def page_heading(title: str, sub: str) -> None:
+def page_heading(title: str, sub: str, *, allow_title_html: bool = False) -> None:
+    repaired_title = _repair_mojibake(title)
+    title_html = repaired_title if allow_title_html else _html_inline(repaired_title)
     st.markdown(
-        f"<div class='page-heading'><h1>{_html_inline(title)}</h1>"
+        f"<div class='page-heading'><h1>{title_html}</h1>"
         f"<div class='accent-bar'></div><p>{_html_inline(sub)}</p></div>",
         unsafe_allow_html=True,
     )
@@ -1943,17 +1969,23 @@ def selected_employee_sidebar(conn, employee_id: int | None) -> None:
     if not emp:
         return
     full_name = f"{emp.get('first_name') or ''} {emp.get('last_name') or ''}".strip() or "Unknown Employee"
+    full_name_html = _html_inline(full_name)
+    emp_id_html = _html_inline(emp.get("employee_id") or "—")
+    building_html = _html_inline(emp.get("building") or "—")
+    last_point_html = _html_inline(fmt_date(emp.get("last_positive_point_date")))
+    roll_off_html = _html_inline(fmt_date(emp.get("rolloff_date")))
+    perfect_attendance_html = _html_inline(fmt_date(emp.get("perfect_attendance")))
     st.markdown(
         "<div class='sidebar-employee-card'>"
         "<div class='sidebar-employee-title'>&#9673; Employee Spotlight</div>"
-        f"<div class='sidebar-employee-name'>{full_name}</div>"
+        f"<div class='sidebar-employee-name'>{full_name_html}</div>"
         "<div class='sidebar-employee-grid'>"
-        f"<div class='sidebar-employee-item'><span class='label'>Emp #</span><span class='value'>{emp.get('employee_id') or 'â€”'}</span></div>"
-        f"<div class='sidebar-employee-item'><span class='label'>Building</span><span class='value'>{emp.get('building') or 'â€”'}</span></div>"
+        f"<div class='sidebar-employee-item'><span class='label'>Emp #</span><span class='value'>{emp_id_html}</span></div>"
+        f"<div class='sidebar-employee-item'><span class='label'>Building</span><span class='value'>{building_html}</span></div>"
         f"<div class='sidebar-employee-item full-width'><span class='label'>Point Total</span><span class='value highlight'>{float(emp.get('point_total') or 0):.1f} pts</span></div>"
-        f"<div class='sidebar-employee-item'><span class='label'>Last Point</span><span class='value'>{fmt_date(emp.get('last_positive_point_date'))}</span></div>"
-        f"<div class='sidebar-employee-item'><span class='label'>Roll Off</span><span class='value'>{fmt_date(emp.get('rolloff_date'))}</span></div>"
-        f"<div class='sidebar-employee-item full-width'><span class='label'>Perfect Attendance</span><span class='value'>{fmt_date(emp.get('perfect_attendance'))}</span></div>"
+        f"<div class='sidebar-employee-item'><span class='label'>Last Point</span><span class='value'>{last_point_html}</span></div>"
+        f"<div class='sidebar-employee-item'><span class='label'>Roll Off</span><span class='value'>{roll_off_html}</span></div>"
+        f"<div class='sidebar-employee-item full-width'><span class='label'>Perfect Attendance</span><span class='value'>{perfect_attendance_html}</span></div>"
         "</div>"
         "</div>",
         unsafe_allow_html=True,
@@ -1983,7 +2015,7 @@ def selected_employee_sidebar(conn, employee_id: int | None) -> None:
         </style>""",
         unsafe_allow_html=True,
     )
-    if st.button("âŠ•  Add Point to Record", key="spotlight_add_point", use_container_width=True):
+    if st.button("⊕  Add Point to Record", key="spotlight_add_point", use_container_width=True):
         st.session_state["ledger_emp_id"] = int(emp["employee_id"])
         st.session_state["_nav_to"] = "Points Ledger"
         st.rerun()
@@ -1998,6 +2030,7 @@ def dashboard_page(conn, building: str) -> None:
     page_heading(
         '<span class="live-dot"></span>Active',
         "Track attendance momentum, risk thresholds, and next actions in one polished workspace.",
+        allow_title_html=True,
     )
 
     today = date.today()
@@ -2171,7 +2204,7 @@ def dashboard_page(conn, building: str) -> None:
                         GROUP BY ph2.reason
                         ORDER BY COUNT(*) DESC, MAX(ph2.point_date::date) DESC, ph2.reason
                         LIMIT 1
-                   ), 'â€”') AS top_reason
+                   ), '—') AS top_reason
               FROM employees e
               JOIN points_history ph ON ph.employee_id = e.employee_id
              WHERE e.employee_id IN ({ph})
@@ -2348,7 +2381,7 @@ def dashboard_page(conn, building: str) -> None:
                         GROUP BY ph2.reason
                         ORDER BY COUNT(*) DESC, MAX(date(ph2.point_date)) DESC, ph2.reason
                         LIMIT 1
-                   ), 'â€”') AS top_reason
+                   ), '—') AS top_reason
               FROM employees e
               JOIN points_history ph ON ph.employee_id = e.employee_id
              WHERE e.employee_id IN ({ph})
@@ -2595,7 +2628,7 @@ def dashboard_page(conn, building: str) -> None:
                         "employee_id": int(r["employee_id"]),
                         "Employee #": str(r["employee_id"]),
                         "Name": f"{r['last_name']}, {r['first_name']}",
-                        "Building": r.get("building") or "â€”",
+                        "Building": r.get("building") or "—",
                         "Point Total": f"{float(r.get('point_total') or 0):.1f}",
                         "Last Point Date": fmt_date(r.get("last_point_date")),
                     }
@@ -2629,7 +2662,7 @@ def dashboard_page(conn, building: str) -> None:
                     {
                         "Employee #": str(r["employee_id"]),
                         "Name": f"{r['last_name']}, {r['first_name']}",
-                        "Building": r.get("building") or "â€”",
+                        "Building": r.get("building") or "—",
                         "Rolloff Date": fmt_date(r.get("rolloff_date")),
                         "Current Points": f"{float(r.get('point_total') or 0):.1f}",
                     }
@@ -2648,7 +2681,7 @@ def dashboard_page(conn, building: str) -> None:
                     {
                         "Employee #": str(r["employee_id"]),
                         "Name": f"{r['last_name']}, {r['first_name']}",
-                        "Building": r.get("building") or "â€”",
+                        "Building": r.get("building") or "—",
                         "Perfect Date": fmt_date(r.get("perfect_attendance")),
                         "Current Points": f"{float(r.get('point_total') or 0):.1f}",
                     }
@@ -2707,9 +2740,9 @@ def dashboard_page(conn, building: str) -> None:
             pct_change = ((cur_avg_30d - prev_avg_30d) / prev_avg_30d) * 100.0
             pct_txt = f"{pct_change:+.1f}%"
         else:
-            pct_txt = "â€”"
+            pct_txt = "—"
         reason_rows = _read_rows(sql_build_reasons, (since_30, b))
-        most_common_reason = (reason_rows[0].get("reason") if reason_rows else None) or "â€”"
+        most_common_reason = (reason_rows[0].get("reason") if reason_rows else None) or "—"
         snap_rows.append(
             {
                 "Building": b,
@@ -2733,10 +2766,10 @@ def dashboard_page(conn, building: str) -> None:
                 {
                     "Employee #": str(r["employee_id"]),
                     "Name": f"{r['last_name']}, {r['first_name']}",
-                    "Building": r.get("building") or "â€”",
+                    "Building": r.get("building") or "—",
                     "Points (30d)": f"{float(r.get('points_30d') or 0.0):.1f}",
                     "Last Point Date": fmt_date(r.get("last_point_date")),
-                    "Top Reason": (r.get("top_reason") or "â€”"),
+                    "Top Reason": (r.get("top_reason") or "—"),
                 }
                 for r in gt1_rows
             ]
@@ -2748,7 +2781,7 @@ def dashboard_page(conn, building: str) -> None:
     else:
         info_box("No employees over 1.0 points in the last 30 days.")
 
-    st.markdown("#### Trending Risks  â€” On track to exceed 8 points")
+    st.markdown("#### Trending Risks  — On track to exceed 8 points")
     pts60_rows = _read_rows(sql_points_60d, (*emp_ids, since_60))
     points60_by_emp = {int(r.get("employee_id")): float(r.get("points_60d") or 0.0) for r in pts60_rows}
     weekdays_60 = max(len(pd.bdate_range(start=today - timedelta(days=60), end=today)), 1)
@@ -2765,7 +2798,7 @@ def dashboard_page(conn, building: str) -> None:
                 {
                     "Employee #": str(emp_id),
                     "Name": f"{r['last_name']}, {r['first_name']}",
-                    "Building": r.get("building") or "â€”",
+                    "Building": r.get("building") or "—",
                     "Current Points": f"{current_points:.1f}",
                     "Points (60d)": f"{points_60d:.1f}",
                     "Projected +30d": f"{projected_30d:.1f}",
@@ -2850,7 +2883,7 @@ def dashboard_page(conn, building: str) -> None:
 
     denominator_count = max(len(emp_ids), 1)
     if metric_choice == "Rate":
-        st.caption("Rate uses approximate active-headcount denominator: incidents Ã· active employees Ã— 100.")
+        st.caption("Rate uses approximate active-headcount denominator: incidents ÷ active employees × 100.")
 
     def metric_value(stats: dict, metric: str) -> float:
         incidents = float(stats.get("incidents") or 0)
@@ -2876,7 +2909,7 @@ def dashboard_page(conn, building: str) -> None:
             sql_weekday_reason,
             (*emp_ids, window_start.isoformat(), window_end.isoformat(), dow),
         )
-        top_reason_day = (weekday_reason_rows[0].get("reason") if weekday_reason_rows else None) or "â€”"
+        top_reason_day = (weekday_reason_rows[0].get("reason") if weekday_reason_rows else None) or "—"
 
         table_rows.append(
             {
@@ -2906,7 +2939,7 @@ def dashboard_page(conn, building: str) -> None:
             (*emp_ids, window_start.isoformat(), window_end.isoformat(), sel_dow),
         )
         if emp_rows:
-            st.markdown(f"**Employees pointed on {sel_label}s** ({window_start.strftime('%b %d')} â€“ {window_end.strftime('%b %d, %Y')})")
+            st.markdown(f"**Employees pointed on {sel_label}s** ({window_start.strftime('%b %d')} – {window_end.strftime('%b %d, %Y')})")
             emp_display = pd.DataFrame([
                 {
                     "Employee": r["employee"],
@@ -2929,7 +2962,7 @@ def dashboard_page(conn, building: str) -> None:
         worst_value_txt = f"{worst_value:.1f} points"
     else:
         worst_value_txt = f"{worst_value:.2f} incidents per 100 active"
-    st.markdown(f"â€¢ Worst weekday ({metric_choice.lower()}): **{worst_label}** â€” **{worst_value_txt}**")
+    st.markdown(f"• Worst weekday ({metric_choice.lower()}): **{worst_label}** — **{worst_value_txt}**")
 
     delta_rows = []
     for dow in dow_order:
@@ -2946,15 +2979,15 @@ def dashboard_page(conn, building: str) -> None:
 
     if delta_rows:
         ch_dow, _, pct_txt = max(delta_rows, key=lambda x: x[1])
-        st.markdown(f"â€¢ Biggest change vs prior matching window: **{dow_labels[ch_dow]}** â€” **{pct_txt}**")
+        st.markdown(f"• Biggest change vs prior matching window: **{dow_labels[ch_dow]}** — **{pct_txt}**")
 
     reason_rows = _read_rows(
         sql_weekday_reason,
         (*emp_ids, window_start.isoformat(), window_end.isoformat(), worst_dow),
     )
-    top_reason = (reason_rows[0].get("reason") if reason_rows else None) or "â€”"
-    if top_reason != "â€”":
-        st.markdown(f"â€¢ Most common reason on {worst_label}: **{top_reason}**")
+    top_reason = (reason_rows[0].get("reason") if reason_rows else None) or "—"
+    if top_reason != "—":
+        st.markdown(f"• Most common reason on {worst_label}: **{top_reason}**")
 
 
 
