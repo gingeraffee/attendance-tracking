@@ -3954,7 +3954,7 @@ def pto_page(conn, building: str) -> None:
         file_name=f"pto_export_{date_start}_{date_end}.csv",
         mime="text/csv",
     )
-    if st.button("Clear PTO Data", key="pto_clear_btn"):
+    def _clear_pto_data() -> None:
         st.session_state.pop("pto_df", None)
         st.session_state.pop("pto_type_toggles", None)
         try:
@@ -3963,6 +3963,8 @@ def pto_page(conn, building: str) -> None:
         except Exception:
             pass
         st.rerun()
+    if st.button("Clear PTO Data", key="pto_clear_btn_export"):
+        _clear_pto_data()
 
     # â”€â”€ Clear data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     divider()
@@ -3971,15 +3973,8 @@ def pto_page(conn, building: str) -> None:
         "Clear the loaded CSV data to start over with a new file.</p>",
         unsafe_allow_html=True,
     )
-    if st.button("Clear PTO Data", key="pto_clear_btn"):
-        st.session_state.pop("pto_df", None)
-        st.session_state.pop("pto_type_toggles", None)
-        try:
-            with db.tx(conn):
-                repo.clear_pto_data(conn)
-        except Exception:
-            pass
-        st.rerun()
+    if st.button("Clear PTO Data", key="pto_clear_btn_footer"):
+        _clear_pto_data()
 
 # â”€â”€ Employees â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def employees_page(conn, building: str) -> None:
