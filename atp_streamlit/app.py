@@ -4843,14 +4843,17 @@ def corrective_action_page(conn, building: str) -> None:
                    e.first_name,
                    COALESCE(e."Location", '') AS building,
                    COALESCE(e.point_total, 0.0) AS point_total,
-                   MAX(ph2.point_date::date)::text AS last_point_date,
+                   (
+                       SELECT MAX(ph3.point_date::date)::text
+                         FROM points_history ph3
+                        WHERE ph3.employee_id = e.employee_id
+                          AND COALESCE(ph3.points, 0.0) > 0.0
+                   ) AS last_point_date,
                    e.point_warning_date::text AS point_warning_date
               FROM employees e
-              LEFT JOIN points_history ph2 ON ph2.employee_id = e.employee_id
              WHERE e.employee_id IN ({ph})
                AND COALESCE(e.is_active, 1) = 1
-             GROUP BY e.employee_id, e.last_name, e.first_name, e."Location", e.point_warning_date
-            HAVING COALESCE(e.point_total, 0.0) >= 5.0
+               AND COALESCE(e.point_total, 0.0) >= 5.0
              ORDER BY COALESCE(e.point_total, 0.0) DESC,
                       lower(e.last_name), lower(e.first_name)
         """
@@ -4877,22 +4880,40 @@ def corrective_action_page(conn, building: str) -> None:
 
     ca_rows = [dict(r) for r in fetchall(conn, sql_ca, tuple(emp_ids))]
 
+    def parse_iso_date(value):
+        if not value:
+            return None
+        try:
+            return date.fromisoformat(str(value)[:10])
+        except Exception:
+            return None
+
+    def needs_new_warning(row: dict) -> bool:
+        warning_dt = parse_iso_date(row.get("point_warning_date"))
+        if warning_dt is None:
+            return True
+        last_positive_dt = parse_iso_date(row.get("last_point_date"))
+        return last_positive_dt is not None and last_positive_dt > warning_dt
+
+    needs_warning_rows = [row for row in ca_rows if needs_new_warning(row)]
+    already_warned_rows = [row for row in ca_rows if not needs_new_warning(row)]
+
     # (key, label, range_str, predicate, hex, r, g, b)
     tiers = [
         ("termination",     "Termination",    "7.6 +",     lambda p: p > 7.5,         "#ff3b30", 255, 59,  48),
-        ("written_warning", "Written Warning", "7.0 â€“ 7.5", lambda p: 7.0 <= p <= 7.5, "#bf5af2", 191, 90, 242),
-        ("verbal_warning",  "Verbal Warning",  "6.0 â€“ 6.5", lambda p: 6.0 <= p <= 6.5, "#ffd60a", 255, 214, 10),
-        ("verbal_coaching", "Verbal Coaching", "5.0 â€“ 5.5", lambda p: 5.0 <= p <= 5.5, "#32ade6", 50, 173, 230),
+        ("written_warning", "Written Warning", "7.0 - 7.5", lambda p: 7.0 <= p <= 7.5, "#bf5af2", 191, 90, 242),
+        ("verbal_warning",  "Verbal Warning",  "6.0 - 6.5", lambda p: 6.0 <= p <= 6.5, "#ffd60a", 255, 214, 10),
+        ("verbal_coaching", "Verbal Coaching", "5.0 - 5.5", lambda p: 5.0 <= p <= 5.5, "#32ade6", 50, 173, 230),
     ]
 
     def tier_for(pts):
         for key, lbl, rng, fn, col, r, g, b in tiers:
             if fn(pts):
                 return key, lbl, rng, col, r, g, b
-        return "none", "â€”", "â€”", "#8e8e93", 142, 142, 147
+        return "none", "-", "-", "#8e8e93", 142, 142, 147
 
     if not ca_rows:
-        info_box("No active employees are currently at or above the 5.0 point threshold. ðŸŽ‰")
+        info_box("No active employees are currently at or above the 5.0 point threshold.")
         return
 
     # â”€â”€ Shared CSS injected once â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -5047,15 +5068,20 @@ def corrective_action_page(conn, building: str) -> None:
 
     # â”€â”€ Summary pills â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     pills_html = '<div class="ca-pills">'
-    total = len(ca_rows)
     pills_html += (
-        f"<div class='ca-pill' style='color:#aeaeb2;border-color:rgba(174,174,178,.25);"
-        f"background:rgba(174,174,178,.06)'>"
-        f"<div class='ca-pill-dot' style='background:#8e8e93'></div>"
-        f"{total} flagged</div>"
+        "<div class='ca-pill' style='color:#ff9f0a;border-color:rgba(255,159,10,.30);"
+        "background:rgba(255,159,10,.09)'>"
+        "<div class='ca-pill-dot' style='background:#ff9f0a'></div>"
+        f"{len(needs_warning_rows)} need warning</div>"
+    )
+    pills_html += (
+        "<div class='ca-pill' style='color:#8e8e93;border-color:rgba(142,142,147,.30);"
+        "background:rgba(142,142,147,.08)'>"
+        "<div class='ca-pill-dot' style='background:#8e8e93'></div>"
+        f"{len(already_warned_rows)} already warned</div>"
     )
     for key, lbl, rng, fn, col, r, g, b in tiers:
-        n = sum(1 for row in ca_rows if fn(float(row.get("point_total") or 0)))
+        n = sum(1 for row in needs_warning_rows if fn(float(row.get("point_total") or 0)))
         if n == 0:
             continue
         pills_html += (
@@ -5082,8 +5108,8 @@ def corrective_action_page(conn, building: str) -> None:
                 f"<div class='ca-edit-panel' style='border-color:rgba({r_e},{g_e},{b_e},.35)'>"
                 f"<div class='ca-edit-title' style='color:{col_e}'>Edit warning date</div>"
                 f"<div class='ca-edit-name'>{edit_row['last_name']}, {edit_row['first_name']}</div>"
-                f"<div class='ca-edit-sub'>Emp #{edit_row['employee_id']} &nbsp;Â·&nbsp; "
-                f"{pts_e:.1f} pts &nbsp;Â·&nbsp; {lbl_e}</div>"
+                f"<div class='ca-edit-sub'>Emp #{edit_row['employee_id']} &nbsp;&middot;&nbsp; "
+                f"{pts_e:.1f} pts &nbsp;&middot;&nbsp; {lbl_e}</div>"
                 f"</div>",
                 unsafe_allow_html=True,
             )
@@ -5115,54 +5141,81 @@ def corrective_action_page(conn, building: str) -> None:
                     st.rerun()
 
     # â”€â”€ Tier sections â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    for key, label, rng, fn, col, r, g, b in tiers:
-        tier_rows = [row for row in ca_rows if fn(float(row.get("point_total") or 0))]
-        if not tier_rows:
-            continue
-
+    def render_ca_group(group_label: str, group_key: str, rows: list[dict], empty_text: str) -> None:
         st.markdown(
             f"<div class='ca-section'>"
-            f"<span style='color:{col}'>{label}</span>"
-            f"<span style='color:#3a3a3c;margin:0 .4rem'>Â·</span>"
-            f"<span>{rng} pts</span>"
-            f"<span style='color:#3a3a3c;margin:0 .4rem'>Â·</span>"
-            f"{len(tier_rows)} {'employee' if len(tier_rows)==1 else 'employees'}"
+            f"<span>{group_label}</span>"
+            f"<span style='color:#3a3a3c;margin:0 .4rem'>&middot;</span>"
+            f"{len(rows)} {'employee' if len(rows) == 1 else 'employees'}"
             f"</div>",
             unsafe_allow_html=True,
         )
+        if not rows:
+            info_box(empty_text)
+            return
 
-        for row in tier_rows:
-            eid   = int(row["employee_id"])
-            pts   = float(row.get("point_total") or 0)
-            name  = f"{row['last_name']}, {row['first_name']}"
-            bldg  = row.get("building") or "â€”"
-            lpd   = fmt_date(row.get("last_point_date"))
-            pwd   = fmt_date(row.get("point_warning_date"))
-            is_ed = (editing_id == eid)
-
-            active_cls = "ca-row-active" if is_ed else ""
-            warn_color = col if pwd != "â€”" else "#48484a"
-            warn_label = pwd if pwd != "â€”" else "Not logged"
+        for key, label, rng, fn, col, r, g, b in tiers:
+            tier_rows = [row for row in rows if fn(float(row.get("point_total") or 0))]
+            if not tier_rows:
+                continue
 
             st.markdown(
-                f"<div class='ca-row {active_cls}'>"
-                f"<div class='ca-strip' style='background:{col}'></div>"
-                f"<div style='flex:1;min-width:0'>"
-                f"  <div class='ca-name'>{name}</div>"
-                f"  <div class='ca-meta'>#{eid} &nbsp;Â·&nbsp; {bldg}</div>"
-                f"</div>"
-                f"<div class='ca-pts' style='color:{col}'>{pts:.1f}</div>"
-                f"<div class='ca-dates'>"
-                f"  <div class='ca-date-chip'>Last point &nbsp;<span>{lpd}</span></div>"
-                f"  <div class='ca-date-chip' style='color:{warn_color}'>"
-                f"    Warning &nbsp;<span style='color:{warn_color}'>{warn_label}</span></div>"
-                f"</div>"
+                f"<div class='ca-section'>"
+                f"<span style='color:{col}'>{label}</span>"
+                f"<span style='color:#3a3a3c;margin:0 .4rem'>&middot;</span>"
+                f"<span>{rng} pts</span>"
+                f"<span style='color:#3a3a3c;margin:0 .4rem'>&middot;</span>"
+                f"{len(tier_rows)} {'employee' if len(tier_rows)==1 else 'employees'}"
                 f"</div>",
                 unsafe_allow_html=True,
             )
-            if st.button("Set date", key=f"ca_edit_{eid}", use_container_width=False):
-                st.session_state["ca_edit_id"] = eid
-                st.rerun()
+
+            for row in tier_rows:
+                eid = int(row["employee_id"])
+                pts = float(row.get("point_total") or 0)
+                name = f"{row['last_name']}, {row['first_name']}"
+                bldg = row.get("building") or "-"
+                lpd = fmt_date(row.get("last_point_date"))
+                pwd = fmt_date(row.get("point_warning_date"))
+                is_ed = (editing_id == eid)
+
+                active_cls = "ca-row-active" if is_ed else ""
+                warn_color = col if pwd != "-" else "#48484a"
+                warn_label = pwd if pwd != "-" else "Not logged"
+
+                st.markdown(
+                    f"<div class='ca-row {active_cls}'>"
+                    f"<div class='ca-strip' style='background:{col}'></div>"
+                    f"<div style='flex:1;min-width:0'>"
+                    f"  <div class='ca-name'>{name}</div>"
+                    f"  <div class='ca-meta'>#{eid} &nbsp;&middot;&nbsp; {bldg}</div>"
+                    f"</div>"
+                    f"<div class='ca-pts' style='color:{col}'>{pts:.1f}</div>"
+                    f"<div class='ca-dates'>"
+                    f"  <div class='ca-date-chip'>Last point &nbsp;<span>{lpd}</span></div>"
+                    f"  <div class='ca-date-chip' style='color:{warn_color}'>"
+                    f"    Warning &nbsp;<span style='color:{warn_color}'>{warn_label}</span></div>"
+                    f"</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+                if st.button("Set date", key=f"ca_edit_{group_key}_{eid}", use_container_width=False):
+                    st.session_state["ca_edit_id"] = eid
+                    st.rerun()
+
+    render_ca_group(
+        "Needs Corrective Action",
+        "needs",
+        needs_warning_rows,
+        "No employees currently need a new warning.",
+    )
+    with st.expander("Threshold Met - Warning Up To Date", expanded=False):
+        render_ca_group(
+            "Threshold Met - Warning Up To Date",
+            "up_to_date",
+            already_warned_rows,
+            "No employees are currently in the already-warned group.",
+        )
 
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -5176,11 +5229,12 @@ def corrective_action_page(conn, building: str) -> None:
             "Last Point Date":    fmt_date(r.get("last_point_date")),
             "Point Warning Date": fmt_date(r.get("point_warning_date")),
             "Tier":               tier_for(float(r.get("point_total") or 0))[1],
+            "Status":             "Needs Warning" if needs_new_warning(r) else "Warning Up To Date",
         }
         for r in ca_rows
     ])
     st.download_button(
-        "â¬‡ Download Corrective Action List",
+        "Download Corrective Action List",
         data=to_csv(df_ca),
         file_name=f"corrective_action_{today}.csv",
         mime="text/csv",
