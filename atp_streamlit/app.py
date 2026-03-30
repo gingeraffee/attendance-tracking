@@ -1,4 +1,4 @@
-"""Attendance Point Tracker â€” Streamlit Web App
+"""Attendance Point Tracker — Streamlit Web App
 Full remodel: clean layout, status badges, live countdown, improved workflows.
 """
 from __future__ import annotations
@@ -26,7 +26,7 @@ from reportlab.lib.styles import ParagraphStyle
 
 st.set_page_config(
     page_title="Attendance Point Tracker",
-    page_icon="â°",
+    page_icon="⏰",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -49,30 +49,30 @@ LEDGER_HISTORY_DEFAULT_LIMIT = 500
 LEDGER_HISTORY_FULL_LIMIT = 5000
 
 
-# â”€â”€ Theme â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Theme ─────────────────────────────────────────────────────────────────────
 def apply_theme() -> None:
     st.markdown(
         """<style>
-/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-   CONTROL ROOM OS  â€”  Ultimate Command Interface
+/* ══════════════════════════════════════════════════════════════
+   CONTROL ROOM OS  —  Ultimate Command Interface
    Space Grotesk (UI) + Space Mono (data readouts)
-â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+══════════════════════════════════════════════════════════════ */
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap');
 
 :root {
-    /* â”€â”€ Depth palette â”€â”€ */
+    /* ── Depth palette ── */
     --bg:        #02060e;
     --bg2:       #040c1a;
     --surface:   rgba(4,12,28,0.82);
     --surface2:  rgba(6,16,36,0.68);
 
-    /* â”€â”€ Text â”€â”€ */
+    /* ── Text ── */
     --text:      #b8d0ee;
     --text-hi:   #e4f0ff;
     --muted:     #3d5a7a;
     --faint:     #182840;
 
-    /* â”€â”€ Accent system â”€â”€ */
+    /* ── Accent system ── */
     --blue:      #0078ff;
     --cyan:      #00c8f0;
     --green:     #00e896;
@@ -81,7 +81,7 @@ def apply_theme() -> None:
     --purple:    #8855ee;
     --teal:      #00b8a0;
 
-    /* â”€â”€ Borders / glows â”€â”€ */
+    /* ── Borders / glows ── */
     --border:    rgba(0,120,255,.14);
     --border-hi: rgba(0,200,240,.50);
     --glow-b:    rgba(0,120,255,.28);
@@ -89,12 +89,12 @@ def apply_theme() -> None:
     --shadow:    0 10px 48px rgba(0,0,0,.75);
 }
 
-/* â”€â”€ System-wide font â”€â”€ */
+/* ── System-wide font ── */
 html, body, .stApp, button, input, select, textarea, label, p, span, div {
     font-family: 'Space Grotesk', 'Inter', system-ui, -apple-system, sans-serif !important;
 }
 
-/* â”€â”€ Base canvas â”€â”€ */
+/* ── Base canvas ── */
 .stApp { background: var(--bg) !important; color: var(--text); }
 .block-container {
     padding-top: 1.6rem; padding-bottom: 3rem;
@@ -102,7 +102,7 @@ html, body, .stApp, button, input, select, textarea, label, p, span, div {
 }
 footer, #MainMenu { visibility: hidden; }
 
-/* â”€â”€ Custom scrollbar â”€â”€ */
+/* ── Custom scrollbar ── */
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: #02060e; }
 ::-webkit-scrollbar-thumb {
@@ -110,9 +110,9 @@ footer, #MainMenu { visibility: hidden; }
 }
 ::-webkit-scrollbar-thumb:hover { background: rgba(0,200,240,.38); }
 
-/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+/* ══════════════════════════════════════════════════════════════
    ATMOSPHERIC BACKGROUND LAYERS
-â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+══════════════════════════════════════════════════════════════ */
 
 /* Aurora glow (injected div) */
 @keyframes aurora-drift {
@@ -155,9 +155,9 @@ footer, #MainMenu { visibility: hidden; }
 .hud-corner-bl { bottom: 12px; left: 12px; border-width: 0 0 2px 2px; border-radius: 0 0 0 2px; }
 .hud-corner-br { bottom: 12px; right: 12px; border-width: 0 2px 2px 0; border-radius: 0 0 2px 0; }
 
-/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+/* ══════════════════════════════════════════════════════════════
    SIDEBAR
-â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+══════════════════════════════════════════════════════════════ */
 section[data-testid="stSidebar"] {
     background: linear-gradient(180deg, rgba(8,18,42,.84) 0%, rgba(5,13,31,.78) 55%, rgba(4,10,24,.80) 100%) !important;
     border-right: 1px solid rgba(0,200,240,.20) !important;
@@ -230,9 +230,9 @@ section[data-testid="stSidebar"] [data-testid="stRadio"] label:hover {
     color: #6a9ec8 !important;
 }
 
-/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+/* ══════════════════════════════════════════════════════════════
    METRIC TILES
-â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+══════════════════════════════════════════════════════════════ */
 div[data-testid="stMetric"] {
     background: rgba(3,10,26,0.80) !important;
     backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
@@ -266,9 +266,9 @@ div[data-testid="stMetric"] [data-testid="stMetricDelta"] {
     font-family: 'Space Mono', monospace !important; font-size: .76rem !important;
 }
 
-/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+/* ══════════════════════════════════════════════════════════════
    BUTTONS
-â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+══════════════════════════════════════════════════════════════ */
 .stButton > button {
     border-radius: 7px !important; font-weight: 600 !important;
     font-size: .84rem !important; letter-spacing: .025em !important;
@@ -297,9 +297,9 @@ div[data-testid="stMetric"] [data-testid="stMetricDelta"] {
     box-shadow: 0 0 10px rgba(0,120,255,.18) !important;
 }
 
-/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+/* ══════════════════════════════════════════════════════════════
    TABS
-â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+══════════════════════════════════════════════════════════════ */
 .stTabs [data-baseweb="tab-list"] {
     gap: 2px;
     border-bottom: 1px solid rgba(0,120,255,.12);
@@ -325,9 +325,9 @@ div[data-testid="stMetric"] [data-testid="stMetricDelta"] {
     text-shadow: 0 0 16px rgba(0,200,240,.40);
 }
 
-/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+/* ══════════════════════════════════════════════════════════════
    FORM INPUTS
-â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+══════════════════════════════════════════════════════════════ */
 .stTextInput > div > div > input,
 .stNumberInput > div > div > input,
 .stDateInput > div > div > input,
@@ -391,9 +391,9 @@ div[data-testid="stMetric"] [data-testid="stMetricDelta"] {
     caret-color: var(--cyan) !important;
 }
 
-/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+/* ══════════════════════════════════════════════════════════════
    DATA FRAMES & CHARTS
-â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+══════════════════════════════════════════════════════════════ */
 
     border: 1px solid rgba(0,120,255,.15) !important;
     border-radius: 10px !important;
@@ -413,13 +413,13 @@ div[data-testid="stMetric"] [data-testid="stMetricDelta"] {
     border-radius: 12px !important; overflow: hidden;
 }
 
-/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+/* ══════════════════════════════════════════════════════════════
    TYPOGRAPHY
-â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+══════════════════════════════════════════════════════════════ */
 h1, h2, h3, h4, h5, h6 { color: var(--text-hi) !important; }
 p, label { color: var(--muted) !important; }
 
-/* â”€â”€ Page heading â”€â”€ */
+/* ── Page heading ── */
 .page-heading { margin-bottom: 1.2rem; }
 .page-heading h1 {
     font-size: 1.52rem; font-weight: 700; color: var(--text-hi);
@@ -435,7 +435,7 @@ p, label { color: var(--muted) !important; }
     background-size: 300% 100%;
 }
 
-/* â”€â”€ Cards â”€â”€ */
+/* ── Cards ── */
 .card {
     background: rgba(3,10,26,0.72);
     backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
@@ -456,7 +456,7 @@ p, label { color: var(--muted) !important; }
 }
 .card h2 { color: var(--text-hi) !important; }
 
-/* â”€â”€ Section label â”€â”€ */
+/* ── Section label ── */
 .section-label {
     font-size: .66rem; font-weight: 700; letter-spacing: .16em;
     text-transform: uppercase; color: #4dd8f0; margin: 0 0 .5rem 0;
@@ -464,7 +464,7 @@ p, label { color: var(--muted) !important; }
     text-shadow: 0 0 16px rgba(0,200,240,.70);
 }
 
-/* â”€â”€ Section header (prominent section titles) â”€â”€ */
+/* ── Section header (prominent section titles) ── */
 .section-header {
     font-size: .82rem; font-weight: 700; letter-spacing: .13em;
     text-transform: uppercase; color: #4dd8f0;
@@ -477,14 +477,14 @@ p, label { color: var(--muted) !important; }
     text-shadow: 0 0 22px rgba(0,200,240,.80);
 }
 
-/* â”€â”€ Divider â”€â”€ */
+/* ── Divider ── */
 .divider {
     height: 1px;
     background: linear-gradient(90deg, transparent, rgba(0,120,255,.24), transparent);
     margin: 1.2rem 0; box-shadow: 0 0 8px rgba(0,120,255,.05);
 }
 
-/* â”€â”€ Info / warn / danger boxes â”€â”€ */
+/* ── Info / warn / danger boxes ── */
 .info-box {
     background: rgba(0,120,255,.06); border: 1px solid rgba(0,120,255,.22);
     border-left: 3px solid var(--cyan); border-radius: 8px;
@@ -501,7 +501,7 @@ p, label { color: var(--muted) !important; }
     padding: .75rem 1rem; color: var(--text); font-size: .86rem;
 }
 
-/* â”€â”€ List rows â”€â”€ */
+/* ── List rows ── */
 .list-row {
     background: rgba(3,10,26,0.58); border: 1px solid rgba(0,120,255,.10);
     border-radius: 9px; padding: .62rem 1rem; margin-bottom: .36rem;
@@ -593,7 +593,7 @@ p, label { color: var(--muted) !important; }
     letter-spacing: .07em;
 }
 
-/* â”€â”€ Sidebar brand â”€â”€ */
+/* ── Sidebar brand ── */
 .sidebar-brand {
     padding: .70rem 0 .95rem 0;
     border-bottom: 1px solid rgba(0,120,255,.10); margin-bottom: .9rem;
@@ -610,7 +610,7 @@ p, label { color: var(--muted) !important; }
     display: block; font-family: 'Space Mono', monospace !important;
 }
 
-/* â”€â”€ Employee spotlight card â”€â”€ */
+/* ── Employee spotlight card ── */
 section[data-testid="stSidebar"] .sidebar-employee-card {
     margin-top: 1rem; padding: 1rem .9rem .85rem;
     border-radius: 14px; border: 1px solid rgba(0,200,240,.20);
@@ -663,7 +663,7 @@ section[data-testid="stSidebar"] .sidebar-employee-item .value.highlight {
     font-weight: 800; text-shadow: 0 0 8px rgba(0,200,240,.32);
 }
 
-/* â”€â”€ Live dot â”€â”€ */
+/* ── Live dot ── */
 @keyframes live-pulse {
   0%,100% { box-shadow: 0 0 0 0 rgba(0,232,150,.55), 0 0 8px rgba(0,232,150,.40); background: #00e896; }
   50%      { box-shadow: 0 0 0 7px rgba(0,232,150,0), 0 0 18px rgba(0,232,150,.70); background: #00ffaa; }
@@ -674,11 +674,11 @@ section[data-testid="stSidebar"] .sidebar-employee-item .value.highlight {
     animation: live-pulse 1.8s ease-in-out infinite;
 }
 
-/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+/* ══════════════════════════════════════════════════════════════
    ANIMATIONS
-â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+══════════════════════════════════════════════════════════════ */
 
-/* Metric tiles â€” top border cycles + lift */
+/* Metric tiles — top border cycles + lift */
 @keyframes tile-breathe {
   0%,100% {
     border-top-color: rgba(0,200,240,.52) !important;
@@ -700,7 +700,7 @@ div[data-testid="stMetric"]:nth-child(4) { animation-delay: 4.2s; }
 div[data-testid="stMetric"]:nth-child(5) { animation-delay: 2.1s; }
 div[data-testid="stMetric"]:nth-child(6) { animation-delay: 3.5s; }
 
-/* Accent bar â€” continuous sweep */
+/* Accent bar — continuous sweep */
 @keyframes accent-sweep {
   0%   { background-position: 0%   50%; box-shadow: 0 0 10px rgba(0,120,255,.55), 0 0 24px rgba(0,120,255,.18); }
   50%  { background-position: 100% 50%; box-shadow: 0 0 18px rgba(0,200,240,.75), 0 0 36px rgba(0,200,240,.25); }
@@ -708,7 +708,7 @@ div[data-testid="stMetric"]:nth-child(6) { animation-delay: 3.5s; }
 }
 .accent-bar { animation: accent-sweep 3.5s linear infinite; }
 
-/* Cards â€” border breathe */
+/* Cards — border breathe */
 @keyframes card-breathe {
   0%,100% { border-color: rgba(0,120,255,.14); box-shadow: 0 8px 32px rgba(0,0,0,.50), inset 0 1px 0 rgba(255,255,255,.025); }
   50%      { border-color: rgba(0,120,255,.28); box-shadow: 0 10px 38px rgba(0,0,0,.55), 0 0 20px rgba(0,120,255,.07), inset 0 1px 0 rgba(255,255,255,.04); }
@@ -798,7 +798,7 @@ div[data-testid="stMetric"]:nth-child(6) { animation-delay: 3.5s; }
         unsafe_allow_html=True,
     )
 
-# â”€â”€ DB helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── DB helpers ────────────────────────────────────────────────────────────────
 def _db_cache_key() -> str:
     return db.get_db_path()
 
@@ -898,7 +898,7 @@ def first_value(rows, default=0):
         return default
 
 
-# â”€â”€ Format helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Format helpers ────────────────────────────────────────────────────────────
 def fmt_date(val) -> str:
     if not val:
         return "-"
@@ -959,39 +959,34 @@ def warn_box(msg: str) -> None:
 
 
 def _repair_mojibake(text: object) -> str:
-    repaired = "" if text is None else str(text)
-    replacements = {
-        "Ã¢â‚¬â€": "—",
-        "â€”": "—",
-        "Ã¢â‚¬â€œ": "–",
-        "â€“": "–",
-        "Ã¢â‚¬Â¢": "•",
-        "â€¢": "•",
-        "Ã¢Å“â€œ": "✓",
-        "âœ“": "✓",
-        "Ãƒâ€”": "×",
-        "Ã—": "×",
-        "ÃƒÂ·": "÷",
-        "Â·": "·",
-        "Ã¢Å â€¢": "⊕",
-        "Ã°Å¸Å½â€°": "🎉",
-    }
-    for bad, good in replacements.items():
-        repaired = repaired.replace(bad, good)
-    return repaired
+    """Fix double-encoded UTF-8 text (UTF-8 bytes misread as cp1252/latin-1)."""
+    if text is None:
+        return ""
+    s = str(text)
+    # Only attempt repair if text contains characters typical of mojibake
+    # (latin chars with diacritics followed by special cp1252 chars)
+    try:
+        raw = s.encode("cp1252", errors="ignore")
+        candidate = raw.decode("utf-8", errors="ignore")
+        # Accept the repair only if it's shorter (mojibake is always longer)
+        if candidate and len(candidate) < len(s):
+            return candidate
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        pass
+    return s
 
 
 def _html_inline(text: object) -> str:
-    """Normalize punctuation for Streamlit raw-HTML blocks to avoid mojibake."""
+    """Normalize punctuation for Streamlit raw-HTML blocks."""
     repaired = _repair_mojibake(text)
     return (
         html.escape(repaired)
-        .replace("—", "&mdash;")
-        .replace("–", "&ndash;")
-        .replace("·", "&middot;")
-        .replace("•", "&bull;")
-        .replace("✓", "&#10003;")
-        .replace("×", "&times;")
+        .replace("\u2014", "&mdash;")
+        .replace("\u2013", "&ndash;")
+        .replace("\u00b7", "&middot;")
+        .replace("\u2022", "&bull;")
+        .replace("\u2713", "&#10003;")
+        .replace("\u00d7", "&times;")
     )
 
 
@@ -1075,7 +1070,7 @@ def render_hr_live_monitor(
 
     PTO mode (pto_utilization_pct provided):
       - Cyan  : utilization <= 50 %
-      - Amber : 51â€“80 %
+      - Amber : 51–80 %
       - Red   : 81 %+  (pulsing)
     """
     # ── PTO color override ────────────────────────────────────────────────────
@@ -1086,15 +1081,15 @@ def render_hr_live_monitor(
         if p <= 50.0:
             r, g, b = 0, 200, 240          # cyan
             pulse = False
-            status = f"PTO Utilization {p:.0f}% â€” Normal"
+            status = f"PTO Utilization {p:.0f}% — Normal"
         elif p <= 80.0:
             r, g, b = 240, 168, 0          # amber
             pulse = False
-            status = f"PTO Utilization {p:.0f}% â€” Elevated"
+            status = f"PTO Utilization {p:.0f}% — Elevated"
         else:
             r, g, b = 255, 48, 80          # red
             pulse = True
-            status = f"PTO Utilization {p:.0f}% â€” High"
+            status = f"PTO Utilization {p:.0f}% — High"
 
         sweep_s   = 1.4
         glow      = 0.72
@@ -1148,7 +1143,7 @@ def render_hr_live_monitor(
         )
         return
 
-    # â”€â”€ Standard attendance mode â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Standard attendance mode ───────────────────────────────────────────────
     # Weighted: last 24h matters most, then 7d.
     activity_raw = (points_24h * 2.5) + (points_7d * 0.6)
     # Log scale so it doesn't go ridiculous on big weeks:
@@ -1274,9 +1269,9 @@ def render_tech_hud(
     """Live HUD status bar with reactive colors based on employees at 5+ points.
 
     ACTIVITY label + bar/border color:
-      Cyan  (< 10 % at 5+ pts)  â€” Normal
-      Amber (10â€“24 %)            â€” Elevated
-      Red   (25 %+)              â€” Critical
+      Cyan  (< 10 % at 5+ pts)  — Normal
+      Amber (10–24 %)            — Elevated
+      Red   (25 %+)              — Critical
     """
     pct = (at_risk_5plus / max(total_employees, 1)) * 100.0
 
@@ -1418,7 +1413,7 @@ body {{
     )
 
 
-# â”€â”€ Login â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Login ──────────────────────────────────────────────────────────────────────
 def login_page() -> None:
     """Render a centered access-code login screen matching the reference design."""
     def _handle_login_submit() -> None:
@@ -1451,13 +1446,13 @@ def login_page() -> None:
         section[data-testid="stSidebar"] {{ display: none !important; }}
         footer, #MainMenu {{ visibility: hidden; }}
 
-        /* â”€â”€ Full-screen dark canvas â”€â”€ */
+        /* ── Full-screen dark canvas ── */
         .stApp {{
             background: #02060e !important;
             font-family: 'Space Grotesk', system-ui, sans-serif !important;
         }}
 
-        /* â”€â”€ Atmospheric grid â”€â”€ */
+        /* ── Atmospheric grid ── */
         .stApp::before {{
             content: '';
             position: fixed; inset: 0;
@@ -1468,7 +1463,7 @@ def login_page() -> None:
             pointer-events: none; z-index: 0;
         }}
 
-        /* â”€â”€ Aurora glow behind card â”€â”€ */
+        /* ── Aurora glow behind card ── */
         .stApp::after {{
             content: '';
             position: fixed; inset: 0;
@@ -1479,19 +1474,19 @@ def login_page() -> None:
             pointer-events: none; z-index: 0;
         }}
 
-        /* â”€â”€ Vertical centering via top padding â”€â”€ */
+        /* ── Vertical centering via top padding ── */
         .block-container {{
             padding-top: 12vh !important;
             padding-bottom: 4rem !important;
             max-width: 100% !important;
         }}
 
-        /* â”€â”€ Center the card within its column â”€â”€ */
+        /* ── Center the card within its column ── */
         .login-card {{
             margin: 0 auto !important;
         }}
 
-        /* â”€â”€ Status bar (top-of-card) â”€â”€ */
+        /* ── Status bar (top-of-card) ── */
         .login-status-bar {{
             display: flex; align-items: center; gap: 8px;
             font-family: 'Space Mono', monospace;
@@ -1510,7 +1505,7 @@ def login_page() -> None:
             50%      {{ box-shadow: 0 0 14px rgba(0,232,150,.90); }}
         }}
 
-        /* â”€â”€ Main login card â”€â”€ */
+        /* ── Main login card ── */
         .login-card {{
             background: rgba(3,10,26,0.88);
             backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
@@ -1543,7 +1538,7 @@ def login_page() -> None:
             border-radius: 0 0 16px 0;
         }}
 
-        /* â”€â”€ Card header band â”€â”€ */
+        /* ── Card header band ── */
         .login-card-header {{
             padding: 1.8rem 2rem 1.4rem;
             border-bottom: 1px solid rgba(0,120,255,.12);
@@ -1553,7 +1548,7 @@ def login_page() -> None:
             padding: 1.6rem 2rem 2rem;
         }}
 
-        /* â”€â”€ Title & subtitle â”€â”€ */
+        /* ── Title & subtitle ── */
         .login-system-tag {{
             font-family: 'Space Mono', monospace;
             font-size: .60rem; font-weight: 700;
@@ -1568,7 +1563,7 @@ def login_page() -> None:
             text-shadow: 0 0 30px rgba(0,200,240,.18);
         }}
 
-        /* â”€â”€ Field label â”€â”€ */
+        /* ── Field label ── */
         .login-field-label {{
             display: block;
             font-family: 'Space Mono', monospace;
@@ -1578,7 +1573,7 @@ def login_page() -> None:
             margin-bottom: .4rem; margin-top: 0;
         }}
 
-        /* â”€â”€ Input â”€â”€ */
+        /* ── Input ── */
         div[data-testid="stTextInput"] input {{
             background: rgba(0,6,20,.92) !important;
             border: 1px solid rgba(0,120,255,.25) !important;
@@ -1594,7 +1589,7 @@ def login_page() -> None:
             box-shadow: 0 0 0 3px rgba(0,200,240,.12), 0 0 18px rgba(0,200,240,.07) !important;
         }}
 
-        /* â”€â”€ Authorize button â”€â”€ */
+        /* ── Authorize button ── */
         .stButton > button {{
             background: linear-gradient(135deg, rgba(0,80,200,.20) 0%, rgba(0,120,255,.10) 100%) !important;
             border: 1px solid rgba(0,200,240,.40) !important;
@@ -1617,7 +1612,7 @@ def login_page() -> None:
         }}
         .stButton > button:active {{ transform: translateY(0) !important; }}
 
-        /* â”€â”€ Error message â”€â”€ */
+        /* ── Error message ── */
         .login-error {{
             background: rgba(255,48,80,.08);
             border: 1px solid rgba(255,48,80,.28);
@@ -1630,7 +1625,7 @@ def login_page() -> None:
             margin-top: .65rem; letter-spacing: .02em;
         }}
 
-        /* â”€â”€ Footer tagline â”€â”€ */
+        /* ── Footer tagline ── */
         .login-footer {{
             font-family: 'Space Mono', monospace;
             font-size: .58rem; letter-spacing: .14em;
@@ -1647,16 +1642,16 @@ def login_page() -> None:
         st.markdown(
             "<div class='login-status-bar'>"
             "<span class='login-status-dot'></span>"
-            "SYSTEM ONLINE &nbsp;Â·&nbsp;"
+            "SYSTEM ONLINE &nbsp;·&nbsp;"
             "</div>",
             unsafe_allow_html=True,
         )
 
-        # Card header (pure HTML â€” logo, system tag, title)
+        # Card header (pure HTML — logo, system tag, title)
         st.markdown(
             f"<div class='login-card'>"
             f"  <div class='login-card-header'>"
-            f"    <div class='login-system-tag'>Status: â—Online</div>"
+            f"    <div class='login-system-tag'>Status: ●Online</div>"
             f"    {logo_tag}"
             f"    <div class='login-title'>Attendance Tracking</div>"
             f"  </div>"
@@ -1675,7 +1670,7 @@ def login_page() -> None:
         st.button("Begin Tracking", use_container_width=True, on_click=_handle_login_submit)
         if st.session_state.get("login_error"):
             st.markdown(
-                "<div class='login-error'>ACCESS DENIED â€” Incorrect authorization code.</div>",
+                "<div class='login-error'>ACCESS DENIED — Incorrect authorization code.</div>",
                 unsafe_allow_html=True,
             )
 
@@ -1694,7 +1689,7 @@ def build_point_history_pdf(employee: dict, history: list[dict]) -> bytes:
 
     buffer = BytesIO()
 
-    # â”€â”€ Brand palette â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Brand palette ─────────────────────────────────────────────────────────
     C_NAVY    = colors.HexColor("#0D2461")   # AAP deep navy
     C_RED     = colors.HexColor("#CC1F2D")   # AAP brand red (borders/accents only)
     C_TEXT    = colors.HexColor("#0D1117")   # near-black body text
@@ -1704,7 +1699,7 @@ def build_point_history_pdf(employee: dict, history: list[dict]) -> bytes:
     C_STAT_BG = colors.HexColor("#F8FAFC")   # empty-state table background
     C_WHITE   = colors.white
 
-    # â”€â”€ Page geometry â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Page geometry ─────────────────────────────────────────────────────────
     PW, PH = letter
     LM = RM = 0.5 * inch
     HEADER_H = 0.82 * inch   # height of drawn header zone
@@ -1712,14 +1707,14 @@ def build_point_history_pdf(employee: dict, history: list[dict]) -> bytes:
     BM = 0.48 * inch
     CW = PW - LM - RM        # 7.5 inch content width
 
-    # â”€â”€ Employee data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Employee data ─────────────────────────────────────────────────────────
     full_name   = f"{employee.get('last_name', '')}, {employee.get('first_name', '')}".strip(", ")
-    emp_id      = str(employee.get("employee_id", "â€”"))
-    location    = str(employee.get("Location") or employee.get("location") or "â€”")
+    emp_id      = str(employee.get("employee_id", "—"))
+    location    = str(employee.get("Location") or employee.get("location") or "—")
     cur_pts     = float(employee.get("point_total") or 0)
     gen_on      = datetime.now().strftime("%m/%d/%Y  %I:%M %p")
 
-    # â”€â”€ Styles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Styles ────────────────────────────────────────────────────────────────
     styles = getSampleStyleSheet()
 
     def S(name, **kw):
@@ -1735,21 +1730,21 @@ def build_point_history_pdf(employee: dict, history: list[dict]) -> bytes:
     pts_r_s  = S("PDFPtsR",  fontName="Helvetica-Bold", fontSize=8.5, textColor=C_TEXT,  alignment=TA_RIGHT)
     empty_s  = S("PDFEmpty", fontName="Helvetica",      fontSize=10,  leading=14, textColor=C_MUTED)
 
-    # â”€â”€ Logo / asset path â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Logo / asset path ─────────────────────────────────────────────────────
     LOGO_PATH = Path(__file__).resolve().parent.parent / "assets" / "logo.png"
 
-    # â”€â”€ Per-page header + footer via canvas callback â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Per-page header + footer via canvas callback ───────────────────────────
     def draw_page(canvas, doc):
         canvas.saveState()
 
-        # â”€â”€ Header: two accent stripes at the bottom edge of header zone â”€â”€â”€â”€â”€â”€
+        # ── Header: two accent stripes at the bottom edge of header zone ──────
         stripe_y = PH - HEADER_H
         canvas.setFillColor(C_NAVY)
         canvas.rect(0, stripe_y - 3.5, PW, 3.5, fill=1, stroke=0)
         canvas.setFillColor(C_RED)
         canvas.rect(0, stripe_y - 6.0, PW, 2.5, fill=1, stroke=0)
 
-        # â”€â”€ Logo â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Logo ──────────────────────────────────────────────────────────────
         logo_h = 0.52 * inch
         logo_y = (PH - HEADER_H) + (HEADER_H - logo_h) / 2
         if LOGO_PATH.exists():
@@ -1762,7 +1757,7 @@ def build_point_history_pdf(employee: dict, history: list[dict]) -> bytes:
             except Exception:
                 pass
 
-        # â”€â”€ Title block (right-aligned) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Title block (right-aligned) ────────────────────────────────────────
         mid_y = PH - HEADER_H / 2
         canvas.setFillColor(C_MUTED)
         canvas.setFont("Helvetica", 7.5)
@@ -1774,14 +1769,14 @@ def build_point_history_pdf(employee: dict, history: list[dict]) -> bytes:
         canvas.setFont("Helvetica", 7.5)
         canvas.drawRightString(PW - RM, mid_y - 15, f"Generated  {gen_on}")
 
-        # â”€â”€ Footer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Footer ────────────────────────────────────────────────────────────
         foot_y = BM - 6
         canvas.setStrokeColor(C_DIVIDER)
         canvas.setLineWidth(0.5)
         canvas.line(LM, foot_y, PW - RM, foot_y)
         canvas.setFillColor(C_MUTED)
         canvas.setFont("Helvetica", 7)
-        canvas.drawString(LM, foot_y - 11, "CONFIDENTIAL â€” FOR INTERNAL USE ONLY")
+        canvas.drawString(LM, foot_y - 11, "CONFIDENTIAL — FOR INTERNAL USE ONLY")
         canvas.drawCentredString(PW / 2, foot_y - 11, full_name)
         canvas.drawRightString(PW - RM, foot_y - 11, f"Page {doc.page}")
 
@@ -1798,7 +1793,7 @@ def build_point_history_pdf(employee: dict, history: list[dict]) -> bytes:
 
     story = []
 
-    # â”€â”€ Employee info card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Employee info card ────────────────────────────────────────────────────
     # col widths: 3.0 + 1.3 + 1.3 + 1.9 = 7.5
     emp_col_w = [3.0 * inch, 1.3 * inch, 1.3 * inch, 1.9 * inch]
     pts_val_s = S("PDFPtsV", fontName="Helvetica-Bold", fontSize=18, textColor=C_TEXT)
@@ -1812,7 +1807,7 @@ def build_point_history_pdf(employee: dict, history: list[dict]) -> bytes:
                 Paragraph("CURRENT POINTS", lbl_s),
             ],
             [
-                Paragraph(full_name or "â€”", val_s),
+                Paragraph(full_name or "—", val_s),
                 Paragraph(emp_id, val_s),
                 Paragraph(location, val_s),
                 Paragraph(f"{cur_pts:.1f}", pts_val_s),
@@ -1839,7 +1834,7 @@ def build_point_history_pdf(employee: dict, history: list[dict]) -> bytes:
     story.append(emp_table)
     story.append(Spacer(1, 0.11 * inch))
 
-    # â”€â”€ Section label â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Section label ─────────────────────────────────────────────────────────
     sec_lbl = Table(
         [[Paragraph("POINT HISTORY", S("SecLbl", fontName="Helvetica-Bold", fontSize=7.5, textColor=C_NAVY))]],
         colWidths=[CW],
@@ -1854,7 +1849,7 @@ def build_point_history_pdf(employee: dict, history: list[dict]) -> bytes:
     ]))
     story.append(sec_lbl)
 
-    # â”€â”€ History table â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── History table ─────────────────────────────────────────────────────────
     # col widths: 0.88 + 0.62 + 1.6 + 3.52 + 0.88 = 7.5 inch
     col_w = [0.88 * inch, 0.62 * inch, 1.6 * inch, 3.52 * inch, 0.88 * inch]
 
@@ -1888,8 +1883,8 @@ def build_point_history_pdf(employee: dict, history: list[dict]) -> bytes:
             table_rows.append([
                 Paragraph(fmt_date(row.get("point_date")), date_s),
                 Paragraph(f"{pt:+.1f}",  pts_r_s),
-                Paragraph(str(row.get("reason") or "â€”"), reason_s),
-                Paragraph(str(row.get("note")   or "â€”"), note_s),
+                Paragraph(str(row.get("reason") or "—"), reason_s),
+                Paragraph(str(row.get("note")   or "—"), note_s),
                 Paragraph(f"{tot:.1f}",  pts_r_s),
             ])
 
@@ -1970,8 +1965,8 @@ def selected_employee_sidebar(conn, employee_id: int | None) -> None:
         return
     full_name = f"{emp.get('first_name') or ''} {emp.get('last_name') or ''}".strip() or "Unknown Employee"
     full_name_html = _html_inline(full_name)
-    emp_id_html = _html_inline(emp.get("employee_id") or "—")
-    building_html = _html_inline(emp.get("building") or "—")
+    emp_id_html = _html_inline(emp.get("employee_id") or "�")
+    building_html = _html_inline(emp.get("building") or "�")
     last_point_html = _html_inline(fmt_date(emp.get("last_positive_point_date")))
     roll_off_html = _html_inline(fmt_date(emp.get("rolloff_date")))
     perfect_attendance_html = _html_inline(fmt_date(emp.get("perfect_attendance")))
@@ -2025,7 +2020,7 @@ def load_employees(conn, q: str = "", building: str = "All") -> list[dict]:
     return _load_employees_cached(_db_cache_key(), q, building)
 
 
-# â”€â”€ Dashboard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Dashboard ─────────────────────────────────────────────────────────────────
 def dashboard_page(conn, building: str) -> None:
     page_heading(
         '<span class="live-dot"></span>Active',
@@ -2054,7 +2049,7 @@ def dashboard_page(conn, building: str) -> None:
             return 0
         return int(rows[0].get("n") or 0)
 
-    # â”€â”€ HR Live Monitor data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── HR Live Monitor data ──────────────────────────────────────────────────
     since_24h = (today - timedelta(days=1)).isoformat()
     since_7d = (today - timedelta(days=7)).isoformat()
     due_7d = (today + timedelta(days=7)).isoformat()
@@ -2204,7 +2199,7 @@ def dashboard_page(conn, building: str) -> None:
                         GROUP BY ph2.reason
                         ORDER BY COUNT(*) DESC, MAX(ph2.point_date::date) DESC, ph2.reason
                         LIMIT 1
-                   ), '—') AS top_reason
+                   ), '�') AS top_reason
               FROM employees e
               JOIN points_history ph ON ph.employee_id = e.employee_id
              WHERE e.employee_id IN ({ph})
@@ -2381,7 +2376,7 @@ def dashboard_page(conn, building: str) -> None:
                         GROUP BY ph2.reason
                         ORDER BY COUNT(*) DESC, MAX(date(ph2.point_date)) DESC, ph2.reason
                         LIMIT 1
-                   ), '—') AS top_reason
+                   ), '�') AS top_reason
               FROM employees e
               JOIN points_history ph ON ph.employee_id = e.employee_id
              WHERE e.employee_id IN ({ph})
@@ -2494,7 +2489,7 @@ def dashboard_page(conn, building: str) -> None:
         for key, fn in bucket_defs.items()
     }
 
-    # â”€â”€ Now that we have real data, fill the top-of-page widgets â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Now that we have real data, fill the top-of-page widgets ─────────────
     at_risk_5plus = bucket_counts.get("5-6", 0) + bucket_counts.get("7", 0)
     total_active  = len(emp_detail_rows)
 
@@ -2628,7 +2623,7 @@ def dashboard_page(conn, building: str) -> None:
                         "employee_id": int(r["employee_id"]),
                         "Employee #": str(r["employee_id"]),
                         "Name": f"{r['last_name']}, {r['first_name']}",
-                        "Building": r.get("building") or "—",
+                        "Building": r.get("building") or "�",
                         "Point Total": f"{float(r.get('point_total') or 0):.1f}",
                         "Last Point Date": fmt_date(r.get("last_point_date")),
                     }
@@ -2662,7 +2657,7 @@ def dashboard_page(conn, building: str) -> None:
                     {
                         "Employee #": str(r["employee_id"]),
                         "Name": f"{r['last_name']}, {r['first_name']}",
-                        "Building": r.get("building") or "—",
+                        "Building": r.get("building") or "�",
                         "Rolloff Date": fmt_date(r.get("rolloff_date")),
                         "Current Points": f"{float(r.get('point_total') or 0):.1f}",
                     }
@@ -2681,7 +2676,7 @@ def dashboard_page(conn, building: str) -> None:
                     {
                         "Employee #": str(r["employee_id"]),
                         "Name": f"{r['last_name']}, {r['first_name']}",
-                        "Building": r.get("building") or "—",
+                        "Building": r.get("building") or "�",
                         "Perfect Date": fmt_date(r.get("perfect_attendance")),
                         "Current Points": f"{float(r.get('point_total') or 0):.1f}",
                     }
@@ -2740,9 +2735,9 @@ def dashboard_page(conn, building: str) -> None:
             pct_change = ((cur_avg_30d - prev_avg_30d) / prev_avg_30d) * 100.0
             pct_txt = f"{pct_change:+.1f}%"
         else:
-            pct_txt = "—"
+            pct_txt = "�"
         reason_rows = _read_rows(sql_build_reasons, (since_30, b))
-        most_common_reason = (reason_rows[0].get("reason") if reason_rows else None) or "—"
+        most_common_reason = (reason_rows[0].get("reason") if reason_rows else None) or "�"
         snap_rows.append(
             {
                 "Building": b,
@@ -2766,10 +2761,10 @@ def dashboard_page(conn, building: str) -> None:
                 {
                     "Employee #": str(r["employee_id"]),
                     "Name": f"{r['last_name']}, {r['first_name']}",
-                    "Building": r.get("building") or "—",
+                    "Building": r.get("building") or "�",
                     "Points (30d)": f"{float(r.get('points_30d') or 0.0):.1f}",
                     "Last Point Date": fmt_date(r.get("last_point_date")),
-                    "Top Reason": (r.get("top_reason") or "—"),
+                    "Top Reason": (r.get("top_reason") or "�"),
                 }
                 for r in gt1_rows
             ]
@@ -2781,7 +2776,7 @@ def dashboard_page(conn, building: str) -> None:
     else:
         info_box("No employees over 1.0 points in the last 30 days.")
 
-    st.markdown("#### Trending Risks  — On track to exceed 8 points")
+    st.markdown("#### Trending Risks  � On track to exceed 8 points")
     pts60_rows = _read_rows(sql_points_60d, (*emp_ids, since_60))
     points60_by_emp = {int(r.get("employee_id")): float(r.get("points_60d") or 0.0) for r in pts60_rows}
     weekdays_60 = max(len(pd.bdate_range(start=today - timedelta(days=60), end=today)), 1)
@@ -2798,7 +2793,7 @@ def dashboard_page(conn, building: str) -> None:
                 {
                     "Employee #": str(emp_id),
                     "Name": f"{r['last_name']}, {r['first_name']}",
-                    "Building": r.get("building") or "—",
+                    "Building": r.get("building") or "�",
                     "Current Points": f"{current_points:.1f}",
                     "Points (60d)": f"{points_60d:.1f}",
                     "Projected +30d": f"{projected_30d:.1f}",
@@ -2883,7 +2878,7 @@ def dashboard_page(conn, building: str) -> None:
 
     denominator_count = max(len(emp_ids), 1)
     if metric_choice == "Rate":
-        st.caption("Rate uses approximate active-headcount denominator: incidents ÷ active employees × 100.")
+        st.caption("Rate uses approximate active-headcount denominator: incidents � active employees � 100.")
 
     def metric_value(stats: dict, metric: str) -> float:
         incidents = float(stats.get("incidents") or 0)
@@ -2909,7 +2904,7 @@ def dashboard_page(conn, building: str) -> None:
             sql_weekday_reason,
             (*emp_ids, window_start.isoformat(), window_end.isoformat(), dow),
         )
-        top_reason_day = (weekday_reason_rows[0].get("reason") if weekday_reason_rows else None) or "—"
+        top_reason_day = (weekday_reason_rows[0].get("reason") if weekday_reason_rows else None) or "�"
 
         table_rows.append(
             {
@@ -2939,7 +2934,7 @@ def dashboard_page(conn, building: str) -> None:
             (*emp_ids, window_start.isoformat(), window_end.isoformat(), sel_dow),
         )
         if emp_rows:
-            st.markdown(f"**Employees pointed on {sel_label}s** ({window_start.strftime('%b %d')} – {window_end.strftime('%b %d, %Y')})")
+            st.markdown(f"**Employees pointed on {sel_label}s** ({window_start.strftime('%b %d')} � {window_end.strftime('%b %d, %Y')})")
             emp_display = pd.DataFrame([
                 {
                     "Employee": r["employee"],
@@ -2962,7 +2957,7 @@ def dashboard_page(conn, building: str) -> None:
         worst_value_txt = f"{worst_value:.1f} points"
     else:
         worst_value_txt = f"{worst_value:.2f} incidents per 100 active"
-    st.markdown(f"• Worst weekday ({metric_choice.lower()}): **{worst_label}** — **{worst_value_txt}**")
+    st.markdown(f"� Worst weekday ({metric_choice.lower()}): **{worst_label}** � **{worst_value_txt}**")
 
     delta_rows = []
     for dow in dow_order:
@@ -2979,25 +2974,25 @@ def dashboard_page(conn, building: str) -> None:
 
     if delta_rows:
         ch_dow, _, pct_txt = max(delta_rows, key=lambda x: x[1])
-        st.markdown(f"• Biggest change vs prior matching window: **{dow_labels[ch_dow]}** — **{pct_txt}**")
+        st.markdown(f"� Biggest change vs prior matching window: **{dow_labels[ch_dow]}** � **{pct_txt}**")
 
     reason_rows = _read_rows(
         sql_weekday_reason,
         (*emp_ids, window_start.isoformat(), window_end.isoformat(), worst_dow),
     )
-    top_reason = (reason_rows[0].get("reason") if reason_rows else None) or "—"
-    if top_reason != "—":
-        st.markdown(f"• Most common reason on {worst_label}: **{top_reason}**")
+    top_reason = (reason_rows[0].get("reason") if reason_rows else None) or "�"
+    if top_reason != "�":
+        st.markdown(f"� Most common reason on {worst_label}: **{top_reason}**")
 
 
 
-# â”€â”€ PTO Usage Analytics â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── PTO Usage Analytics ────────────────────────────────────────────────────────
 _PTO_PALETTE = [
     "#00d4ff", "#7b61ff", "#00e5a0", "#ff6b6b", "#ffa94d",
     "#a9e34b", "#f06595", "#74c0fc", "#e599f7", "#63e6be",
 ]
 
-# Fixed colors for canonical PTO types â€” override palette-assigned colors
+# Fixed colors for canonical PTO types — override palette-assigned colors
 _PTO_TYPE_COLORS = {
     "Vacation": "#00d4ff",  # light blue
     "Personal": "#7b61ff",  # purple
@@ -3046,7 +3041,7 @@ def _weekday_date_range(start_val, end_val):
 def pto_page(conn, building: str) -> None:
     page_heading("PTO Usage Analytics", "Upload a CSV export to analyze PTO patterns by type, building, and employee.")
 
-    # â”€â”€ Active employee roster from DB (active_only=True by default) â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Active employee roster from DB (active_only=True by default) ────────
     active_db = load_employees(conn, building="All")
     active_ids: set[int] = {int(e["employee_id"]) for e in active_db}
     active_names: set[str] = {
@@ -3059,7 +3054,7 @@ def pto_page(conn, building: str) -> None:
     else:
         active_count_in_scope = len(active_db)
 
-    # â”€â”€ Load persisted PTO data from DB into session state if not already loaded â”€â”€
+    # ── Load persisted PTO data from DB into session state if not already loaded ──
     def _set_session_pto_df(rows: list[dict]) -> bool:
         if not rows:
             return False
@@ -3080,7 +3075,7 @@ def pto_page(conn, building: str) -> None:
         except Exception:
             pass  # No persisted data or schema not yet migrated
 
-    # â”€â”€ CSV upload â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── CSV upload ──────────────────────────────────────────────────────────
     with st.expander("Upload PTO Data", expanded="pto_df" not in st.session_state):
         st.markdown(
             "Upload a completed template to upload employee PTO data and see trends and analytics."
@@ -3099,7 +3094,7 @@ def pto_page(conn, building: str) -> None:
 
         if uploaded is not None:
             try:
-                raw = pd.read_csv(uploaded)
+                raw = pd.read_csv(uploaded, encoding="utf-8-sig")
                 raw.columns = [c.strip().lower().replace(" ", "_") for c in raw.columns]
                 cols = set(raw.columns)
 
@@ -3111,7 +3106,7 @@ def pto_page(conn, building: str) -> None:
                     df["employee"] = df["last_name"].str.strip() + ", " + df["first_name"].str.strip()
                     df["days"] = (df["hours"] / 8).round(2)
 
-                    # Build nameâ†’id lookup from DB for reliable export
+                    # Build name→id lookup from DB for reliable export
                     _name_to_id: dict = {
                         f"{e['last_name'].strip().lower()}, {e['first_name'].strip().lower()}": int(e["employee_id"])
                         for e in active_db
@@ -3133,7 +3128,7 @@ def pto_page(conn, building: str) -> None:
                     if excluded:
                         removed_names = sorted(df.loc[~mask, "employee"].unique())
                         st.warning(
-                            f"{excluded} row(s) excluded â€” employee(s) not found in the active database: "
+                            f"{excluded} row(s) excluded — employee(s) not found in the active database: "
                             + ", ".join(removed_names)
                         )
                     df = df[mask].copy()
@@ -3174,7 +3169,7 @@ def pto_page(conn, building: str) -> None:
                         except Exception as _save_err:
                             st.warning(f"PTO data parsed but could not be saved to database: {_save_err}")
                 elif "date" in cols:
-                    # Legacy single-day format â€” convert to range format
+                    # Legacy single-day format — convert to range format
                     required = {"last_name", "first_name", "building", "pto_type", "date", "hours"}
                     missing = required - cols
                     if missing:
@@ -3206,7 +3201,7 @@ def pto_page(conn, building: str) -> None:
 
     df_all: pd.DataFrame = st.session_state["pto_df"].copy()
 
-    # â”€â”€ 30-day PTO utilization for the At a Glance bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── 30-day PTO utilization for the At a Glance bar ───────────────────────
     _now = date.today()
     _since_30 = pd.Timestamp(_now - timedelta(days=30))
     _df_30 = df_all[
@@ -3225,11 +3220,11 @@ def pto_page(conn, building: str) -> None:
         points_7d=0,
         rolloffs_due_7d=0,
         perfect_due_7d=0,
-        label="At a glance â€” PTO (Last 30 Days)",
+        label="At a glance — PTO (Last 30 Days)",
         pto_utilization_pct=_util_30,
     )
 
-    # â”€â”€ Filters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Filters ─────────────────────────────────────────────────────────────
     import re as _re
     divider()
     section_label("Filters")
@@ -3250,7 +3245,7 @@ def pto_page(conn, building: str) -> None:
 
     all_types = sorted(df_all["pto_type"].dropna().unique())
 
-    # â”€â”€ PTO type toggle chips â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── PTO type toggle chips ────────────────────────────────────────────────
     def _tkey(t: str) -> str:
         return "pto_toggle_" + _re.sub(r"[^a-z0-9]", "_", t.lower())
 
@@ -3293,7 +3288,7 @@ def pto_page(conn, building: str) -> None:
 
     sel_types = [t for t in all_types if st.session_state["pto_type_toggles"].get(t, True)]
 
-    # Apply filters â€” include any PTO event that overlaps the selected date range
+    # Apply filters — include any PTO event that overlaps the selected date range
     df = df_all[
         (df_all["start_date"].dt.date <= date_end)
         & (df_all["end_date"].dt.date >= date_start)
@@ -3307,7 +3302,7 @@ def pto_page(conn, building: str) -> None:
         info_box("No PTO records match the current filters.")
         return
 
-    # â”€â”€ KPI tiles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── KPI tiles ───────────────────────────────────────────────────────────
     divider()
     section_header("Summary")
     k1, k2, k3, k4 = st.columns(4)
@@ -3321,13 +3316,13 @@ def pto_page(conn, building: str) -> None:
             _pto_date_set.add(pd.Timestamp(_d).normalize())
     total_dates_impacted = len(_pto_date_set)
     unique_emps = df["employee"].nunique()
-    # Denominator is active DB headcount for the selected building â€” not the CSV
+    # Denominator is active DB headcount for the selected building — not the CSV
     denom = active_count_in_scope if sel_building == building else (
         sum(1 for e in active_db if (e.get("location") or "") == sel_building)
         if sel_building != "All" else len(active_db)
     )
     utilization_pct = (unique_emps / denom * 100) if denom else 0
-    top_type = df.groupby("pto_type")["hours"].sum().idxmax() if not df.empty else "â€”"
+    top_type = df.groupby("pto_type")["hours"].sum().idxmax() if not df.empty else "—"
     avg_hours = total_hours / unique_emps if unique_emps else 0
 
     with k1:
@@ -3339,7 +3334,7 @@ def pto_page(conn, building: str) -> None:
     with k4:
         _pto_metric("Avg Days / Employee", f"{avg_hours / 8:.1f}", f"{avg_hours:.0f} hrs avg")
 
-    # â”€â”€ Donut chart + Monthly trend â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Donut chart + Monthly trend ─────────────────────────────────────────
     divider()
     chart_col, trend_col = st.columns(2)
 
@@ -3410,13 +3405,13 @@ def pto_page(conn, building: str) -> None:
         )
         st.plotly_chart(trend_fig, use_container_width=True, key="pto_trend")
 
-    # â”€â”€ Donut drill-down â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Donut drill-down ────────────────────────────────────────────────────
     selected_points = donut_event.selection.get("points", []) if donut_event.selection else []
     if selected_points:
         sel_type = selected_points[0].get("label")
         if sel_type:
             divider()
-            section_label(f"Employees â€” {sel_type}")
+            section_label(f"Employees — {sel_type}")
             if sel_type == "Other":
                 drill_src = df[~df["pto_type"].isin(_top5_types)].copy()
             else:
@@ -3460,7 +3455,7 @@ def pto_page(conn, building: str) -> None:
             col_order = ["Employee", "PTO Type", "Hours Used", "Days Impacted", "Building"]
             st.dataframe(drill[col_order], use_container_width=True, hide_index=True)
 
-    # â”€â”€ Building comparison â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Building comparison ─────────────────────────────────────────────────
     divider()
     bc1, bc2 = st.columns(2)
 
@@ -3519,7 +3514,7 @@ def pto_page(conn, building: str) -> None:
                 x=dow_order,
                 y=subset.values,
                 marker=dict(color=_DOW_COLORS.get(pt, "#7b61ff"), line=dict(color="#060d1f", width=1)),
-                hovertemplate=f"<b>%{{x}}</b> â€” {pt}: %{{y:.0f}} hrs<extra></extra>",
+                hovertemplate=f"<b>%{{x}}</b> — {pt}: %{{y:.0f}} hrs<extra></extra>",
             ))
         dow_fig = go.Figure(data=dow_traces)
         dow_fig.update_layout(
@@ -3534,7 +3529,7 @@ def pto_page(conn, building: str) -> None:
         )
         st.plotly_chart(dow_fig, use_container_width=True, key="pto_dow_bar")
 
-    # â”€â”€ Top PTO users â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Top PTO users ───────────────────────────────────────────────────────
     divider()
     tu1, tu2 = st.columns([3, 2])
 
@@ -3553,9 +3548,9 @@ def pto_page(conn, building: str) -> None:
         st.dataframe(top_users[["Employee", "Building", "Days", "Hours"]], use_container_width=True, hide_index=True)
 
     with tu2:
-        section_header("Zero PTO â€” No Usage Recorded")
+        section_header("Zero PTO — No Usage Recorded")
         emps_with_pto = set(df["employee"].unique())
-        # Use the DB roster as the reference â€” not the CSV
+        # Use the DB roster as the reference — not the CSV
         scoped_active = [
             e for e in active_db
             if sel_building == "All" or (e.get("location") or "") == sel_building
@@ -3571,7 +3566,7 @@ def pto_page(conn, building: str) -> None:
         else:
             info_box("All active employees have PTO recorded in this period.")
 
-    # â”€â”€ Module 1: Planned vs Unplanned â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Module 1: Planned vs Unplanned ──────────────────────────────────────
     divider()
     section_header("Planned vs Unplanned PTO")
 
@@ -3587,7 +3582,7 @@ def pto_page(conn, building: str) -> None:
         return "Other"
 
     def _drill_table(source_df: pd.DataFrame, label: str) -> None:
-        section_label(f"Employees â€” {label}")
+        section_label(f"Employees — {label}")
         d = source_df.copy()
         d["start_date"] = d["start_date"].dt.strftime("%Y-%m-%d")
         d["end_date"]   = d["end_date"].dt.strftime("%Y-%m-%d")
@@ -3610,7 +3605,7 @@ def pto_page(conn, building: str) -> None:
     prot_h = cat_hrs.get("Protected / Neutral", 0)
 
     pv1, pv2, pv3, pv4 = st.columns(4)
-    _pct = lambda h: f"{h / total_cls_h * 100:.0f}%" if total_cls_h else "â€”"
+    _pct = lambda h: f"{h / total_cls_h * 100:.0f}%" if total_cls_h else "—"
     with pv1:
         _pto_metric("Planned", _pct(plan_h), f"{plan_h / 8:.1f} days")
     with pv2:
@@ -3618,7 +3613,7 @@ def pto_page(conn, building: str) -> None:
     with pv3:
         _pto_metric("Protected / Neutral", _pct(prot_h), f"{prot_h / 8:.1f} days")
     with pv4:
-        ratio_str = f"{plan_h / unpl_h:.1f}Ã—" if unpl_h else "N/A"
+        ratio_str = f"{plan_h / unpl_h:.1f}×" if unpl_h else "N/A"
         _pto_metric("Plan : Unplan Ratio", ratio_str, "higher = more predictable")
 
     df_cls["month"] = df_cls["start_date"].dt.to_period("M").dt.to_timestamp()
@@ -3665,7 +3660,7 @@ def pto_page(conn, building: str) -> None:
         cls_tbl["Hours"] = cls_tbl["Hours"].round(1)
         st.dataframe(cls_tbl, use_container_width=True, hide_index=True, height=300)
 
-    # Trend drilldown â€” rendered outside columns at full width
+    # Trend drilldown — rendered outside columns at full width
     pu_pts = pu_event.selection.get("points", []) if (pu_event and pu_event.selection) else []
     if pu_pts:
         pt = pu_pts[0]
@@ -3685,7 +3680,7 @@ def pto_page(conn, building: str) -> None:
             except Exception:
                 pass
 
-    # â”€â”€ Module 2: Concentration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Module 2: Concentration ──────────────────────────────────────
     divider()
     section_header("PTO Concentration \u2014 Who's Driving Usage?")
 
@@ -3757,7 +3752,7 @@ def pto_page(conn, building: str) -> None:
         )
         hist_event = st.plotly_chart(hist_fig, use_container_width=True, on_select="rerun", key="pto_dist_hist")
 
-    # Concentration drilldowns â€” rendered outside columns at full width
+    # Concentration drilldowns — rendered outside columns at full width
     conc_pts = conc_event.selection.get("points", []) if (conc_event and conc_event.selection) else []
     if conc_pts:
         bar_label = conc_pts[0].get("y") or conc_pts[0].get("label") or ""
@@ -3833,10 +3828,10 @@ def pto_page(conn, building: str) -> None:
                 _hist_agg["Hours"] = _hist_agg["Hours"].round(1)
                 _hist_agg["Days"] = (_hist_agg["Hours"] / 8).round(1)
                 divider()
-                section_label(f"Employees Using {bin_sel} â€” by PTO Type")
+                section_label(f"Employees Using {bin_sel} — by PTO Type")
                 st.dataframe(_hist_agg, use_container_width=True, hide_index=True)
 
-    # â”€â”€ Module 3: Burnout & Retention Risk â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Module 3: Burnout & Retention Risk ──────────────────────────────────
     divider()
     section_header("Burnout & Retention Risk")
 
@@ -3848,7 +3843,7 @@ def pto_page(conn, building: str) -> None:
 
     br1, br2, br3 = st.columns(3)
     with br1:
-        _pto_metric("No PTO Recorded", str(no_pto_count), "employees â€” 0 hrs")
+        _pto_metric("No PTO Recorded", str(no_pto_count), "employees — 0 hrs")
     with br2:
         _pto_metric("Zero-PTO Rate", f"{no_pto_rate:.0f}%", "of active headcount")
     with br3:
@@ -3857,11 +3852,11 @@ def pto_page(conn, building: str) -> None:
     brl, brr = st.columns(2)
 
     with brl:
-        section_label("No PTO Usage â€” Burnout Risk")
+        section_label("No PTO Usage — Burnout Risk")
         if no_pto:
             st.dataframe(pd.DataFrame({"Employee": no_pto}), use_container_width=True, hide_index=True)
         else:
-            info_box("All active employees have PTO recorded. âœ“")
+            info_box("All active employees have PTO recorded. ✓")
     with brr:
         section_label(f"Bottom 10% of Users({low10_n} employees)")
         if not low_users.empty:
@@ -3872,7 +3867,7 @@ def pto_page(conn, building: str) -> None:
         else:
             info_box("Not enough data for bottom 10% analysis.")
 
-    # â”€â”€ Module 4: Pace & Seasonality â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Module 4: Pace & Seasonality ────────────────────────────────────────
     divider()
     section_header("PTO Pace & Seasonality")
 
@@ -3888,11 +3883,11 @@ def pto_page(conn, building: str) -> None:
     fh_rate = fh_hrs / max(1, period_days // 2)
     sh_rate = sh_hrs / max(1, period_days - period_days // 2)
     delta_pct = (sh_rate - fh_rate) / fh_rate * 100 if fh_rate else 0
-    trend_arrow = "â–²" if delta_pct > 5 else ("â–¼" if delta_pct < -5 else "â†’")
+    trend_arrow = "▲" if delta_pct > 5 else ("▼" if delta_pct < -5 else "→")
 
     ps1, ps2, ps3 = st.columns(3)
     with ps1:
-        _pto_metric("Annualized PTO Days", f"{annualized_total:,.0f}", "at current pace â€” total")
+        _pto_metric("Annualized PTO Days", f"{annualized_total:,.0f}", "at current pace — total")
     with ps2:
         _pto_metric("Days / Employee (ann.)", f"{annualized_per_emp:.1f}", "per active employee")
     with ps3:
@@ -3941,7 +3936,7 @@ def pto_page(conn, building: str) -> None:
                 divider()
                 _drill_table(drill_mon, f"PTO in {sel_mon_label}")
 
-    # â”€â”€ Export â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Export ──────────────────────────────────────────────────────────────
     divider()
     section_label("Export Filtered Data")
     exp_cols = ["employee_id", "employee", "building", "pto_type", "start_date", "end_date", "hours", "days"]
@@ -3966,7 +3961,7 @@ def pto_page(conn, building: str) -> None:
     if st.button("Clear PTO Data", key="pto_clear_btn_export"):
         _clear_pto_data()
 
-    # â”€â”€ Clear data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Clear data ──────────────────────────────────────────────────────────
     divider()
     st.markdown(
         "<p style='color:#6a8ab8;font-size:.8rem;margin-bottom:.4rem'>"
@@ -3976,7 +3971,7 @@ def pto_page(conn, building: str) -> None:
     if st.button("Clear PTO Data", key="pto_clear_btn_footer"):
         _clear_pto_data()
 
-# â”€â”€ Employees â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Employees ─────────────────────────────────────────────────────────────────
 def employees_page(conn, building: str) -> None:
     page_heading("Employees", "Look up employees and review current attendance status.")
 
@@ -4051,7 +4046,7 @@ def employees_page(conn, building: str) -> None:
         info_box("No history entries yet for this employee.")
 
 
-# â”€â”€ Points Ledger â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Points Ledger ─────────────────────────────────────────────────────────────
 def points_ledger_page(conn, building: str) -> None:
     page_heading("Points Ledger", "Record attendance transactions and maintain a complete audit trail.")
 
@@ -4363,7 +4358,7 @@ def manage_employees_page(conn) -> None:
     BLDG_OPTS = ["", *BUILDINGS]
     tab_add, tab_edit = st.tabs(["Add Employee", "Edit / Archive / Delete"])
 
-    # â”€â”€ Add â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Add ──────────────────────────────────────────────────────────────────
     with tab_add:
         st.markdown("<div style='height:.5rem'></div>", unsafe_allow_html=True)
         col_form, col_info = st.columns([1, 1], gap="large")
@@ -4392,7 +4387,7 @@ def manage_employees_page(conn) -> None:
                         )
                         conn.commit()
                         clear_read_caches()
-                        st.success(f"Employee #{int(emp_id)} â€” {last}, {first} added.")
+                        st.success(f"Employee #{int(emp_id)} — {last}, {first} added.")
                     except Exception as exc:
                         st.error(str(exc))
 
@@ -4406,7 +4401,7 @@ def manage_employees_page(conn) -> None:
                 unsafe_allow_html=True,
             )
 
-    # â”€â”€ Edit / Archive / Delete â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Edit / Archive / Delete ───────────────────────────────────────────────
     with tab_edit:
         st.markdown("<div style='height:.5rem'></div>", unsafe_allow_html=True)
         all_rows = [dict(r) for r in repo.search_employees(conn, q="", active_only=False, limit=3000)]
@@ -4498,7 +4493,7 @@ def manage_employees_page(conn) -> None:
                 unsafe_allow_html=True,
             )
             st.markdown("<div style='height:.6rem'></div>", unsafe_allow_html=True)
-            confirmed = st.checkbox(f"I understand â€” permanently delete #{sel[0]}")
+            confirmed = st.checkbox(f"I understand — permanently delete #{sel[0]}")
             if confirmed:
                 if st.button("Delete Employee", key="del_emp"):
                     try:
@@ -4511,7 +4506,7 @@ def manage_employees_page(conn) -> None:
                         st.error(str(exc))
 
 
-# â”€â”€ Exports & Forecasts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Exports & Forecasts ───────────────────────────────────────────────────────
 EXPORT_LABELS = {
     "30-day point history":        "30-Day Point History",
     "upcoming 2-month roll-offs":  "Upcoming 2-Month Roll-offs",
@@ -4701,7 +4696,7 @@ def exports_page(conn, building: str) -> None:
             info_box("Choose a report type and date range, then click <b>Run Report</b>.")
 
 
-# â”€â”€ System Updates â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── System Updates ────────────────────────────────────────────────────────────
 def system_updates_page(conn) -> None:
     page_heading(
         "System Updates",
@@ -4719,11 +4714,11 @@ def system_updates_page(conn) -> None:
         dry_run  = st.toggle("Dry run (preview only)", value=True)
 
         if dry_run:
-            st.markdown("<div class='info-box' style='margin:.6rem 0'>Dry run â€” no data will be changed.</div>", unsafe_allow_html=True)
+            st.markdown("<div class='info-box' style='margin:.6rem 0'>Dry run — no data will be changed.</div>", unsafe_allow_html=True)
             ok = True
         else:
-            st.markdown("<div class='warn-box' style='margin:.6rem 0'>Live mode â€” changes will be written to the database.</div>", unsafe_allow_html=True)
-            ok = st.checkbox("I confirm â€” apply changes to the database")
+            st.markdown("<div class='warn-box' style='margin:.6rem 0'>Live mode — changes will be written to the database.</div>", unsafe_allow_html=True)
+            ok = st.checkbox("I confirm — apply changes to the database")
 
         st.markdown("<div style='height:.5rem'></div>", unsafe_allow_html=True)
         btn_roll = st.button("Run 2-Month Roll-offs",      use_container_width=True, disabled=not ok)
@@ -4732,11 +4727,11 @@ def system_updates_page(conn) -> None:
 
         st.markdown(
             "<div style='margin-top:.9rem;font-size:.79rem;color:#6a8ab8'>"
-            "<b style='color:#7eb3ff'>2-Month Roll-offs</b> â€” removes 1 pt per overdue period, "
+            "<b style='color:#7eb3ff'>2-Month Roll-offs</b> — removes 1 pt per overdue period, "
             "advances the roll-off date.<br><br>"
-            "<b style='color:#7eb3ff'>Perfect Attendance</b> â€” advances eligible milestone dates "
+            "<b style='color:#7eb3ff'>Perfect Attendance</b> — advances eligible milestone dates "
             "by one month per overdue period. No points are removed.<br><br>"
-            "<b style='color:#7eb3ff'>YTD Roll-offs</b> â€” applies a rolling 12-month net point "
+            "<b style='color:#7eb3ff'>YTD Roll-offs</b> — applies a rolling 12-month net point "
             "reduction. Does not move roll-off or perfect attendance anchors.</div>",
             unsafe_allow_html=True,
         )
@@ -4820,7 +4815,7 @@ def system_updates_page(conn) -> None:
             )
 
 
-# â”€â”€ Corrective Action â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Corrective Action ─────────────────────────────────────────────────────────
 def corrective_action_page(conn, building: str) -> None:
     page_heading(
         "Corrective Action",
@@ -4916,7 +4911,7 @@ def corrective_action_page(conn, building: str) -> None:
         info_box("No active employees are currently at or above the 5.0 point threshold.")
         return
 
-    # â”€â”€ Shared CSS injected once â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Shared CSS injected once ──────────────────────────────────────────────
     st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
@@ -5066,7 +5061,7 @@ def corrective_action_page(conn, building: str) -> None:
 <div class="ca-wrap">
 """, unsafe_allow_html=True)
 
-    # â”€â”€ Summary pills â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Summary pills ─────────────────────────────────────────────────────────
     pills_html = '<div class="ca-pills">'
     pills_html += (
         "<div class='ca-pill' style='color:#ff9f0a;border-color:rgba(255,159,10,.30);"
@@ -5094,7 +5089,7 @@ def corrective_action_page(conn, building: str) -> None:
     pills_html += "</div>"
     st.markdown(pills_html, unsafe_allow_html=True)
 
-    # â”€â”€ Inline edit panel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Inline edit panel ─────────────────────────────────────────────────────
     if "ca_edit_id" not in st.session_state:
         st.session_state["ca_edit_id"] = None
     editing_id = st.session_state.get("ca_edit_id")
@@ -5140,7 +5135,7 @@ def corrective_action_page(conn, building: str) -> None:
                     st.session_state["ca_edit_id"] = None
                     st.rerun()
 
-    # â”€â”€ Tier sections â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Tier sections ─────────────────────────────────────────────────────────
     def render_ca_group(group_label: str, group_key: str, rows: list[dict], empty_text: str) -> None:
         st.markdown(
             f"<div class='ca-section'>"
@@ -5224,7 +5219,7 @@ def corrective_action_page(conn, building: str) -> None:
         {
             "Employee #":         str(int(r["employee_id"])),
             "Name":               f"{r['last_name']}, {r['first_name']}",
-            "Building":           r.get("building") or "â€”",
+            "Building":           r.get("building") or "—",
             "Point Total":        f"{float(r.get('point_total') or 0):.1f}",
             "Last Point Date":    fmt_date(r.get("last_point_date")),
             "Point Warning Date": fmt_date(r.get("point_warning_date")),
@@ -5242,7 +5237,7 @@ def corrective_action_page(conn, building: str) -> None:
     )
 
 
-# â”€â”€ Main â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Main ──────────────────────────────────────────────────────────────────────
 def main() -> None:
     apply_theme()
     ensure_session_defaults()
