@@ -4019,6 +4019,39 @@ def employees_page(conn, building: str) -> None:
     c3.metric("Perfect Attendance", fmt_date(emp.get("perfect_attendance")))
     c4.metric("Last Point Entry", fmt_date(emp.get("last_point_date")))
 
+    # --- Override Point Total ---
+    with st.expander("Override Point Total"):
+        st.caption("Manually set the point total. Use this to correct totals affected by prior calculation errors. "
+                   "This inserts an adjustment entry in the point history.")
+        ov_col1, ov_col2 = st.columns([1, 2])
+        with ov_col1:
+            new_total = st.number_input("New Point Total", min_value=0.0, step=0.5, value=pts, key=f"override_pts_{emp_id}")
+        with ov_col2:
+            override_note = st.text_input("Reason for override", value="Manual correction — prior roll-off calculation error", key=f"override_note_{emp_id}")
+        if st.button("Apply Override", key=f"override_btn_{emp_id}"):
+            adjustment = round(new_total - pts, 3)
+            if abs(adjustment) < 0.001:
+                st.warning("New total is the same as the current total.")
+            else:
+                try:
+                    with db.tx(conn):
+                        repo.insert_points_history(
+                            conn,
+                            employee_id=emp_id,
+                            point_date=date.today(),
+                            points=adjustment,
+                            reason="Manual Adjustment",
+                            note=override_note or "Manual point total override",
+                            flag_code="MANUAL",
+                        )
+                        services.recalculate_employee_dates(conn, emp_id)
+                    conn.commit()
+                    clear_read_caches()
+                    st.success(f"Point total adjusted by {adjustment:+.1f} → new total: {new_total:.1f}")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+
     divider()
     section_label("Point History (all events)")
     hist = [dict(r) for r in repo.get_points_history(conn, emp_id, limit=5000)]
