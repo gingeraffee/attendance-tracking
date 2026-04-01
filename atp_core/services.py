@@ -635,6 +635,14 @@ def _add_month(d: date) -> date:
     return date(y, m, 1)
 
 
+def _current_point_total(conn, employee_id: int) -> float:
+    """Return the employee's current point_total (floored at 0.0)."""
+    rows = repo.with_running_point_totals(
+        repo.get_points_history_ordered(conn, employee_id)
+    )
+    return float(rows[-1]["point_total"]) if rows else 0.0
+
+
 def preview_ytd_rolloffs(
     conn,
     run_date: date | None = None,
@@ -719,7 +727,11 @@ def preview_ytd_rolloffs(
             )
 
         if not already:
-            pending.append((employee_id, net_points, item_roll_date, item_label))
+            # Cap to current point_total so we never go below 0.0
+            current_total = _current_point_total(conn, int(employee_id))
+            capped = round(min(float(net_points), max(current_total, 0.0)), 3)
+            if capped > 0.0:
+                pending.append((employee_id, capped, item_roll_date, item_label))
 
     return pending
 
@@ -769,7 +781,13 @@ def apply_ytd_rolloffs(
         if already:
             continue
 
-        applied.append((employee_id, net_points, roll_date, label))
+        # Cap the roll-off so point_total never goes below 0.0
+        current_total = _current_point_total(conn, int(employee_id))
+        capped = round(min(float(net_points), max(current_total, 0.0)), 3)
+        if capped <= 0.0:
+            continue
+
+        applied.append((employee_id, capped, roll_date, label))
 
         if dry_run:
             continue
@@ -779,7 +797,7 @@ def apply_ytd_rolloffs(
                 conn,
                 employee_id=int(employee_id),
                 point_date=roll_date,
-                points=-float(net_points),
+                points=-float(capped),
                 reason="YTD Roll-Off",
                 note=f"YTD roll-off for {label}",
                 flag_code="AUTO",
