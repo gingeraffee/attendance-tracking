@@ -4968,6 +4968,8 @@ def system_updates_page(conn) -> None:
                         chg_df = pd.DataFrame(changes)
                         st.dataframe(chg_df, use_container_width=True, hide_index=True)
                         st.markdown(f"**{len(changes)}** employee(s) will be updated.")
+        except Exception as exc:
+            st.error(f"Error reading CSV: {exc}")
 
     # --- Apply step (outside file-upload block so button survives reruns) ---
     if "bulk_override_changes" in st.session_state:
@@ -5036,8 +5038,6 @@ def system_updates_page(conn) -> None:
             else:
                 st.session_state["bulk_override_msg"] = f"✅ Applied {applied} override(s) successfully."
             st.rerun()
-        except Exception as exc:
-            st.error(f"Error reading CSV: {exc}")
 
     divider()
 
