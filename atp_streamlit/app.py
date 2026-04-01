@@ -4800,6 +4800,25 @@ def exports_page(conn, building: str) -> None:
 
 
 # ── System Updates ────────────────────────────────────────────────────────────
+def _build_full_backup_excel(conn) -> bytes:
+    """Build an Excel workbook with Employees and Point History sheets."""
+    import io
+    buf = io.BytesIO()
+    emp_df = pd.DataFrame([dict(r) for r in fetchall(conn,
+        'SELECT employee_id, last_name, first_name, COALESCE("Location",\'\') AS "Location", '
+        'start_date, point_total, last_point_date, rolloff_date, perfect_attendance, '
+        'point_warning_date, is_active FROM employees ORDER BY last_name, first_name'
+    )])
+    hist_df = pd.DataFrame([dict(r) for r in fetchall(conn,
+        'SELECT id, employee_id, point_date, points, reason, note, flag_code '
+        'FROM points_history ORDER BY employee_id, point_date, id'
+    )])
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        emp_df.to_excel(writer, sheet_name="Employees", index=False)
+        hist_df.to_excel(writer, sheet_name="Point History", index=False)
+    return buf.getvalue()
+
+
 def system_updates_page(conn) -> None:
     page_heading(
         "System Updates",
@@ -4809,6 +4828,119 @@ def system_updates_page(conn) -> None:
     if "maintenance_log" not in st.session_state:
         st.session_state["maintenance_log"] = []
 
+    # ── Database Backup ──────────────────────────────────────────────────
+    section_label("Database Backup")
+    st.caption("Download a full snapshot of all employees and point history as an Excel file. "
+               "Always download a backup before running bulk operations.")
+    bk_col1, bk_col2 = st.columns([1, 2])
+    with bk_col1:
+        if st.button("Generate Backup", use_container_width=True, key="gen_backup"):
+            with st.spinner("Building backup..."):
+                st.session_state["_backup_bytes"] = _build_full_backup_excel(conn)
+                st.session_state["_backup_downloaded"] = True
+    with bk_col2:
+        if st.session_state.get("_backup_bytes"):
+            st.download_button(
+                "Download Full Backup (Excel)",
+                data=st.session_state["_backup_bytes"],
+                file_name=f"atp_full_backup_{date.today()}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                key="dl_backup",
+            )
+
+    divider()
+
+    # ── Recalculate All ──────────────────────────────────────────────────
+    section_label("Recalculate All Employee Totals")
+    st.caption("Recomputes every employee's point total, roll-off date, and perfect attendance date "
+               "from their full point history. Use this after fixing calculation bugs.")
+    backup_done = st.session_state.get("_backup_downloaded", False)
+    if not backup_done:
+        st.markdown("<div class='warn-box'>You must generate a backup above before recalculating.</div>", unsafe_allow_html=True)
+    recalc_confirm = st.checkbox("I confirm — recalculate all employee totals", disabled=not backup_done, key="recalc_confirm")
+    if st.button("Recalculate All", disabled=not (backup_done and recalc_confirm), use_container_width=False, key="btn_recalc_all"):
+        try:
+            with st.spinner("Recalculating all employees..."):
+                emp_rows = fetchall(conn, "SELECT employee_id FROM employees ORDER BY employee_id")
+                count = 0
+                with db.tx(conn):
+                    for row in emp_rows:
+                        services.recalculate_employee_dates(conn, int(row["employee_id"]))
+                        count += 1
+                conn.commit()
+                clear_read_caches()
+            st.success(f"Recalculated {count} employee(s). Point totals and dates are now recomputed from history.")
+        except Exception as exc:
+            st.error(str(exc))
+
+    divider()
+
+    # ── Bulk Point Total Override ────────────────────────────────────────
+    section_label("Bulk Point Total Override")
+    st.caption("Upload a CSV with corrected point totals. Required columns: **Employee #** and **Point Total**. "
+               "An adjustment entry will be inserted for each employee whose total differs.")
+    uploaded = st.file_uploader("Upload corrections CSV", type=["csv"], key="bulk_override_csv")
+    if uploaded is not None:
+        try:
+            csv_df = pd.read_csv(uploaded)
+            if "Employee #" not in csv_df.columns or "Point Total" not in csv_df.columns:
+                st.error("CSV must contain 'Employee #' and 'Point Total' columns.")
+            else:
+                adjustments = []
+                for _, row in csv_df.iterrows():
+                    eid = int(row["Employee #"])
+                    new_total = round(float(row["Point Total"]), 1)
+                    emp = repo.get_employee(conn, eid)
+                    if not emp:
+                        continue
+                    emp = dict(emp)
+                    current = round(float(emp.get("point_total", 0) or 0), 1)
+                    diff = round(new_total - current, 3)
+                    if abs(diff) >= 0.05:
+                        adjustments.append({
+                            "Employee #": eid,
+                            "Last Name": emp.get("last_name", ""),
+                            "First Name": emp.get("first_name", ""),
+                            "Current Total": current,
+                            "New Total": new_total,
+                            "Adjustment": round(diff, 1),
+                        })
+                if not adjustments:
+                    info_box("No adjustments needed — all totals match.")
+                else:
+                    adj_df = pd.DataFrame(adjustments)
+                    st.dataframe(adj_df, use_container_width=True, hide_index=True)
+                    st.markdown(f"**{len(adjustments)}** employee(s) will be adjusted.")
+                    bulk_confirm = st.checkbox("I confirm — apply these point total overrides", key="bulk_override_confirm")
+                    if st.button("Apply Bulk Overrides", disabled=not bulk_confirm, key="btn_bulk_override"):
+                        try:
+                            applied = 0
+                            for adj in adjustments:
+                                with db.tx(conn):
+                                    repo.insert_points_history(
+                                        conn,
+                                        employee_id=int(adj["Employee #"]),
+                                        point_date=date.today(),
+                                        points=float(adj["Adjustment"]),
+                                        reason="Manual Adjustment",
+                                        note="Bulk point total override — prior calculation correction",
+                                        flag_code="MANUAL",
+                                    )
+                                    services.recalculate_employee_dates(conn, int(adj["Employee #"]))
+                                applied += 1
+                            conn.commit()
+                            clear_read_caches()
+                            st.success(f"Applied {applied} adjustment(s).")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(str(exc))
+        except Exception as exc:
+            st.error(f"Error reading CSV: {exc}")
+
+    divider()
+
+    # ── Automated Jobs ───────────────────────────────────────────────────
     col_ctrl, col_results = st.columns([1, 2.2], gap="large")
 
     with col_ctrl:
