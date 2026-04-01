@@ -4631,6 +4631,7 @@ def run_export_query(conn, export_type: str, building: str, start_date: date, en
                 "Employee ID": int(employee_id),
                 "First Name": emp.get("first_name", ""),
                 "Last Name": emp.get("last_name", ""),
+                "Point Total": round(float(emp.get("point_total", 0) or 0), 1),
                 "Points": round(float(net_points), 1),
                 "Point Date": roll_date.isoformat(),
                 "Note": "YTD Roll Off",
@@ -4638,7 +4639,7 @@ def run_export_query(conn, export_type: str, building: str, start_date: date, en
             })
         if rows_out:
             return pd.DataFrame(rows_out)
-        return pd.DataFrame(columns=["Employee ID", "First Name", "Last Name", "Points", "Point Date", "Note", "Notes"])
+        return pd.DataFrame(columns=["Employee ID", "First Name", "Last Name", "Point Total", "Points", "Point Date", "Note", "Notes"])
 
     else:  # applied ytd roll-off history
         year_start = date(date.today().year, 1, 1)
@@ -4646,6 +4647,7 @@ def run_export_query(conn, export_type: str, building: str, start_date: date, en
             sql = """SELECT e.employee_id AS "Employee ID",
                             e.first_name  AS "First Name",
                             e.last_name   AS "Last Name",
+                            COALESCE(e.point_total, 0.0) AS "Point Total",
                             p.points      AS "Points",
                             p.point_date  AS "Point Date",
                             'YTD Roll Off' AS "Note",
@@ -4657,6 +4659,7 @@ def run_export_query(conn, export_type: str, building: str, start_date: date, en
             sql = """SELECT e.employee_id AS "Employee ID",
                             e.first_name  AS "First Name",
                             e.last_name   AS "Last Name",
+                            COALESCE(e.point_total, 0.0) AS "Point Total",
                             p.points      AS "Points",
                             p.point_date  AS "Point Date",
                             'YTD Roll Off' AS "Note",
