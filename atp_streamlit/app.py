@@ -4876,65 +4876,131 @@ def system_updates_page(conn) -> None:
 
     divider()
 
-    # ── Bulk Point Total Override ────────────────────────────────────────
-    section_label("Bulk Point Total Override")
-    st.caption("Upload a CSV with corrected point totals. Required columns: **Employee #** and **Point Total**. "
-               "An adjustment entry will be inserted for each employee whose total differs.")
+    # ── Bulk Employee Override ─────────────────────────────────────────
+    section_label("Bulk Employee Override")
+    st.caption("Upload a CSV with corrected employee data. Required column: **Employee #**. "
+               "Optional columns: **Point Total**, **2 Month Roll Off Date**, **Perfect Attendance Date**. "
+               "Point adjustments are inserted as history entries; dates are set directly.")
     uploaded = st.file_uploader("Upload corrections CSV", type=["csv"], key="bulk_override_csv")
     if uploaded is not None:
         try:
             csv_df = pd.read_csv(uploaded)
-            if "Employee #" not in csv_df.columns or "Point Total" not in csv_df.columns:
-                st.error("CSV must contain 'Employee #' and 'Point Total' columns.")
+            if "Employee #" not in csv_df.columns:
+                st.error("CSV must contain an 'Employee #' column.")
             else:
-                adjustments = []
-                for _, row in csv_df.iterrows():
-                    eid = int(row["Employee #"])
-                    new_total = round(float(row["Point Total"]), 1)
-                    emp = repo.get_employee(conn, eid)
-                    if not emp:
-                        continue
-                    emp = dict(emp)
-                    current = round(float(emp.get("point_total", 0) or 0), 1)
-                    diff = round(new_total - current, 3)
-                    if abs(diff) >= 0.05:
-                        adjustments.append({
+                has_points = "Point Total" in csv_df.columns
+                has_rolloff = "2 Month Roll Off Date" in csv_df.columns
+                has_perfect = "Perfect Attendance Date" in csv_df.columns
+                if not (has_points or has_rolloff or has_perfect):
+                    st.error("CSV must contain at least one of: 'Point Total', '2 Month Roll Off Date', 'Perfect Attendance Date'.")
+                else:
+                    changes = []
+                    for _, row in csv_df.iterrows():
+                        eid = int(row["Employee #"])
+                        emp = repo.get_employee(conn, eid)
+                        if not emp:
+                            continue
+                        emp = dict(emp)
+                        change = {
                             "Employee #": eid,
                             "Last Name": emp.get("last_name", ""),
                             "First Name": emp.get("first_name", ""),
-                            "Current Total": current,
-                            "New Total": new_total,
-                            "Adjustment": round(diff, 1),
-                        })
-                if not adjustments:
-                    info_box("No adjustments needed — all totals match.")
-                else:
-                    adj_df = pd.DataFrame(adjustments)
-                    st.dataframe(adj_df, use_container_width=True, hide_index=True)
-                    st.markdown(f"**{len(adjustments)}** employee(s) will be adjusted.")
-                    bulk_confirm = st.checkbox("I confirm — apply these point total overrides", key="bulk_override_confirm")
-                    if st.button("Apply Bulk Overrides", disabled=not bulk_confirm, key="btn_bulk_override"):
-                        try:
-                            applied = 0
-                            for adj in adjustments:
-                                with db.tx(conn):
-                                    repo.insert_points_history(
-                                        conn,
-                                        employee_id=int(adj["Employee #"]),
-                                        point_date=date.today(),
-                                        points=float(adj["Adjustment"]),
-                                        reason="Manual Adjustment",
-                                        note="Bulk point total override — prior calculation correction",
-                                        flag_code="MANUAL",
-                                    )
-                                    services.recalculate_employee_dates(conn, int(adj["Employee #"]))
-                                applied += 1
-                            conn.commit()
-                            clear_read_caches()
-                            st.success(f"Applied {applied} adjustment(s).")
-                            st.rerun()
-                        except Exception as exc:
-                            st.error(str(exc))
+                        }
+                        changed = False
+
+                        # -- Point Total --
+                        if has_points:
+                            val = row["Point Total"]
+                            new_total = round(float(val), 1) if pd.notna(val) and str(val).strip() != "" else 0.0
+                            current = round(float(emp.get("point_total", 0) or 0), 1)
+                            diff = round(new_total - current, 3)
+                            change["Current Points"] = current
+                            change["New Points"] = new_total
+                            change["Pt Adjustment"] = round(diff, 1)
+                            if abs(diff) >= 0.05:
+                                changed = True
+
+                        # -- Roll-off Date --
+                        if has_rolloff:
+                            val = row["2 Month Roll Off Date"]
+                            new_ro = None
+                            if pd.notna(val) and str(val).strip() != "":
+                                try:
+                                    new_ro = pd.to_datetime(str(val)).date()
+                                except Exception:
+                                    new_ro = None
+                            cur_ro_raw = emp.get("rolloff_date")
+                            cur_ro = date.fromisoformat(str(cur_ro_raw)) if cur_ro_raw else None
+                            change["Current Roll-off"] = str(cur_ro) if cur_ro else ""
+                            change["New Roll-off"] = str(new_ro) if new_ro else ""
+                            if new_ro != cur_ro:
+                                changed = True
+
+                        # -- Perfect Attendance Date --
+                        if has_perfect:
+                            val = row["Perfect Attendance Date"]
+                            new_pa = None
+                            if pd.notna(val) and str(val).strip() != "":
+                                try:
+                                    new_pa = pd.to_datetime(str(val)).date()
+                                except Exception:
+                                    new_pa = None
+                            cur_pa_raw = emp.get("perfect_attendance")
+                            cur_pa = date.fromisoformat(str(cur_pa_raw)) if cur_pa_raw else None
+                            change["Current Perfect Att."] = str(cur_pa) if cur_pa else ""
+                            change["New Perfect Att."] = str(new_pa) if new_pa else ""
+                            if new_pa != cur_pa:
+                                changed = True
+
+                        if changed:
+                            changes.append(change)
+
+                    if not changes:
+                        info_box("No changes needed — all values match.")
+                    else:
+                        chg_df = pd.DataFrame(changes)
+                        st.dataframe(chg_df, use_container_width=True, hide_index=True)
+                        st.markdown(f"**{len(changes)}** employee(s) will be updated.")
+                        bulk_confirm = st.checkbox("I confirm — apply these overrides", key="bulk_override_confirm")
+                        if st.button("Apply Bulk Overrides", disabled=not bulk_confirm, key="btn_bulk_override"):
+                            try:
+                                applied = 0
+                                for chg in changes:
+                                    eid = int(chg["Employee #"])
+                                    with db.tx(conn):
+                                        # Point total adjustment
+                                        if has_points and abs(chg.get("Pt Adjustment", 0)) >= 0.05:
+                                            repo.insert_points_history(
+                                                conn,
+                                                employee_id=eid,
+                                                point_date=date.today(),
+                                                points=float(chg["Pt Adjustment"]),
+                                                reason="Manual Adjustment",
+                                                note="Bulk override — prior calculation correction",
+                                                flag_code="MANUAL",
+                                            )
+                                            services.recalculate_employee_dates(conn, eid)
+
+                                        # Direct date overrides
+                                        if has_rolloff:
+                                            new_ro = chg.get("New Roll-off", "")
+                                            ro_val = new_ro if new_ro else None
+                                            repo._exec(conn,
+                                                "UPDATE employees SET rolloff_date = ? WHERE employee_id = ?;",
+                                                (ro_val, eid))
+                                        if has_perfect:
+                                            new_pa = chg.get("New Perfect Att.", "")
+                                            pa_val = new_pa if new_pa else None
+                                            repo._exec(conn,
+                                                "UPDATE employees SET perfect_attendance = ? WHERE employee_id = ?;",
+                                                (pa_val, eid))
+                                    applied += 1
+                                conn.commit()
+                                clear_read_caches()
+                                st.success(f"Applied {applied} override(s).")
+                                st.rerun()
+                            except Exception as exc:
+                                st.error(str(exc))
         except Exception as exc:
             st.error(f"Error reading CSV: {exc}")
 
