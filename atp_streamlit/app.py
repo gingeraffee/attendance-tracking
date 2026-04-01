@@ -4960,53 +4960,82 @@ def system_updates_page(conn) -> None:
                     if not changes:
                         info_box("No changes needed — all values match.")
                     else:
+                        # Store changes in session so they survive reruns
+                        st.session_state["bulk_override_changes"] = changes
+                        st.session_state["bulk_override_flags"] = {
+                            "has_points": has_points, "has_rolloff": has_rolloff, "has_perfect": has_perfect,
+                        }
                         chg_df = pd.DataFrame(changes)
                         st.dataframe(chg_df, use_container_width=True, hide_index=True)
                         st.markdown(f"**{len(changes)}** employee(s) will be updated.")
-                        bulk_confirm = st.checkbox("I confirm — apply these overrides", key="bulk_override_confirm")
-                        if st.button("Apply Bulk Overrides", disabled=not bulk_confirm, key="btn_bulk_override"):
-                            errors = []
-                            applied = 0
-                            for chg in changes:
-                                eid = int(chg["Employee #"])
-                                try:
-                                    # Point total: insert adjustment history, then force exact total
-                                    if has_points and abs(chg.get("Pt Adjustment", 0)) >= 0.05:
-                                        conn.execute(
-                                            "INSERT INTO points_history (employee_id, point_date, points, reason, note, flag_code) "
-                                            "VALUES (?, ?, ?, ?, ?, ?)",
-                                            (eid, date.today().isoformat(), float(chg["Pt Adjustment"]),
-                                             "Manual Adjustment", "Bulk override — prior calculation correction", "MANUAL"),
-                                        )
-                                    # Force exact point total directly
-                                    if has_points:
-                                        conn.execute(
-                                            "UPDATE employees SET point_total = ? WHERE employee_id = ?",
-                                            (float(chg["New Points"]), eid),
-                                        )
-                                    # Direct date overrides
-                                    if has_rolloff:
-                                        ro_val = chg.get("New Roll-off", "") or None
-                                        conn.execute(
-                                            "UPDATE employees SET rolloff_date = ? WHERE employee_id = ?",
-                                            (ro_val, eid),
-                                        )
-                                    if has_perfect:
-                                        pa_val = chg.get("New Perfect Att.", "") or None
-                                        conn.execute(
-                                            "UPDATE employees SET perfect_attendance = ? WHERE employee_id = ?",
-                                            (pa_val, eid),
-                                        )
-                                    applied += 1
-                                except Exception as exc:
-                                    errors.append(f"Employee {eid}: {exc}")
-                            conn.commit()
-                            clear_read_caches()
-                            if errors:
-                                st.session_state["bulk_override_msg"] = f"⚠️ Applied {applied} override(s) with {len(errors)} error(s): {'; '.join(errors)}"
-                            else:
-                                st.session_state["bulk_override_msg"] = f"✅ Applied {applied} override(s) successfully."
-                            st.rerun()
+
+    # --- Apply step (outside file-upload block so button survives reruns) ---
+    if "bulk_override_changes" in st.session_state:
+        changes = st.session_state["bulk_override_changes"]
+        flags = st.session_state["bulk_override_flags"]
+        bulk_confirm = st.checkbox("I confirm — apply these overrides", key="bulk_override_confirm")
+        if st.button("Apply Bulk Overrides", disabled=not bulk_confirm, key="btn_bulk_override"):
+            _pg = is_pg(conn)
+            errors = []
+            applied = 0
+            for chg in changes:
+                eid = int(chg["Employee #"])
+                try:
+                    # Point total: insert adjustment history, then force exact total
+                    if flags["has_points"] and abs(chg.get("Pt Adjustment", 0)) >= 0.05:
+                        sql = ("INSERT INTO points_history (employee_id, point_date, points, reason, note, flag_code) "
+                               "VALUES (?, ?, ?, ?, ?, ?)")
+                        params = (eid, date.today().isoformat(), float(chg["Pt Adjustment"]),
+                                  "Manual Adjustment", "Bulk override — prior calculation correction", "MANUAL")
+                        if _pg:
+                            cur = conn.cursor()
+                            cur.execute(sql.replace("?", "%s"), params)
+                            cur.close()
+                        else:
+                            conn.execute(sql, params)
+                    # Force exact point total directly
+                    if flags["has_points"]:
+                        sql = "UPDATE employees SET point_total = ? WHERE employee_id = ?"
+                        params = (float(chg["New Points"]), eid)
+                        if _pg:
+                            cur = conn.cursor()
+                            cur.execute(sql.replace("?", "%s"), params)
+                            cur.close()
+                        else:
+                            conn.execute(sql, params)
+                    # Direct date overrides
+                    if flags["has_rolloff"]:
+                        ro_val = chg.get("New Roll-off", "") or None
+                        sql = "UPDATE employees SET rolloff_date = ? WHERE employee_id = ?"
+                        params = (ro_val, eid)
+                        if _pg:
+                            cur = conn.cursor()
+                            cur.execute(sql.replace("?", "%s"), params)
+                            cur.close()
+                        else:
+                            conn.execute(sql, params)
+                    if flags["has_perfect"]:
+                        pa_val = chg.get("New Perfect Att.", "") or None
+                        sql = "UPDATE employees SET perfect_attendance = ? WHERE employee_id = ?"
+                        params = (pa_val, eid)
+                        if _pg:
+                            cur = conn.cursor()
+                            cur.execute(sql.replace("?", "%s"), params)
+                            cur.close()
+                        else:
+                            conn.execute(sql, params)
+                    applied += 1
+                except Exception as exc:
+                    errors.append(f"Employee {eid}: {exc}")
+            conn.commit()
+            clear_read_caches()
+            del st.session_state["bulk_override_changes"]
+            del st.session_state["bulk_override_flags"]
+            if errors:
+                st.session_state["bulk_override_msg"] = f"⚠️ Applied {applied} override(s) with {len(errors)} error(s): {'; '.join(errors)}"
+            else:
+                st.session_state["bulk_override_msg"] = f"✅ Applied {applied} override(s) successfully."
+            st.rerun()
         except Exception as exc:
             st.error(f"Error reading CSV: {exc}")
 
