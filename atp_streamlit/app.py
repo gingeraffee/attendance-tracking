@@ -4877,6 +4877,8 @@ def system_updates_page(conn) -> None:
     divider()
 
     # ── Bulk Employee Override ─────────────────────────────────────────
+    if "bulk_override_msg" in st.session_state:
+        st.success(st.session_state.pop("bulk_override_msg"))
     section_label("Bulk Employee Override")
     st.caption("Upload a CSV with corrected employee data. Required column: **Employee #**. "
                "Optional columns: **Point Total**, **2 Month Roll Off Date**, **Perfect Attendance Date**. "
@@ -4997,7 +4999,7 @@ def system_updates_page(conn) -> None:
                                     applied += 1
                                 conn.commit()
                                 clear_read_caches()
-                                st.success(f"Applied {applied} override(s).")
+                                st.session_state["bulk_override_msg"] = f"✅ Applied {applied} override(s) successfully."
                                 st.rerun()
                             except Exception as exc:
                                 st.error(str(exc))
