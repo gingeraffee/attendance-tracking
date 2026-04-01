@@ -4965,49 +4965,48 @@ def system_updates_page(conn) -> None:
                         st.markdown(f"**{len(changes)}** employee(s) will be updated.")
                         bulk_confirm = st.checkbox("I confirm — apply these overrides", key="bulk_override_confirm")
                         if st.button("Apply Bulk Overrides", disabled=not bulk_confirm, key="btn_bulk_override"):
-                            try:
-                                applied = 0
-                                for chg in changes:
-                                    eid = int(chg["Employee #"])
-                                    with db.tx(conn):
-                                        # Point total adjustment
-                                        if has_points and abs(chg.get("Pt Adjustment", 0)) >= 0.05:
-                                            repo.insert_points_history(
-                                                conn,
-                                                employee_id=eid,
-                                                point_date=date.today(),
-                                                points=float(chg["Pt Adjustment"]),
-                                                reason="Manual Adjustment",
-                                                note="Bulk override — prior calculation correction",
-                                                flag_code="MANUAL",
-                                            )
-                                            services.recalculate_employee_dates(conn, eid)
-                                            # Force the exact point total from the CSV
-                                            # (recalculate may differ due to floor logic)
-                                            repo._exec(conn,
-                                                "UPDATE employees SET point_total = ? WHERE employee_id = ?;",
-                                                (float(chg["New Points"]), eid))
-
-                                        # Direct date overrides
-                                        if has_rolloff:
-                                            new_ro = chg.get("New Roll-off", "")
-                                            ro_val = new_ro if new_ro else None
-                                            repo._exec(conn,
-                                                "UPDATE employees SET rolloff_date = ? WHERE employee_id = ?;",
-                                                (ro_val, eid))
-                                        if has_perfect:
-                                            new_pa = chg.get("New Perfect Att.", "")
-                                            pa_val = new_pa if new_pa else None
-                                            repo._exec(conn,
-                                                "UPDATE employees SET perfect_attendance = ? WHERE employee_id = ?;",
-                                                (pa_val, eid))
+                            errors = []
+                            applied = 0
+                            for chg in changes:
+                                eid = int(chg["Employee #"])
+                                try:
+                                    # Point total: insert adjustment history, then force exact total
+                                    if has_points and abs(chg.get("Pt Adjustment", 0)) >= 0.05:
+                                        conn.execute(
+                                            "INSERT INTO points_history (employee_id, point_date, points, reason, note, flag_code) "
+                                            "VALUES (?, ?, ?, ?, ?, ?)",
+                                            (eid, date.today().isoformat(), float(chg["Pt Adjustment"]),
+                                             "Manual Adjustment", "Bulk override — prior calculation correction", "MANUAL"),
+                                        )
+                                    # Force exact point total directly
+                                    if has_points:
+                                        conn.execute(
+                                            "UPDATE employees SET point_total = ? WHERE employee_id = ?",
+                                            (float(chg["New Points"]), eid),
+                                        )
+                                    # Direct date overrides
+                                    if has_rolloff:
+                                        ro_val = chg.get("New Roll-off", "") or None
+                                        conn.execute(
+                                            "UPDATE employees SET rolloff_date = ? WHERE employee_id = ?",
+                                            (ro_val, eid),
+                                        )
+                                    if has_perfect:
+                                        pa_val = chg.get("New Perfect Att.", "") or None
+                                        conn.execute(
+                                            "UPDATE employees SET perfect_attendance = ? WHERE employee_id = ?",
+                                            (pa_val, eid),
+                                        )
                                     applied += 1
-                                conn.commit()
-                                clear_read_caches()
+                                except Exception as exc:
+                                    errors.append(f"Employee {eid}: {exc}")
+                            conn.commit()
+                            clear_read_caches()
+                            if errors:
+                                st.session_state["bulk_override_msg"] = f"⚠️ Applied {applied} override(s) with {len(errors)} error(s): {'; '.join(errors)}"
+                            else:
                                 st.session_state["bulk_override_msg"] = f"✅ Applied {applied} override(s) successfully."
-                                st.rerun()
-                            except Exception as exc:
-                                st.error(str(exc))
+                            st.rerun()
         except Exception as exc:
             st.error(f"Error reading CSV: {exc}")
 
