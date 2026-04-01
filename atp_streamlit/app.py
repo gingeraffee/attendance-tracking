@@ -4627,6 +4627,9 @@ def run_export_query(conn, export_type: str, building: str, start_date: date, en
             loc = (emp.get("Location") or "")
             if building != "All" and loc != building:
                 continue
+            current_total = round(float(emp.get("point_total", 0) or 0), 1)
+            if current_total <= 0.0:
+                continue
             rows_out.append({
                 "Employee ID": int(employee_id),
                 "First Name": emp.get("first_name", ""),
