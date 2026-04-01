@@ -4511,7 +4511,8 @@ EXPORT_LABELS = {
     "30-day point history":        "30-Day Point History",
     "upcoming 2-month roll-offs":  "Upcoming 2-Month Roll-offs",
     "upcoming perfect attendance": "Upcoming Perfect Attendance",
-    "upcoming annual roll-off":    "Annual YTD Roll-off Entries",
+    "pending ytd roll-offs":       "Pending YTD Roll-offs",
+    "applied ytd roll-off history": "Applied YTD Roll-off History",
 }
 
 
@@ -4614,7 +4615,30 @@ def run_export_query(conn, export_type: str, building: str, start_date: date, en
                          AND date(perfect_attendance) BETWEEN date(?) AND date(?)"""
         params = [start_date.isoformat(), end_date.isoformat()]
 
-    else:  # annual roll-off
+    elif export_type == "pending ytd roll-offs":
+        # Show pending YTD roll-offs for the current month (not yet applied)
+        pending = services.preview_ytd_rolloffs(conn, run_date=date.today(), exclude_applied=True)
+        rows_out = []
+        for employee_id, net_points, roll_date, label in pending:
+            emp = repo.get_employee(conn, int(employee_id))
+            if not emp:
+                continue
+            emp = dict(emp)
+            loc = (emp.get("Location") or "")
+            if building != "All" and loc != building:
+                continue
+            rows_out.append({
+                "employee_id": int(employee_id),
+                "last_name": emp.get("last_name", ""),
+                "first_name": emp.get("first_name", ""),
+                "location": loc,
+                "roll_off_month": label,
+                "net_points": round(float(net_points), 1),
+                "roll_date": roll_date.isoformat(),
+            })
+        return pd.DataFrame(rows_out)
+
+    else:  # applied ytd roll-off history
         year_start = date(date.today().year, 1, 1)
         if pg:
             sql = """SELECT e.employee_id, e.last_name, e.first_name, COALESCE(e."Location",'') AS location,
