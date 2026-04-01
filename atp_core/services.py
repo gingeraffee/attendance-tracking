@@ -727,11 +727,7 @@ def preview_ytd_rolloffs(
             )
 
         if not already:
-            # Cap to current point_total so we never go below 0.0
-            current_total = _current_point_total(conn, int(employee_id))
-            capped = round(min(float(net_points), max(current_total, 0.0)), 3)
-            if capped > 0.0:
-                pending.append((employee_id, capped, item_roll_date, item_label))
+            pending.append((employee_id, net_points, item_roll_date, item_label))
 
     return pending
 
