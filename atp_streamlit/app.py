@@ -4541,6 +4541,7 @@ def manage_employees_page(conn) -> None:
 
 # ── Exports & Forecasts ───────────────────────────────────────────────────────
 EXPORT_LABELS = {
+    "employee audit":             "Employee Audit",
     "30-day point history":        "30-Day Point History",
     "upcoming 2-month roll-offs":  "Upcoming 2-Month Roll-offs",
     "upcoming perfect attendance": "Upcoming Perfect Attendance",
@@ -4552,7 +4553,34 @@ EXPORT_LABELS = {
 def run_export_query(conn, export_type: str, building: str, start_date: date, end_date: date) -> pd.DataFrame:
     pg = is_pg(conn)
 
-    if export_type == "30-day point history":
+    if export_type == "employee audit":
+        if pg:
+            sql = """SELECT employee_id   AS "Employee #",
+                            last_name     AS "Last Name",
+                            first_name    AS "First Name",
+                            COALESCE(point_total, 0.0) AS "Point Total",
+                            rolloff_date  AS "2 Month Roll Off Date",
+                            perfect_attendance AS "Perfect Attendance Date"
+                       FROM employees
+                      WHERE is_active = 1"""
+        else:
+            sql = """SELECT employee_id   AS "Employee #",
+                            last_name     AS "Last Name",
+                            first_name    AS "First Name",
+                            COALESCE(point_total, 0.0) AS "Point Total",
+                            rolloff_date  AS "2 Month Roll Off Date",
+                            perfect_attendance AS "Perfect Attendance Date"
+                       FROM employees
+                      WHERE is_active = 1"""
+        params = []
+        if building != "All":
+            sql += ' AND COALESCE("Location",\'\') = ?'
+            params.append(building)
+        sql += " ORDER BY last_name, first_name"
+        df = pd.DataFrame([dict(r) for r in fetchall(conn, sql, tuple(params))])
+        return df
+
+    elif export_type == "30-day point history":
         if pg:
             sql = """
                 SELECT e.employee_id AS "Employee #",
