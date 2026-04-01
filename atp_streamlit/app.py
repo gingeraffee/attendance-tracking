@@ -4628,13 +4628,13 @@ def run_export_query(conn, export_type: str, building: str, start_date: date, en
             if building != "All" and loc != building:
                 continue
             rows_out.append({
-                "employee_id": int(employee_id),
-                "last_name": emp.get("last_name", ""),
-                "first_name": emp.get("first_name", ""),
-                "location": loc,
-                "roll_off_month": label,
-                "net_points": round(float(net_points), 1),
-                "roll_date": roll_date.isoformat(),
+                "Employee ID": int(employee_id),
+                "First Name": emp.get("first_name", ""),
+                "Last Name": emp.get("last_name", ""),
+                "Points": round(float(net_points), 1),
+                "Point Date": roll_date.isoformat(),
+                "Note": "YTD Roll Off",
+                "Notes": "",
             })
         return pd.DataFrame(rows_out)
 
