@@ -122,9 +122,10 @@ def step_next_rolloff(current_due: date, perfect_date: date) -> date:
 
 def step_next_perfect_attendance(current_due: date) -> date:
     """
-    Advance perfect-attendance date by one monthly cycle.
+    Advance perfect-attendance date by a full 3-month cycle.
 
-    Perfect attendance bonuses follow a monthly cadence after becoming due,
-    so we move to the first day of the next month.
+    After a perfect attendance milestone is reached, the next eligibility
+    is 3 calendar months later, on the first of the following month.
+    E.g. 2026-04-01 -> 2026-08-01 (Apr + 3 months = Jul, first of next = Aug 1).
     """
-    return first_of_next_month(current_due)
+    return three_months_then_first(current_due)
