@@ -4636,19 +4636,31 @@ def run_export_query(conn, export_type: str, building: str, start_date: date, en
                 "Note": "YTD Roll Off",
                 "Notes": "",
             })
-        return pd.DataFrame(rows_out)
+        if rows_out:
+            return pd.DataFrame(rows_out)
+        return pd.DataFrame(columns=["Employee ID", "First Name", "Last Name", "Points", "Point Date", "Note", "Notes"])
 
     else:  # applied ytd roll-off history
         year_start = date(date.today().year, 1, 1)
         if pg:
-            sql = """SELECT e.employee_id, e.last_name, e.first_name, COALESCE(e."Location",'') AS location,
-                            p.point_date, p.points, p.reason, COALESCE(p.note,'') AS note
+            sql = """SELECT e.employee_id AS "Employee ID",
+                            e.first_name  AS "First Name",
+                            e.last_name   AS "Last Name",
+                            p.points      AS "Points",
+                            p.point_date  AS "Point Date",
+                            'YTD Roll Off' AS "Note",
+                            COALESCE(p.note,'') AS "Notes"
                        FROM points_history p JOIN employees e ON e.employee_id=p.employee_id
                       WHERE p.reason='YTD Roll-Off' AND p.flag_code='AUTO'
                         AND (p.point_date::date) >= (%s::date)"""
         else:
-            sql = """SELECT e.employee_id, e.last_name, e.first_name, COALESCE(e."Location",'') AS location,
-                            p.point_date, p.points, p.reason, COALESCE(p.note,'') AS note
+            sql = """SELECT e.employee_id AS "Employee ID",
+                            e.first_name  AS "First Name",
+                            e.last_name   AS "Last Name",
+                            p.points      AS "Points",
+                            p.point_date  AS "Point Date",
+                            'YTD Roll Off' AS "Note",
+                            COALESCE(p.note,'') AS "Notes"
                        FROM points_history p JOIN employees e ON e.employee_id=p.employee_id
                       WHERE p.reason='YTD Roll-Off' AND p.flag_code='AUTO'
                         AND date(p.point_date) >= date(?)"""
@@ -4659,7 +4671,7 @@ def run_export_query(conn, export_type: str, building: str, start_date: date, en
         sql += f" AND COALESCE({e_ref},'') = ?"
         params.append(building)
 
-    sql += " ORDER BY last_name, first_name"
+    sql += " ORDER BY e.last_name, e.first_name" if export_type == "applied ytd roll-off history" else " ORDER BY last_name, first_name"
     df = pd.DataFrame([dict(r) for r in fetchall(conn, sql, tuple(params))])
 
     if export_type == "30-day point history" and not df.empty:
