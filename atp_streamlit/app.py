@@ -4982,6 +4982,11 @@ def system_updates_page(conn) -> None:
                                                 flag_code="MANUAL",
                                             )
                                             services.recalculate_employee_dates(conn, eid)
+                                            # Force the exact point total from the CSV
+                                            # (recalculate may differ due to floor logic)
+                                            repo._exec(conn,
+                                                "UPDATE employees SET point_total = ? WHERE employee_id = ?;",
+                                                (float(chg["New Points"]), eid))
 
                                         # Direct date overrides
                                         if has_rolloff:
