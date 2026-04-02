@@ -5023,7 +5023,6 @@ def system_updates_page(conn) -> None:
     if uploaded is not None:
         st.session_state.pop("bulk_override_changes", None)
         st.session_state.pop("bulk_override_summary", None)
-        st.session_state.pop("bulk_override_confirm", None)
         try:
             csv_df = _normalize_bulk_override_columns(pd.read_csv(uploaded))
             if "Employee #" not in csv_df.columns:
