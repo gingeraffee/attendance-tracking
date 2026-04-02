@@ -895,9 +895,12 @@ def _parse_bulk_override_point_total(value) -> float:
     if pd.isna(value) or str(value).strip() == "":
         return 0.0
     try:
-        return round(float(value), 1)
+        parsed = round(float(value), 1)
     except ValueError as exc:
         raise ValueError(f"Point Total '{value}' is not a valid number.") from exc
+    if parsed < 0:
+        raise ValueError("Point Total cannot be negative.")
+    return parsed
 
 
 def _parse_bulk_override_date(value, column_name: str) -> date | None:
@@ -907,6 +910,79 @@ def _parse_bulk_override_date(value, column_name: str) -> date | None:
         return pd.to_datetime(str(value)).date()
     except Exception as exc:
         raise ValueError(f"{column_name} '{value}' is not a valid date.") from exc
+
+
+def _get_history_point_total(conn, employee_id: int) -> float:
+    svc = getattr(services, "get_history_point_total", None)
+    if callable(svc):
+        return round(float(svc(conn, int(employee_id))), 1)
+
+    rows = repo.with_running_point_totals(
+        repo.get_points_history_ordered(conn, int(employee_id))
+    )
+    return round(float(rows[-1]["point_total"]) if rows else 0.0, 1)
+
+
+def _apply_bulk_employee_override(
+    conn,
+    *,
+    employee_id: int,
+    point_total: float | None = None,
+    update_point_total: bool = False,
+    rolloff_date: date | None = None,
+    update_rolloff_date: bool = False,
+    perfect_attendance: date | None = None,
+    update_perfect_attendance: bool = False,
+    note: str | None = None,
+) -> None:
+    svc = getattr(services, "apply_bulk_employee_override", None)
+    if callable(svc):
+        svc(
+            conn,
+            employee_id=int(employee_id),
+            point_total=point_total,
+            update_point_total=update_point_total,
+            rolloff_date=rolloff_date,
+            update_rolloff_date=update_rolloff_date,
+            perfect_attendance=perfect_attendance,
+            update_perfect_attendance=update_perfect_attendance,
+            note=note,
+        )
+        return
+
+    employee_id = int(employee_id)
+    with db.tx(conn):
+        if update_point_total:
+            current_total = _get_history_point_total(conn, employee_id)
+            target_total = round(float(point_total or 0.0), 1)
+            adjustment = round(target_total - current_total, 3)
+            if abs(adjustment) >= 0.001:
+                repo.insert_points_history(
+                    conn,
+                    employee_id=employee_id,
+                    point_date=date.today(),
+                    points=adjustment,
+                    reason="Manual Adjustment",
+                    note=(note or "").strip() or "Bulk override",
+                    flag_code="MANUAL",
+                )
+            services.recalculate_employee_dates(conn, employee_id)
+
+        if update_rolloff_date or update_perfect_attendance:
+            current = dict(repo.get_employee(conn, employee_id) or {})
+            rolloff_iso = current.get("rolloff_date")
+            perfect_iso = current.get("perfect_attendance")
+
+            if update_rolloff_date:
+                rolloff_iso = rolloff_date.isoformat() if rolloff_date else None
+            if update_perfect_attendance:
+                perfect_iso = perfect_attendance.isoformat() if perfect_attendance else None
+
+            exec_sql(
+                conn,
+                "UPDATE employees SET rolloff_date = ?, perfect_attendance = ? WHERE employee_id = ?",
+                (rolloff_iso, perfect_iso, employee_id),
+            )
 
 
 def fetchall(conn, sql: str, params=()):
@@ -4990,7 +5066,7 @@ def system_updates_page(conn) -> None:
                                 continue
 
                             stored_total = round(float(emp.get("point_total", 0) or 0), 1)
-                            history_total = services.get_history_point_total(conn, eid)
+                            history_total = _get_history_point_total(conn, eid)
                             diff = round(new_total - history_total, 3)
                             change["Stored Points"] = stored_total
                             change["History Points"] = history_total
@@ -5093,7 +5169,7 @@ def system_updates_page(conn) -> None:
             for chg in changes:
                 eid = int(chg["Employee #"])
                 try:
-                    services.apply_bulk_employee_override(
+                    _apply_bulk_employee_override(
                         conn,
                         employee_id=eid,
                         point_total=chg.get("New Points"),
