@@ -349,6 +349,86 @@ def update_point_history_entry(
         recalculate_employee_dates(conn, int(employee_id))
 
 
+def get_history_point_total(conn: sqlite3.Connection, employee_id: int) -> float:
+    """Return the running point total derived from point history."""
+    return round(_current_point_total(conn, int(employee_id)), 1)
+
+
+def apply_bulk_employee_override(
+    conn: sqlite3.Connection,
+    *,
+    employee_id: int,
+    point_total: float | None = None,
+    update_point_total: bool = False,
+    rolloff_date: date | None = None,
+    update_rolloff_date: bool = False,
+    perfect_attendance: date | None = None,
+    update_perfect_attendance: bool = False,
+    note: str | None = None,
+) -> None:
+    """
+    Apply a bulk override while keeping point history as the source of truth.
+
+    Point total overrides are converted into a manual adjustment row and then
+    recalculated so later maintenance jobs do not undo the change. Manual date
+    overrides are written after recalculation so they persist as explicit
+    corrections.
+    """
+    if employee_id is None:
+        raise ValueError("Employee ID is required.")
+
+    employee_id = int(employee_id)
+    employee = repo.get_employee(conn, employee_id)
+    if not employee:
+        raise ValueError("Employee not found.")
+
+    with tx(conn):
+        if update_point_total:
+            target_total = round(float(point_total or 0.0), 1)
+            current_total = get_history_point_total(conn, employee_id)
+            adjustment = round(target_total - current_total, 3)
+
+            if abs(adjustment) >= 0.001:
+                _assert_transaction_does_not_overdraw(
+                    conn,
+                    employee_id,
+                    date.today(),
+                    adjustment,
+                )
+                repo.insert_points_history(
+                    conn,
+                    employee_id=employee_id,
+                    point_date=date.today(),
+                    points=adjustment,
+                    reason="Manual Adjustment",
+                    note=(note or "").strip() or "Bulk override",
+                    flag_code="MANUAL",
+                )
+
+            recalculate_employee_dates(conn, employee_id)
+
+        if update_rolloff_date or update_perfect_attendance:
+            current = dict(repo.get_employee(conn, employee_id) or {})
+            rolloff_iso = current.get("rolloff_date")
+            perfect_iso = current.get("perfect_attendance")
+
+            if update_rolloff_date:
+                rolloff_iso = rolloff_date.isoformat() if rolloff_date else None
+            if update_perfect_attendance:
+                perfect_iso = perfect_attendance.isoformat() if perfect_attendance else None
+
+            _exec(
+                conn,
+                """
+                UPDATE employees
+                   SET rolloff_date = ?,
+                       perfect_attendance = ?
+                 WHERE employee_id = ?
+                """,
+                (rolloff_iso, perfect_iso, employee_id),
+            )
+
+
 def delete_point_history_entry(
     conn: sqlite3.Connection,
     point_id: int,
