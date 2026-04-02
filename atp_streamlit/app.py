@@ -4,6 +4,7 @@ Full remodel: clean layout, status badges, live countdown, improved workflows.
 from __future__ import annotations
 
 import base64
+import hashlib
 import html
 from io import BytesIO
 from datetime import date, datetime, timedelta
@@ -5020,138 +5021,170 @@ def system_updates_page(conn) -> None:
                "Optional columns: **Point Total**, **2 Month Roll Off Date**, **Perfect Attendance Date**. "
                "Point adjustments are inserted as history entries; dates are set directly.")
     uploaded = st.file_uploader("Upload corrections CSV", type=["csv"], key="bulk_override_csv")
-    if uploaded is not None:
-        st.session_state.pop("bulk_override_changes", None)
-        st.session_state.pop("bulk_override_summary", None)
-        try:
-            csv_df = _normalize_bulk_override_columns(pd.read_csv(uploaded))
-            if "Employee #" not in csv_df.columns:
-                st.error("CSV must contain an 'Employee #' column.")
-            else:
-                has_points = "Point Total" in csv_df.columns
-                has_rolloff = "2 Month Roll Off Date" in csv_df.columns
-                has_perfect = "Perfect Attendance Date" in csv_df.columns
-                if not (has_points or has_rolloff or has_perfect):
-                    st.error("CSV must contain at least one of: 'Point Total', '2 Month Roll Off Date', 'Perfect Attendance Date'.")
+    current_upload_sig = None
+    if uploaded is None:
+        for key in (
+            "bulk_override_upload_sig",
+            "bulk_override_changes",
+            "bulk_override_summary",
+            "bulk_override_preview",
+            "bulk_override_row_errors",
+            "bulk_override_parse_error",
+        ):
+            st.session_state.pop(key, None)
+    else:
+        uploaded_bytes = uploaded.getvalue()
+        current_upload_sig = f"{uploaded.name}:{len(uploaded_bytes)}:{hashlib.sha1(uploaded_bytes).hexdigest()}"
+        if st.session_state.get("bulk_override_upload_sig") != current_upload_sig:
+            for key in (
+                "bulk_override_changes",
+                "bulk_override_summary",
+                "bulk_override_preview",
+                "bulk_override_row_errors",
+                "bulk_override_parse_error",
+            ):
+                st.session_state.pop(key, None)
+            st.session_state["bulk_override_upload_sig"] = current_upload_sig
+            st.session_state.pop("bulk_override_confirm", None)
+
+            try:
+                csv_df = _normalize_bulk_override_columns(pd.read_csv(BytesIO(uploaded_bytes)))
+                if "Employee #" not in csv_df.columns:
+                    st.session_state["bulk_override_parse_error"] = "CSV must contain an 'Employee #' column."
                 else:
-                    changes = []
-                    row_errors = []
-                    total_rows = len(csv_df.index)
-                    for _, row in csv_df.iterrows():
-                        try:
-                            eid = _parse_bulk_override_employee_id(row["Employee #"])
-                        except ValueError as exc:
-                            row_errors.append(f"Row {_ + 2}: {exc}")
-                            continue
-
-                        emp = repo.get_employee(conn, eid)
-                        if not emp:
-                            row_errors.append(f"Row {_ + 2}: Employee #{eid} was not found.")
-                            continue
-                        emp = dict(emp)
-                        change = {
-                            "Employee #": eid,
-                            "Last Name": emp.get("last_name", ""),
-                            "First Name": emp.get("first_name", ""),
-                        }
-                        changed = False
-
-                        # -- Point Total --
-                        if has_points:
-                            try:
-                                new_total = _parse_bulk_override_point_total(row["Point Total"])
-                            except ValueError as exc:
-                                row_errors.append(f"Row {_ + 2}: {exc}")
-                                continue
-
-                            stored_total = round(float(emp.get("point_total", 0) or 0), 1)
-                            history_total = _get_history_point_total(conn, eid)
-                            diff = round(new_total - history_total, 3)
-                            change["Stored Points"] = stored_total
-                            change["History Points"] = history_total
-                            change["New Points"] = new_total
-                            change["Pt Adjustment"] = round(diff, 1)
-                            change["_update_points"] = (
-                                abs(new_total - history_total) >= 0.05
-                                or abs(stored_total - new_total) >= 0.05
-                            )
-                            if change["_update_points"]:
-                                changed = True
-
-                        # -- Roll-off Date --
-                        if has_rolloff:
-                            try:
-                                new_ro = _parse_bulk_override_date(row["2 Month Roll Off Date"], "2 Month Roll Off Date")
-                            except ValueError as exc:
-                                row_errors.append(f"Row {_ + 2}: {exc}")
-                                continue
-
-                            cur_ro_raw = emp.get("rolloff_date")
-                            cur_ro = date.fromisoformat(str(cur_ro_raw)) if cur_ro_raw else None
-                            change["Current Roll-off"] = str(cur_ro) if cur_ro else ""
-                            change["New Roll-off"] = str(new_ro) if new_ro else ""
-                            change["_update_rolloff"] = new_ro != cur_ro
-                            if new_ro != cur_ro:
-                                changed = True
-
-                        # -- Perfect Attendance Date --
-                        if has_perfect:
-                            try:
-                                new_pa = _parse_bulk_override_date(row["Perfect Attendance Date"], "Perfect Attendance Date")
-                            except ValueError as exc:
-                                row_errors.append(f"Row {_ + 2}: {exc}")
-                                continue
-
-                            cur_pa_raw = emp.get("perfect_attendance")
-                            cur_pa = date.fromisoformat(str(cur_pa_raw)) if cur_pa_raw else None
-                            change["Current Perfect Att."] = str(cur_pa) if cur_pa else ""
-                            change["New Perfect Att."] = str(new_pa) if new_pa else ""
-                            change["_update_perfect"] = new_pa != cur_pa
-                            if new_pa != cur_pa:
-                                changed = True
-
-                        if changed:
-                            changes.append(change)
-
-                    rejected_rows = len(row_errors)
-                    update_rows = len(changes)
-                    unchanged_rows = max(total_rows - rejected_rows - update_rows, 0)
-
-                    sum_col1, sum_col2, sum_col3, sum_col4 = st.columns(4)
-                    sum_col1.metric("CSV Rows", total_rows)
-                    sum_col2.metric("Ready To Update", update_rows)
-                    sum_col3.metric("Already Matching", unchanged_rows)
-                    sum_col4.metric("Rejected", rejected_rows)
-
-                    if row_errors:
-                        st.warning("Some rows were rejected. Fix those rows before applying this batch.")
-                        for msg in row_errors[:12]:
-                            st.write(f"- {msg}")
-                        if len(row_errors) > 12:
-                            st.caption(f"{len(row_errors) - 12} additional row error(s) not shown.")
-                    elif not changes:
-                        info_box("No changes needed — all values match.")
+                    has_points = "Point Total" in csv_df.columns
+                    has_rolloff = "2 Month Roll Off Date" in csv_df.columns
+                    has_perfect = "Perfect Attendance Date" in csv_df.columns
+                    if not (has_points or has_rolloff or has_perfect):
+                        st.session_state["bulk_override_parse_error"] = (
+                            "CSV must contain at least one of: 'Point Total', '2 Month Roll Off Date', "
+                            "'Perfect Attendance Date'."
+                        )
                     else:
-                        # Store changes in session so they survive reruns
-                        st.session_state["bulk_override_changes"] = changes
+                        changes = []
+                        row_errors = []
+                        total_rows = len(csv_df.index)
+                        for _, row in csv_df.iterrows():
+                            try:
+                                eid = _parse_bulk_override_employee_id(row["Employee #"])
+                            except ValueError as exc:
+                                row_errors.append(f"Row {_ + 2}: {exc}")
+                                continue
+
+                            emp = repo.get_employee(conn, eid)
+                            if not emp:
+                                row_errors.append(f"Row {_ + 2}: Employee #{eid} was not found.")
+                                continue
+                            emp = dict(emp)
+                            change = {
+                                "Employee #": eid,
+                                "Last Name": emp.get("last_name", ""),
+                                "First Name": emp.get("first_name", ""),
+                            }
+                            changed = False
+
+                            if has_points:
+                                try:
+                                    new_total = _parse_bulk_override_point_total(row["Point Total"])
+                                except ValueError as exc:
+                                    row_errors.append(f"Row {_ + 2}: {exc}")
+                                    continue
+
+                                stored_total = round(float(emp.get("point_total", 0) or 0), 1)
+                                history_total = _get_history_point_total(conn, eid)
+                                diff = round(new_total - history_total, 3)
+                                change["Stored Points"] = stored_total
+                                change["History Points"] = history_total
+                                change["New Points"] = new_total
+                                change["Pt Adjustment"] = round(diff, 1)
+                                change["_update_points"] = (
+                                    abs(new_total - history_total) >= 0.05
+                                    or abs(stored_total - new_total) >= 0.05
+                                )
+                                if change["_update_points"]:
+                                    changed = True
+
+                            if has_rolloff:
+                                try:
+                                    new_ro = _parse_bulk_override_date(row["2 Month Roll Off Date"], "2 Month Roll Off Date")
+                                except ValueError as exc:
+                                    row_errors.append(f"Row {_ + 2}: {exc}")
+                                    continue
+
+                                cur_ro_raw = emp.get("rolloff_date")
+                                cur_ro = date.fromisoformat(str(cur_ro_raw)) if cur_ro_raw else None
+                                change["Current Roll-off"] = str(cur_ro) if cur_ro else ""
+                                change["New Roll-off"] = str(new_ro) if new_ro else ""
+                                change["_update_rolloff"] = new_ro != cur_ro
+                                if new_ro != cur_ro:
+                                    changed = True
+
+                            if has_perfect:
+                                try:
+                                    new_pa = _parse_bulk_override_date(row["Perfect Attendance Date"], "Perfect Attendance Date")
+                                except ValueError as exc:
+                                    row_errors.append(f"Row {_ + 2}: {exc}")
+                                    continue
+
+                                cur_pa_raw = emp.get("perfect_attendance")
+                                cur_pa = date.fromisoformat(str(cur_pa_raw)) if cur_pa_raw else None
+                                change["Current Perfect Att."] = str(cur_pa) if cur_pa else ""
+                                change["New Perfect Att."] = str(new_pa) if new_pa else ""
+                                change["_update_perfect"] = new_pa != cur_pa
+                                if new_pa != cur_pa:
+                                    changed = True
+
+                            if changed:
+                                changes.append(change)
+
+                        rejected_rows = len(row_errors)
+                        update_rows = len(changes)
+                        unchanged_rows = max(total_rows - rejected_rows - update_rows, 0)
+                        st.session_state["bulk_override_row_errors"] = row_errors
                         st.session_state["bulk_override_summary"] = {
                             "total_rows": total_rows,
                             "update_rows": update_rows,
                             "unchanged_rows": unchanged_rows,
                             "rejected_rows": rejected_rows,
                         }
-                        chg_df = pd.DataFrame(changes)
-                        chg_df = chg_df.drop(
-                            columns=["_update_points", "_update_rolloff", "_update_perfect"],
-                            errors="ignore",
-                        )
-                        st.dataframe(chg_df, use_container_width=True, hide_index=True)
-                        st.info(
-                            f"Confirmation ready: {update_rows} employee(s) will be updated. "
-                            f"{unchanged_rows} row(s) already match your audit."
-                        )
-        except Exception as exc:
-            st.error(f"Error reading CSV: {exc}")
+                        if changes:
+                            chg_df = pd.DataFrame(changes).drop(
+                                columns=["_update_points", "_update_rolloff", "_update_perfect"],
+                                errors="ignore",
+                            )
+                            st.session_state["bulk_override_changes"] = changes
+                            st.session_state["bulk_override_preview"] = chg_df.to_dict("records")
+            except Exception as exc:
+                st.session_state["bulk_override_parse_error"] = f"Error reading CSV: {exc}"
+
+    parse_error = st.session_state.get("bulk_override_parse_error")
+    summary = st.session_state.get("bulk_override_summary")
+    staged_errors = st.session_state.get("bulk_override_row_errors", [])
+    preview_rows = st.session_state.get("bulk_override_preview", [])
+
+    if parse_error:
+        st.error(parse_error)
+    elif summary:
+        sum_col1, sum_col2, sum_col3, sum_col4 = st.columns(4)
+        sum_col1.metric("CSV Rows", summary["total_rows"])
+        sum_col2.metric("Ready To Update", summary["update_rows"])
+        sum_col3.metric("Already Matching", summary["unchanged_rows"])
+        sum_col4.metric("Rejected", summary["rejected_rows"])
+
+        if staged_errors:
+            st.warning("Some rows were rejected. Fix those rows before applying this batch.")
+            for msg in staged_errors[:12]:
+                st.write(f"- {msg}")
+            if len(staged_errors) > 12:
+                st.caption(f"{len(staged_errors) - 12} additional row error(s) not shown.")
+        elif not preview_rows:
+            info_box("No changes needed — all values match.")
+        else:
+            st.dataframe(pd.DataFrame(preview_rows), use_container_width=True, hide_index=True)
+            st.info(
+                f"Confirmation ready: {summary['update_rows']} employee(s) will be updated. "
+                f"{summary['unchanged_rows']} row(s) already match your audit."
+            )
 
     # --- Apply step (outside file-upload block so button survives reruns) ---
     if "bulk_override_changes" in st.session_state:
@@ -5194,6 +5227,11 @@ def system_updates_page(conn) -> None:
             clear_read_caches()
             del st.session_state["bulk_override_changes"]
             summary = st.session_state.pop("bulk_override_summary", {})
+            st.session_state.pop("bulk_override_preview", None)
+            st.session_state.pop("bulk_override_row_errors", None)
+            st.session_state.pop("bulk_override_parse_error", None)
+            st.session_state.pop("bulk_override_upload_sig", None)
+            st.session_state.pop("bulk_override_confirm", None)
             st.session_state["bulk_override_result"] = {
                 "applied": applied,
                 "unchanged": summary.get("unchanged_rows", 0),

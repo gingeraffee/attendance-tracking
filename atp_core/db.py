@@ -7,6 +7,22 @@ def _database_url() -> str:
     return (os.getenv("DATABASE_URL") or "").strip()
 
 def _sqlite_path() -> str:
+    configured = (os.getenv("SQLITE_PATH") or "").strip()
+    if configured:
+        path = Path(configured)
+        if path.suffix.lower() == ".db":
+            return str(path)
+        return str(path / "employeeroster.db")
+
+    for env_name in ("RENDER_DISK_PATH", "DATA_DIR"):
+        base = (os.getenv(env_name) or "").strip()
+        if base:
+            return str(Path(base) / "employeeroster.db")
+
+    render_default = Path("/var/data")
+    if render_default.exists():
+        return str(render_default / "employeeroster.db")
+
     repo_root = Path(__file__).resolve().parents[1]
     return str(repo_root / "employeeroster.db")
 
