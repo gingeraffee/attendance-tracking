@@ -26,18 +26,40 @@ class ThirtyDayExportTests(unittest.TestCase):
             self.conn,
             services.preview_add_point(
                 employee_id=101,
+                point_date=date(2026, 2, 20),
+                points=1.0,
+                reason="Absence",
+                note="Pre-window point",
+            ),
+            flag_code="MANUAL",
+        )
+        services.add_point(
+            self.conn,
+            services.preview_add_point(
+                employee_id=101,
                 point_date=date(2026, 3, 10),
                 points=1.0,
                 reason="Absence",
-                note="Initial point",
+                note="Initial point in window",
             ),
             flag_code="MANUAL",
+        )
+        services.add_point(
+            self.conn,
+            services.preview_add_point(
+                employee_id=101,
+                point_date=date(2026, 3, 12),
+                points=0.5,
+                reason="Tardy",
+                note="Second point in window",
+            ),
+            flag_code="AUTO",
         )
 
     def tearDown(self) -> None:
         self.conn.close()
 
-    def test_30_day_export_includes_flag_code_column(self) -> None:
+    def test_30_day_export_includes_flag_code_and_per_entry_running_total(self) -> None:
         df = run_export_query(
             self.conn,
             "30-day point history",
@@ -47,7 +69,8 @@ class ThirtyDayExportTests(unittest.TestCase):
         )
 
         self.assertIn("Flag Code", df.columns)
-        self.assertEqual(df.iloc[0]["Flag Code"], "MANUAL")
+        self.assertEqual(df["Flag Code"].tolist(), ["MANUAL", "AUTO"])
+        self.assertEqual(df["Point Total"].tolist(), ["2.0", "2.5"])
 
 
 if __name__ == "__main__":

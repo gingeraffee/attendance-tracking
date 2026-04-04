@@ -4366,6 +4366,48 @@ def points_ledger_page(conn, building: str) -> None:
                     except Exception as exc:
                         st.error(str(exc))
 
+        section_label("Adjust Current Total")
+        st.caption(
+            "Set a corrected current balance when prior calculations were wrong. "
+            "This adds a `Manual Adjustment` transaction so the audit trail stays intact."
+        )
+        with st.form(f"ledger_adjust_total_{emp_id}", clear_on_submit=False):
+            adjust_total = st.number_input(
+                "Corrected Point Total",
+                min_value=0.0,
+                step=0.5,
+                value=pts,
+                format="%.1f",
+                key=f"ledger_adjust_total_value_{emp_id}",
+            )
+            adjust_note = st.text_input(
+                "Adjustment Note",
+                value="Manual correction - prior point total calculation error",
+                key=f"ledger_adjust_total_note_{emp_id}",
+            )
+            apply_adjust_total = st.form_submit_button("Apply Total Adjustment", use_container_width=True)
+
+        if apply_adjust_total:
+            try:
+                target_total = round(float(adjust_total or 0.0), 1)
+                if abs(target_total - pts) < 0.001:
+                    st.warning("Corrected total matches the employee's current total.")
+                else:
+                    _apply_bulk_employee_override(
+                        conn,
+                        employee_id=emp_id,
+                        point_total=target_total,
+                        update_point_total=True,
+                        note=adjust_note,
+                    )
+                    clear_read_caches()
+                    set_ledger_notice(
+                        f"Adjusted employee #{emp_id} from {pts:.1f} to {target_total:.1f} points."
+                    )
+                    st.rerun()
+            except Exception as exc:
+                st.error(str(exc))
+
         section_label("Repair Totals")
         st.caption("Employee totals are calculated from transaction history. Recalculate after correcting a bad roll-off or manual entry.")
         repair_col1, repair_col2 = st.columns(2)
@@ -4743,31 +4785,44 @@ def run_export_query(conn, export_type: str, building: str, start_date: date, en
             sql += ' ORDER BY "Employee #", date(ph.point_date), "_History ID"'
 
         rows = [dict(r) for r in fetchall(conn, sql, tuple(params))]
-        running_by_employee: dict[int, float] = {}
+        history_by_employee: dict[int, list[dict]] = {}
         export_rows: list[dict] = []
         start_iso = start_date.isoformat()
         end_iso = end_date.isoformat()
 
         for row in rows:
             employee_id = int(row["Employee #"])
-            running_total = running_by_employee.get(employee_id, 0.0)
-            running_total = max(0.0, round(running_total + float(row.get("Point") or 0.0), 3))
-            running_by_employee[employee_id] = running_total
+            history_row = {
+                "id": row.get("_History ID"),
+                "point_date": row.get("Point Date"),
+                "points": row.get("Point"),
+                "reason": row.get("Reason"),
+                "note": row.get("Note"),
+                "flag_code": row.get("Flag Code"),
+                "_export_row": row,
+            }
+            history_by_employee.setdefault(employee_id, []).append(history_row)
 
-            point_day = str(row.get("Point Date") or "")[:10]
-            if start_iso <= point_day <= end_iso:
-                row["Point Total"] = round(running_total, 1)
+        for employee_history in history_by_employee.values():
+            computed_history = repo.with_running_point_totals(employee_history)
+            for history_row in computed_history:
+                point_day = str(history_row.get("point_date") or "")[:10]
+                row = dict(history_row["_export_row"])
+                row["Point Total"] = round(float(history_row.get("point_total") or 0.0), 1)
                 row.pop("_History ID", None)
-                export_rows.append(row)
+                if start_iso <= point_day <= end_iso:
+                    export_rows.append(row)
 
         df = pd.DataFrame(export_rows)
         if not df.empty:
             if "Point" in df.columns:
-                df["Point"] = pd.to_numeric(df["Point"], errors="coerce").map(
+                df = df.astype({"Point": "object"})
+                df.loc[:, "Point"] = pd.to_numeric(df["Point"], errors="coerce").map(
                     lambda v: f"{v:.1f}" if pd.notna(v) else ""
                 )
             if "Point Total" in df.columns:
-                df["Point Total"] = pd.to_numeric(df["Point Total"], errors="coerce").map(
+                df = df.astype({"Point Total": "object"})
+                df.loc[:, "Point Total"] = pd.to_numeric(df["Point Total"], errors="coerce").map(
                     lambda v: f"{v:.1f}" if pd.notna(v) else ""
                 )
         return df
