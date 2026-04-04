@@ -4713,7 +4713,8 @@ def run_export_query(conn, export_type: str, building: str, start_date: date, en
                        ph.point_date AS "Point Date",
                        ph.points AS "Point",
                        ph.reason AS "Reason",
-                       COALESCE(ph.note, '') AS "Note"
+                       COALESCE(ph.note, '') AS "Note",
+                       COALESCE(ph.flag_code, '') AS "Flag Code"
                   FROM points_history ph
                   JOIN employees e ON e.employee_id = ph.employee_id
             """
@@ -4727,7 +4728,8 @@ def run_export_query(conn, export_type: str, building: str, start_date: date, en
                        ph.point_date AS "Point Date",
                        ph.points AS "Point",
                        ph.reason AS "Reason",
-                       COALESCE(ph.note, '') AS "Note"
+                       COALESCE(ph.note, '') AS "Note",
+                       COALESCE(ph.flag_code, '') AS "Flag Code"
                   FROM points_history ph
                   JOIN employees e ON e.employee_id = ph.employee_id
             """
