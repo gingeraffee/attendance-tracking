@@ -45,7 +45,7 @@ from atp_core.rules import REASON_OPTIONS
 BUILDINGS = ["APIM", "APIS", "AAP"]
 POINT_BALANCE_REPAIR_VERSION = 2
 EMPLOYEE_CACHE_TTL_SECONDS = 60
-DASHBOARD_CACHE_TTL_SECONDS = 45
+DASHBOARD_CACHE_TTL_SECONDS = 90
 LEDGER_HISTORY_DEFAULT_LIMIT = 500
 LEDGER_HISTORY_FULL_LIMIT = 5000
 
@@ -2150,12 +2150,16 @@ def dashboard_page(conn, building: str) -> None:
         allow_title_html=True,
     )
 
+    _dash_status = st.empty()
+    _dash_status.caption("Loading dashboard data...")
+
     today = date.today()
     in_30_days = today + timedelta(days=30)
     employees = load_employees(conn, building=building)
     emp_ids = [int(e["employee_id"]) for e in employees]
 
     if not emp_ids:
+        _dash_status.empty()
         render_tech_hud(building)
         info_box("No employees found for this building filter.")
         return
@@ -2611,6 +2615,8 @@ def dashboard_page(conn, building: str) -> None:
         for key, fn in bucket_defs.items()
     }
 
+    _dash_status.empty()
+
     # ── Now that we have real data, fill the top-of-page widgets ─────────────
     at_risk_5plus = bucket_counts.get("5-6", 0) + bucket_counts.get("7", 0)
     total_active  = len(emp_detail_rows)
@@ -2719,6 +2725,7 @@ def dashboard_page(conn, building: str) -> None:
                 st.session_state.pop("dashboard_bucket", None)
             else:
                 st.session_state["dashboard_bucket"] = key
+            st.toast(f"Filter applied: {label}")
             st.rerun()
 
     col_left, col_right = st.columns([1.6, 1], gap="large")
@@ -2812,15 +2819,10 @@ def dashboard_page(conn, building: str) -> None:
     divider()
     section_label("Building Snapshot (Average Points per Employee)")
 
-    active_rows = _read_rows(
-        """SELECT COALESCE("Location", '') AS building, COUNT(*) AS n
-           FROM employees
-          WHERE COALESCE(is_active,1)=1
-          GROUP BY COALESCE("Location", '')""",
-        (),
-    )
-    avg_total_rows = _read_rows(
+    # ── Consolidated building stats (1 query instead of 5) ──────────────────
+    build_stats_rows = _read_rows(
         """SELECT COALESCE("Location", '') AS building,
+                  COUNT(*) AS n,
                   AVG(COALESCE(point_total, 0.0)) AS avg_point_total
            FROM employees
           WHERE COALESCE(is_active,1)=1
@@ -2829,11 +2831,9 @@ def dashboard_page(conn, building: str) -> None:
     )
     active_by_build = {b: 0 for b in BUILDINGS}
     avg_total_by_build = {b: 0.0 for b in BUILDINGS}
-    for r in active_rows:
+    for r in build_stats_rows:
         if r["building"] in active_by_build:
             active_by_build[r["building"]] = int(r["n"] or 0)
-    for r in avg_total_rows:
-        if r["building"] in avg_total_by_build:
             avg_total_by_build[r["building"]] = float(r.get("avg_point_total") or 0.0)
 
     since_30 = (today - timedelta(days=30)).isoformat()
@@ -2844,6 +2844,62 @@ def dashboard_page(conn, building: str) -> None:
     prior_rows = _read_rows(sql_build_points_window, (*emp_ids, since_60, since_30))
     current_points = {r.get("building") or "": float(r.get("pts") or 0.0) for r in current_rows}
     prior_points = {r.get("building") or "": float(r.get("pts") or 0.0) for r in prior_rows}
+
+    # ── Consolidated top reason per building (1 query instead of 3) ───────
+    if is_pg(conn):
+        sql_all_build_reasons = '''
+            SELECT sub.building, sub.reason
+              FROM (
+                SELECT COALESCE(e."Location", '') AS building,
+                       ph.reason,
+                       COUNT(*) AS n,
+                       ROW_NUMBER() OVER (PARTITION BY COALESCE(e."Location", '') ORDER BY COUNT(*) DESC, ph.reason) AS rn
+                  FROM points_history ph
+                  JOIN employees e ON e.employee_id = ph.employee_id
+                 WHERE (ph.point_date::date) >= (%s::date)
+                   AND COALESCE(ph.points, 0.0) > 0.0
+                   AND COALESCE(e.is_active, 1) = 1
+                   AND COALESCE(ph.reason, '') <> ''
+                 GROUP BY COALESCE(e."Location", ''), ph.reason
+              ) sub
+             WHERE sub.rn = 1
+        '''
+    else:
+        sql_all_build_reasons = '''
+            SELECT sub.building, sub.reason
+              FROM (
+                SELECT COALESCE(e."Location", '') AS building,
+                       ph.reason,
+                       COUNT(*) AS n
+                  FROM points_history ph
+                  JOIN employees e ON e.employee_id = ph.employee_id
+                 WHERE date(ph.point_date) >= date(?)
+                   AND COALESCE(ph.points, 0.0) > 0.0
+                   AND COALESCE(e.is_active, 1) = 1
+                   AND COALESCE(ph.reason, '') <> ''
+                 GROUP BY COALESCE(e."Location", ''), ph.reason
+              ) sub
+             WHERE sub.n = (
+                SELECT MAX(sub2.n)
+                  FROM (
+                    SELECT COALESCE(e2."Location", '') AS building,
+                           ph2.reason,
+                           COUNT(*) AS n
+                      FROM points_history ph2
+                      JOIN employees e2 ON e2.employee_id = ph2.employee_id
+                     WHERE date(ph2.point_date) >= date(?)
+                       AND COALESCE(ph2.points, 0.0) > 0.0
+                       AND COALESCE(e2.is_active, 1) = 1
+                       AND COALESCE(ph2.reason, '') <> ''
+                     GROUP BY COALESCE(e2."Location", ''), ph2.reason
+                  ) sub2
+                 WHERE sub2.building = sub.building
+             )
+             GROUP BY sub.building
+        '''
+    reason_params = (since_30,) if is_pg(conn) else (since_30, since_30)
+    all_reason_rows = _read_rows(sql_all_build_reasons, reason_params)
+    reason_by_build = {r.get("building", ""): r.get("reason", "") for r in all_reason_rows}
 
     snap_rows = []
     for b in BUILDINGS:
@@ -2857,9 +2913,8 @@ def dashboard_page(conn, building: str) -> None:
             pct_change = ((cur_avg_30d - prev_avg_30d) / prev_avg_30d) * 100.0
             pct_txt = f"{pct_change:+.1f}%"
         else:
-            pct_txt = "�"
-        reason_rows = _read_rows(sql_build_reasons, (since_30, b))
-        most_common_reason = (reason_rows[0].get("reason") if reason_rows else None) or "�"
+            pct_txt = "\u2014"
+        most_common_reason = reason_by_build.get(b) or "\u2014"
         snap_rows.append(
             {
                 "Building": b,
@@ -3012,6 +3067,73 @@ def dashboard_page(conn, building: str) -> None:
             return points
         return (incidents / denominator_count) * 100.0
 
+    # ── Fetch all weekday top-reasons in one query (instead of 5) ───────────
+    if is_pg(conn):
+        sql_weekday_reason_all = f'''
+            SELECT sub.dow, sub.reason
+              FROM (
+                SELECT EXTRACT(DOW FROM ph.point_date::date)::int AS dow,
+                       ph.reason,
+                       COUNT(*) AS n,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY EXTRACT(DOW FROM ph.point_date::date)::int
+                           ORDER BY COUNT(*) DESC, ph.reason
+                       ) AS rn
+                  FROM points_history ph
+                 WHERE ph.employee_id IN ({ph})
+                   AND (ph.point_date::date) >= (%s::date)
+                   AND (ph.point_date::date) < (%s::date)
+                   AND COALESCE(ph.points, 0.0) > 0.0
+                   AND COALESCE(ph.reason, '') <> ''
+                 GROUP BY EXTRACT(DOW FROM ph.point_date::date), ph.reason
+              ) sub
+             WHERE sub.rn = 1
+        '''
+    else:
+        sql_weekday_reason_all = f'''
+            SELECT sub.dow, sub.reason
+              FROM (
+                SELECT CAST(strftime('%w', ph.point_date) AS INTEGER) AS dow,
+                       ph.reason,
+                       COUNT(*) AS n
+                  FROM points_history ph
+                 WHERE ph.employee_id IN ({ph})
+                   AND date(ph.point_date) >= date(?)
+                   AND date(ph.point_date) < date(?)
+                   AND COALESCE(ph.points, 0.0) > 0.0
+                   AND COALESCE(ph.reason, '') <> ''
+                 GROUP BY CAST(strftime('%w', ph.point_date) AS INTEGER), ph.reason
+              ) sub
+             WHERE sub.n = (
+                SELECT MAX(sub2.n)
+                  FROM (
+                    SELECT CAST(strftime('%w', ph2.point_date) AS INTEGER) AS dow2,
+                           ph2.reason,
+                           COUNT(*) AS n
+                      FROM points_history ph2
+                     WHERE ph2.employee_id IN ({ph})
+                       AND date(ph2.point_date) >= date(?)
+                       AND date(ph2.point_date) < date(?)
+                       AND COALESCE(ph2.points, 0.0) > 0.0
+                       AND COALESCE(ph2.reason, '') <> ''
+                     GROUP BY CAST(strftime('%w', ph2.point_date) AS INTEGER), ph2.reason
+                  ) sub2
+                 WHERE sub2.dow2 = sub.dow
+             )
+             GROUP BY sub.dow
+        '''
+    if is_pg(conn):
+        all_weekday_reason_rows = _read_rows(
+            sql_weekday_reason_all,
+            (*emp_ids, window_start.isoformat(), window_end.isoformat()),
+        )
+    else:
+        all_weekday_reason_rows = _read_rows(
+            sql_weekday_reason_all,
+            (*emp_ids, window_start.isoformat(), window_end.isoformat(), *emp_ids, window_start.isoformat(), window_end.isoformat()),
+        )
+    top_reason_by_dow = {int(r.get("dow") or 0): r.get("reason", "") for r in all_weekday_reason_rows}
+
     table_rows = []
     metric_values = {}
     for dow in dow_order:
@@ -3022,11 +3144,7 @@ def dashboard_page(conn, building: str) -> None:
         selected_val = metric_value(stats, metric_choice)
         metric_values[dow] = selected_val
 
-        weekday_reason_rows = _read_rows(
-            sql_weekday_reason,
-            (*emp_ids, window_start.isoformat(), window_end.isoformat(), dow),
-        )
-        top_reason_day = (weekday_reason_rows[0].get("reason") if weekday_reason_rows else None) or "�"
+        top_reason_day = top_reason_by_dow.get(dow) or "\u2014"
 
         table_rows.append(
             {
@@ -3405,7 +3523,9 @@ def pto_page(conn, building: str) -> None:
         st.markdown("<span class='sidebar-nav-label'>PTO Type Filter</span>", unsafe_allow_html=True)
         for _pt in all_types:
             if st.button(_pt, key=_tkey(_pt), use_container_width=True):
-                st.session_state["pto_type_toggles"][_pt] = not toggles.get(_pt, True)
+                new_state = not toggles.get(_pt, True)
+                st.session_state["pto_type_toggles"][_pt] = new_state
+                st.toast(f"{_pt}: {'shown' if new_state else 'hidden'}")
                 st.rerun()
 
     sel_types = [t for t in all_types if st.session_state["pto_type_toggles"].get(t, True)]
@@ -4079,9 +4199,8 @@ def pto_page(conn, building: str) -> None:
                 repo.clear_pto_data(conn)
         except Exception:
             pass
+        st.toast("PTO data cleared.")
         st.rerun()
-    if st.button("Clear PTO Data", key="pto_clear_btn_export"):
-        _clear_pto_data()
 
     # ── Clear data ──────────────────────────────────────────────────────────
     divider()
@@ -4090,7 +4209,8 @@ def pto_page(conn, building: str) -> None:
         "Clear the loaded CSV data to start over with a new file.</p>",
         unsafe_allow_html=True,
     )
-    if st.button("Clear PTO Data", key="pto_clear_btn_footer"):
+    pto_clear_confirmed = st.checkbox("I confirm \u2014 clear all PTO data", key="pto_clear_confirm")
+    if st.button("Clear PTO Data", key="pto_clear_btn_footer", disabled=not pto_clear_confirmed):
         _clear_pto_data()
 
 # ── Employees ─────────────────────────────────────────────────────────────────
@@ -4418,6 +4538,7 @@ def points_ledger_page(conn, building: str) -> None:
                         services.recalculate_employee_dates(conn, emp_id)
                     clear_read_caches()
                     set_ledger_notice(f"Recalculated point totals for employee #{emp_id}.")
+                    st.toast(f"Recalculated employee #{emp_id}.")
                     st.rerun()
                 except Exception as exc:
                     st.error(str(exc))
@@ -4427,6 +4548,7 @@ def points_ledger_page(conn, building: str) -> None:
                     services.recalculate_all_employee_dates(conn)
                     clear_read_caches()
                     set_ledger_notice("Recalculated point totals for all employees.")
+                    st.toast("All employees recalculated.")
                     st.rerun()
                 except Exception as exc:
                     st.error(str(exc))
@@ -4447,6 +4569,7 @@ def points_ledger_page(conn, building: str) -> None:
             if len(hist) >= current_history_limit and current_history_limit < LEDGER_HISTORY_FULL_LIMIT:
                 if st.button("Load Full History", key=f"load_full_history_{emp_id}"):
                     st.session_state[history_limit_key] = LEDGER_HISTORY_FULL_LIMIT
+                    st.toast("Loading full history...")
                     st.rerun()
 
             if st.button("Undo Last Entry", key="undo_last"):
@@ -4454,6 +4577,7 @@ def points_ledger_page(conn, building: str) -> None:
                     services.delete_point_history_entry(conn, point_id=int(df_h.iloc[0]["ID"]), employee_id=emp_id)
                     clear_read_caches()
                     set_ledger_notice("Last entry removed.")
+                    st.toast("Last entry removed.")
                     st.rerun()
                 except Exception as exc:
                     st.error(str(exc))
@@ -4678,6 +4802,7 @@ def manage_employees_page(conn) -> None:
                     conn.commit()
                     clear_read_caches()
                     st.success("Changes saved.")
+                    st.toast("Employee changes saved.")
                     st.rerun()
                 except Exception as exc:
                     st.error(str(exc))
@@ -4698,6 +4823,7 @@ def manage_employees_page(conn) -> None:
                         conn.commit()
                         clear_read_caches()
                         st.success(f"Employee #{sel[0]} deleted.")
+                        st.toast(f"Employee #{sel[0]} deleted.")
                         st.rerun()
                     except Exception as exc:
                         st.error(str(exc))
@@ -4957,8 +5083,10 @@ def exports_page(conn, building: str) -> None:
 
     with col_data:
         if run:
-            df = run_export_query(conn, export_type, building, start_date, end_date)
+            with st.spinner("Generating report..."):
+                df = run_export_query(conn, export_type, building, start_date, end_date)
             st.session_state["last_export"] = (export_type, df)
+            st.toast("Report ready.")
 
         if "last_export" in st.session_state:
             label, df = st.session_state["last_export"]
@@ -5017,6 +5145,7 @@ def system_updates_page(conn) -> None:
             with st.spinner("Building backup..."):
                 st.session_state["_backup_bytes"] = _build_full_backup_excel(conn)
                 st.session_state["_backup_downloaded"] = True
+            st.toast("Backup ready for download.")
     with bk_col2:
         if st.session_state.get("_backup_bytes"):
             st.download_button(
@@ -5050,6 +5179,7 @@ def system_updates_page(conn) -> None:
                 conn.commit()
                 clear_read_caches()
             st.success(f"Recalculated {count} employee(s). Point totals and dates are now recomputed from history.")
+            st.toast(f"Recalculated {count} employee(s).")
         except Exception as exc:
             st.error(str(exc))
 
@@ -5332,7 +5462,8 @@ def system_updates_page(conn) -> None:
     with col_results:
         if btn_roll and ok:
             try:
-                rows = services.apply_2mo_rolloffs(conn, run_date=run_date, dry_run=dry_run)
+                with st.spinner("Running 2-month roll-offs..."):
+                    rows = services.apply_2mo_rolloffs(conn, run_date=run_date, dry_run=dry_run)
                 if not dry_run:
                     clear_read_caches()
                 st.session_state["maintenance_log"].append({
@@ -5344,16 +5475,19 @@ def system_updates_page(conn) -> None:
                 if rows:
                     df = pd.DataFrame(rows)
                     st.success(f"{'Preview:' if dry_run else 'Applied:'} {len(rows)} employee(s) affected.")
+                    st.toast(f"2-Month Roll-offs: {len(rows)} employee(s).")
                     st.dataframe(df, use_container_width=True, hide_index=True)
                     st.download_button("Download CSV", to_csv(df), file_name=f"rolloffs_{run_date}.csv", mime="text/csv", key="dl_roll")
                 else:
                     info_box("No 2-month roll-offs are due as of the selected date.")
+                    st.toast("No roll-offs due.")
             except Exception as exc:
                 st.error(str(exc))
 
         if btn_perf and ok:
             try:
-                rows = services.advance_due_perfect_attendance_dates(conn, run_date=run_date, dry_run=dry_run)
+                with st.spinner("Advancing perfect attendance..."):
+                    rows = services.advance_due_perfect_attendance_dates(conn, run_date=run_date, dry_run=dry_run)
                 if not dry_run:
                     clear_read_caches()
                 st.session_state["maintenance_log"].append({
@@ -5365,16 +5499,19 @@ def system_updates_page(conn) -> None:
                 if rows:
                     df = pd.DataFrame(rows)
                     st.success(f"{'Preview:' if dry_run else 'Applied:'} {len(rows)} employee(s) affected.")
+                    st.toast(f"Perfect Attendance: {len(rows)} employee(s).")
                     st.dataframe(df, use_container_width=True, hide_index=True)
                     st.download_button("Download CSV", to_csv(df), file_name=f"perfect_att_{run_date}.csv", mime="text/csv", key="dl_perf")
                 else:
                     info_box("No perfect attendance dates are due for advancement.")
+                    st.toast("No perfect attendance dates due.")
             except Exception as exc:
                 st.error(str(exc))
 
         if btn_ytd and ok:
             try:
-                rows = services.apply_ytd_rolloffs(conn, run_date=run_date, dry_run=dry_run)
+                with st.spinner("Applying YTD roll-offs..."):
+                    rows = services.apply_ytd_rolloffs(conn, run_date=run_date, dry_run=dry_run)
                 if not dry_run:
                     clear_read_caches()
                 st.session_state["maintenance_log"].append({
@@ -5391,10 +5528,12 @@ def system_updates_page(conn) -> None:
                     except Exception:
                         df = pd.DataFrame(rows)
                     st.success(f"{'Preview:' if dry_run else 'Applied:'} {len(rows)} YTD entry(ies).")
+                    st.toast(f"YTD Roll-offs: {len(rows)} entry(ies).")
                     st.dataframe(df, use_container_width=True, hide_index=True)
                     st.download_button("Download CSV", to_csv(df), file_name=f"ytd_rolloffs_{run_date}.csv", mime="text/csv", key="dl_ytd")
                 else:
                     info_box("No YTD roll-offs are applicable for the selected date.")
+                    st.toast("No YTD roll-offs applicable.")
             except Exception as exc:
                 st.error(str(exc))
 
