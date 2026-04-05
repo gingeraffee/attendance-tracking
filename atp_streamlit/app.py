@@ -4188,7 +4188,7 @@ def pto_page(conn, building: str) -> None:
     st.download_button(
         "Download filtered PTO as CSV",
         data=to_csv(exp_df),
-        file_name=f"pto_export_{date_start}_{date_end}.csv",
+        file_name=f"PTO_Data_Export_{date_start}_{date_end}.csv",
         mime="text/csv",
     )
     def _clear_pto_data() -> None:
@@ -4305,7 +4305,7 @@ def employees_page(conn, building: str) -> None:
     st.download_button(
         "Download Point History PDF",
         data=pdf_bytes,
-        file_name=f"attendance-history-{emp_id}-{safe_last}-{safe_first}-{report_date}.pdf",
+        file_name=f"Points_History_{safe_last}_{safe_first}.pdf",
         mime="application/pdf",
         use_container_width=False,
     )
@@ -5098,7 +5098,7 @@ def exports_page(conn, building: str) -> None:
                 st.download_button(
                     "Download CSV",
                     data=to_csv(df),
-                    file_name=f"atp_{label.replace(' ', '_')}_{date.today()}.csv",
+                    file_name=f"_{date.today()}_{label.replace(' ', '_')}.csv",
                     mime="text/csv",
                 )
         else:
