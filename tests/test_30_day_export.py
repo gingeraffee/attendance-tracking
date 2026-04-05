@@ -4,7 +4,7 @@ from datetime import date
 
 from atp_core import services
 from atp_core.schema import ensure_schema
-from atp_streamlit.pages.exports import run_export_query
+from atp_streamlit.app import run_export_query
 
 
 class ThirtyDayExportTests(unittest.TestCase):
