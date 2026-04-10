@@ -4848,6 +4848,7 @@ def run_export_query(conn, export_type: str, building: str, start_date: date, en
             sql = """SELECT employee_id   AS "Employee #",
                             last_name     AS "Last Name",
                             first_name    AS "First Name",
+                            COALESCE("Location", '') AS "Location",
                             COALESCE(point_total, 0.0) AS "Point Total",
                             rolloff_date  AS "2 Month Roll Off Date",
                             perfect_attendance AS "Perfect Attendance Date"
@@ -4857,6 +4858,7 @@ def run_export_query(conn, export_type: str, building: str, start_date: date, en
             sql = """SELECT employee_id   AS "Employee #",
                             last_name     AS "Last Name",
                             first_name    AS "First Name",
+                            COALESCE("Location", '') AS "Location",
                             COALESCE(point_total, 0.0) AS "Point Total",
                             rolloff_date  AS "2 Month Roll Off Date",
                             perfect_attendance AS "Perfect Attendance Date"
