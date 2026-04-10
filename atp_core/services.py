@@ -214,10 +214,12 @@ def recalculate_employee_dates(conn: sqlite3.Connection, employee_id: int) -> No
 
     elif perfect_anchor_iso:
         # Has positive history but total is currently 0 (all rolled off).
-        # Clear rolloff_date; still keep perfect_attendance cleared too
-        # (per policy: no points = no rolloff scheduled, no perfect date shown).
+        # Clear rolloff_date (nothing left to roll off) but still compute
+        # perfect_attendance — an employee whose points rolled off is doing
+        # well and should continue tracking toward the next milestone.
         rolloff_date_iso = None
-        perfect_date_iso = None
+        perfect_anchor = datetime.strptime(perfect_anchor_iso, "%Y-%m-%d").date()
+        perfect_date_iso = three_months_then_first(perfect_anchor).isoformat()
     else:
         rolloff_date_iso = None
         perfect_date_iso = existing_perfect_iso or start_based_perfect_iso
