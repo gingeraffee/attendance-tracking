@@ -156,12 +156,13 @@ def create_employee(
     first_name: str,
     start_date: str,
     location: str | None = None,
+    manager: str | None = None,
 ):
     _exec(
         conn,
         """
-        INSERT INTO employees (employee_id, last_name, first_name, start_date, "Location", is_active)
-        VALUES (?, ?, ?, ?, ?, 1);
+        INSERT INTO employees (employee_id, last_name, first_name, start_date, "Location", manager, is_active)
+        VALUES (?, ?, ?, ?, ?, ?, 1);
         """,
         (
             int(employee_id),
@@ -169,6 +170,7 @@ def create_employee(
             str(first_name).strip(),
             str(start_date).strip(),
             (location or "").strip() or None,
+            (manager or "").strip() or None,
         ),
     )
 

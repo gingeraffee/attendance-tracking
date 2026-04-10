@@ -25,11 +25,13 @@ def ensure_schema(conn):
             perfect_attendance TEXT,
             point_warning_date TEXT,
             is_active INTEGER DEFAULT 1,
-            "Location" TEXT
+            "Location" TEXT,
+            manager TEXT
         );
         """)
 
         cur.execute('ALTER TABLE employees ADD COLUMN IF NOT EXISTS start_date TEXT;')
+        cur.execute('ALTER TABLE employees ADD COLUMN IF NOT EXISTS manager TEXT;')
 
         cur.execute("""
         CREATE TABLE IF NOT EXISTS points_history (
@@ -107,6 +109,8 @@ def ensure_schema(conn):
         cur.execute('ALTER TABLE employees ADD COLUMN "Location" TEXT;')
     if "start_date" not in cols:
         cur.execute('ALTER TABLE employees ADD COLUMN start_date TEXT;')
+    if "manager" not in cols:
+        cur.execute('ALTER TABLE employees ADD COLUMN manager TEXT;')
 
     cur.execute("""
         CREATE TABLE IF NOT EXISTS pto_uploads (

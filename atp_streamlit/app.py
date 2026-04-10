@@ -934,23 +934,10 @@ def _apply_bulk_employee_override(
     update_rolloff_date: bool = False,
     perfect_attendance: date | None = None,
     update_perfect_attendance: bool = False,
+    manager: str | None = None,
+    update_manager: bool = False,
     note: str | None = None,
 ) -> None:
-    svc = getattr(services, "apply_bulk_employee_override", None)
-    if callable(svc):
-        svc(
-            conn,
-            employee_id=int(employee_id),
-            point_total=point_total,
-            update_point_total=update_point_total,
-            rolloff_date=rolloff_date,
-            update_rolloff_date=update_rolloff_date,
-            perfect_attendance=perfect_attendance,
-            update_perfect_attendance=update_perfect_attendance,
-            note=note,
-        )
-        return
-
     employee_id = int(employee_id)
     with db.tx(conn):
         if update_point_total:
@@ -983,6 +970,13 @@ def _apply_bulk_employee_override(
                 conn,
                 "UPDATE employees SET rolloff_date = ?, perfect_attendance = ? WHERE employee_id = ?",
                 (rolloff_iso, perfect_iso, employee_id),
+            )
+
+        if update_manager:
+            exec_sql(
+                conn,
+                "UPDATE employees SET manager = ? WHERE employee_id = ?",
+                (manager or None, employee_id),
             )
 
 
@@ -4691,6 +4685,7 @@ def manage_employees_page(conn) -> None:
                 last       = st.text_input("Last Name")
                 start_date = st.date_input("Hire / Start Date", value=date.today())
                 location   = st.selectbox("Building", BLDG_OPTS)
+                manager    = st.text_input("Manager")
                 added      = st.form_submit_button("Add Employee", use_container_width=True)
 
             if added:
@@ -4705,6 +4700,7 @@ def manage_employees_page(conn) -> None:
                             first.strip(),
                             start_date,
                             location or None,
+                            manager.strip() or None,
                         )
                         conn.commit()
                         clear_read_caches()
@@ -4745,6 +4741,7 @@ def manage_employees_page(conn) -> None:
         start_raw = str(emp.get("start_date") or "")[:10]
         rolloff_raw = str(emp.get("rolloff_date") or "")[:10]
         perfect_raw = str(emp.get("perfect_attendance") or "")[:10]
+        manager_raw = str(emp.get("manager") or "")
         try:
             start_val = date.fromisoformat(start_raw) if start_raw else date.today()
         except ValueError:
@@ -4755,11 +4752,12 @@ def manage_employees_page(conn) -> None:
         with col_edit:
             section_label("Edit Details")
             with st.form("edit_employee"):
-                first_e = st.text_input("First Name", value=emp.get("first_name") or "")
-                last_e  = st.text_input("Last Name",  value=emp.get("last_name") or "")
-                start_e = st.date_input("Hire / Start Date", value=start_val)
-                bldg_e  = st.selectbox("Building", BLDG_OPTS, index=loc_idx)
-                act_e   = st.checkbox("Active", value=bool(emp.get("is_active", 1)))
+                first_e   = st.text_input("First Name", value=emp.get("first_name") or "")
+                last_e    = st.text_input("Last Name",  value=emp.get("last_name") or "")
+                start_e   = st.date_input("Hire / Start Date", value=start_val)
+                bldg_e    = st.selectbox("Building", BLDG_OPTS, index=loc_idx)
+                manager_e = st.text_input("Manager", value=manager_raw)
+                act_e     = st.checkbox("Active", value=bool(emp.get("is_active", 1)))
                 rolloff_e = st.text_input(
                     "2-Month Roll-off Date (MM/DD/YYYY)",
                     value=(datetime.strptime(rolloff_raw, "%Y-%m-%d").strftime("%m/%d/%Y") if rolloff_raw else ""),
@@ -4783,12 +4781,13 @@ def manage_employees_page(conn) -> None:
                     )
                     exec_sql(
                         conn,
-                        'UPDATE employees SET first_name=?, last_name=?, start_date=?, "Location"=?, is_active=?, rolloff_date=?, perfect_attendance=? WHERE employee_id=?',
+                        'UPDATE employees SET first_name=?, last_name=?, start_date=?, "Location"=?, manager=?, is_active=?, rolloff_date=?, perfect_attendance=? WHERE employee_id=?',
                         (
                             first_e.strip(),
                             last_e.strip(),
                             start_e.isoformat(),
                             bldg_e or None,
+                            manager_e.strip() or None,
                             1 if act_e else 0,
                             rolloff_new_iso,
                             perfect_new_iso,
@@ -4833,6 +4832,7 @@ def manage_employees_page(conn) -> None:
 EXPORT_LABELS = {
     "employee audit":             "Employee Audit",
     "30-day point history":        "30-Day Point History",
+    "points by manager":           "Points by Manager",
     "upcoming 2-month roll-offs":  "Upcoming 2-Month Roll-offs",
     "upcoming perfect attendance": "Upcoming Perfect Attendance",
     "pending ytd roll-offs":       "Pending YTD Roll-offs",
@@ -4953,6 +4953,50 @@ def run_export_query(conn, export_type: str, building: str, start_date: date, en
                 df.loc[:, "Point Total"] = pd.to_numeric(df["Point Total"], errors="coerce").map(
                     lambda v: f"{v:.1f}" if pd.notna(v) else ""
                 )
+        return df
+
+    elif export_type == "points by manager":
+        if pg:
+            sql = """
+                SELECT COALESCE(e.manager, '(No Manager)') AS "Manager",
+                       e.employee_id AS "Employee #",
+                       e.last_name AS "Last Name",
+                       e.first_name AS "First Name",
+                       COALESCE(e."Location", '') AS "Location",
+                       ph.point_date AS "Point Date",
+                       ph.points AS "Points",
+                       ph.reason AS "Reason",
+                       COALESCE(ph.note, '') AS "Note"
+                  FROM points_history ph
+                  JOIN employees e ON e.employee_id = ph.employee_id
+                 WHERE (ph.point_date::date) BETWEEN (%s::date) AND (%s::date)
+            """
+        else:
+            sql = """
+                SELECT COALESCE(e.manager, '(No Manager)') AS "Manager",
+                       e.employee_id AS "Employee #",
+                       e.last_name AS "Last Name",
+                       e.first_name AS "First Name",
+                       COALESCE(e."Location", '') AS "Location",
+                       ph.point_date AS "Point Date",
+                       ph.points AS "Points",
+                       ph.reason AS "Reason",
+                       COALESCE(ph.note, '') AS "Note"
+                  FROM points_history ph
+                  JOIN employees e ON e.employee_id = ph.employee_id
+                 WHERE date(ph.point_date) BETWEEN date(?) AND date(?)
+            """
+        params = [start_date.isoformat(), end_date.isoformat()]
+        if building != "All":
+            sql += " AND COALESCE(e.\"Location\", '') = ?"
+            params.append(building)
+        sql += ' ORDER BY "Manager", e.last_name, e.first_name, ph.point_date'
+        df = pd.DataFrame([dict(r) for r in fetchall(conn, sql, tuple(params))])
+        if not df.empty and "Points" in df.columns:
+            df = df.astype({"Points": "object"})
+            df.loc[:, "Points"] = pd.to_numeric(df["Points"], errors="coerce").map(
+                lambda v: f"{v:.1f}" if pd.notna(v) else ""
+            )
         return df
 
     elif export_type == "upcoming 2-month roll-offs":
@@ -5207,8 +5251,8 @@ def system_updates_page(conn) -> None:
             st.caption("The corrected point totals and date overrides are now saved in the tracker.")
     section_label("Bulk Employee Override")
     st.caption("Upload a CSV with corrected employee data. Required column: **Employee #**. "
-               "Optional columns: **Point Total**, **2 Month Roll Off Date**, **Perfect Attendance Date**. "
-               "Point adjustments are inserted as history entries; dates are set directly.")
+               "Optional columns: **Point Total**, **2 Month Roll Off Date**, **Perfect Attendance Date**, **Manager**. "
+               "Point adjustments are inserted as history entries; dates and manager are set directly.")
     uploaded = st.file_uploader("Upload corrections CSV", type=["csv"], key="bulk_override_csv")
     current_upload_sig = None
     if uploaded is None:
@@ -5244,10 +5288,11 @@ def system_updates_page(conn) -> None:
                     has_points = "Point Total" in csv_df.columns
                     has_rolloff = "2 Month Roll Off Date" in csv_df.columns
                     has_perfect = "Perfect Attendance Date" in csv_df.columns
-                    if not (has_points or has_rolloff or has_perfect):
+                    has_manager = "Manager" in csv_df.columns
+                    if not (has_points or has_rolloff or has_perfect or has_manager):
                         st.session_state["bulk_override_parse_error"] = (
                             "CSV must contain at least one of: 'Point Total', '2 Month Roll Off Date', "
-                            "'Perfect Attendance Date'."
+                            "'Perfect Attendance Date', 'Manager'."
                         )
                     else:
                         changes = []
@@ -5323,6 +5368,15 @@ def system_updates_page(conn) -> None:
                                 if new_pa != cur_pa:
                                     changed = True
 
+                            if has_manager:
+                                new_mgr = str(row["Manager"]).strip() if not pd.isna(row["Manager"]) else ""
+                                cur_mgr = str(emp.get("manager") or "").strip()
+                                change["Current Manager"] = cur_mgr
+                                change["New Manager"] = new_mgr
+                                change["_update_manager"] = new_mgr != cur_mgr
+                                if new_mgr != cur_mgr:
+                                    changed = True
+
                             if changed:
                                 changes.append(change)
 
@@ -5338,7 +5392,7 @@ def system_updates_page(conn) -> None:
                         }
                         if changes:
                             chg_df = pd.DataFrame(changes).drop(
-                                columns=["_update_points", "_update_rolloff", "_update_perfect"],
+                                columns=["_update_points", "_update_rolloff", "_update_perfect", "_update_manager"],
                                 errors="ignore",
                             )
                             st.session_state["bulk_override_changes"] = changes
@@ -5407,6 +5461,8 @@ def system_updates_page(conn) -> None:
                             else None
                         ),
                         update_perfect_attendance=bool(chg.get("_update_perfect")),
+                        manager=chg.get("New Manager") or None,
+                        update_manager=bool(chg.get("_update_manager")),
                         note="Bulk override — prior calculation correction",
                     )
                     applied += 1
