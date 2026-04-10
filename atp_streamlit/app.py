@@ -816,12 +816,15 @@ def _initialize_database(db_key: str, repair_version: int) -> None:
     try:
         if is_pg(conn):
             exec_sql(conn, "ALTER TABLE employees ADD COLUMN IF NOT EXISTS point_warning_date DATE")
+            exec_sql(conn, "ALTER TABLE employees ADD COLUMN IF NOT EXISTS manager TEXT")
             conn.commit()
         else:
             cols = [r[1] for r in fetchall(conn, "PRAGMA table_info(employees)")]
             if "point_warning_date" not in cols:
                 exec_sql(conn, "ALTER TABLE employees ADD COLUMN point_warning_date DATE")
-                conn.commit()
+            if "manager" not in cols:
+                exec_sql(conn, "ALTER TABLE employees ADD COLUMN manager TEXT")
+            conn.commit()
     except Exception:
         pass
 
