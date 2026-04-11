@@ -4210,114 +4210,6 @@ def pto_page(conn, building: str) -> None:
     if st.button("Clear PTO Data", key="pto_clear_btn_footer", disabled=not pto_clear_confirmed):
         _clear_pto_data()
 
-# ── Employees ─────────────────────────────────────────────────────────────────
-def employees_page(conn, building: str) -> None:
-    page_heading("Employees", "Look up employees and review current attendance status.")
-
-    rows = load_employees(conn, building=building)
-
-    if not rows:
-        info_box("No matching employees found.")
-        return
-
-    # Detail view
-    opts = [
-        (int(r["employee_id"]), f"#{r['employee_id']} - {r['last_name']}, {r['first_name']}")
-        for r in rows
-    ]
-    selected = st.selectbox("View details for", opts, format_func=lambda x: x[1], label_visibility="collapsed")
-    emp_id = selected[0]
-    emp = dict(repo.get_employee(conn, emp_id))
-
-    pts = float(emp.get("point_total") or 0)
-    loc = emp.get("Location") or emp.get("location") or "-"
-    active_flag = emp.get("is_active", 1)
-
-    active_badge = (
-        "<span style='display:inline-block;padding:2px 9px;border-radius:99px;font-size:.78rem;font-weight:700;"
-        "color:#00a87a;background:rgba(0,168,122,.10);border:1px solid rgba(0,168,122,.25)'>Active</span>"
-        if active_flag else
-        "<span style='display:inline-block;padding:2px 9px;border-radius:99px;font-size:.78rem;font-weight:700;"
-        "color:#6a8ab8;background:rgba(79,142,247,.08);border:1px solid rgba(79,142,247,.22)'>Inactive</span>"
-    )
-    st.markdown(
-        f"<div class='card'>"
-        f"<div style='display:flex;justify-content:space-between;align-items:flex-start'>"
-        f"<div><h2 style='margin:0;font-size:1.3rem;font-weight:800;color:#d4e1f7'>"
-        f"{emp.get('last_name')}, {emp.get('first_name')}</h2>"
-        f"<div style='color:#6a8ab8;font-size:.85rem;margin-top:.2rem'>"
-        f"Employee #{emp_id} &nbsp;&middot;&nbsp; {loc}</div></div>"
-        f"<div style='display:flex;gap:.4rem;align-items:center'>{pt_badge(pts)} {active_badge}</div>"
-        f"</div></div>",
-        unsafe_allow_html=True,
-    )
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Point Total", f"{pts:.1f}")
-    c2.metric("Next Roll-off", fmt_date(emp.get("rolloff_date")))
-    c3.metric("Perfect Attendance", fmt_date(emp.get("perfect_attendance")))
-    c4.metric("Last Point Entry", fmt_date(emp.get("last_point_date")))
-
-    # --- Override Point Total ---
-    with st.expander("Override Point Total"):
-        st.caption("Manually set the point total. Use this to correct totals affected by prior calculation errors. "
-                   "This inserts an adjustment entry in the point history.")
-        ov_col1, ov_col2 = st.columns([1, 2])
-        with ov_col1:
-            new_total = st.number_input("New Point Total", min_value=0.0, step=0.5, value=pts, key=f"override_pts_{emp_id}")
-        with ov_col2:
-            override_note = st.text_input("Reason for override", value="Manual correction — prior roll-off calculation error", key=f"override_note_{emp_id}")
-        if st.button("Apply Override", key=f"override_btn_{emp_id}"):
-            adjustment = round(new_total - pts, 3)
-            if abs(adjustment) < 0.001:
-                st.warning("New total is the same as the current total.")
-            else:
-                try:
-                    with db.tx(conn):
-                        repo.insert_points_history(
-                            conn,
-                            employee_id=emp_id,
-                            point_date=date.today(),
-                            points=adjustment,
-                            reason="Manual Adjustment",
-                            note=override_note or "Manual point total override",
-                            flag_code="MANUAL",
-                        )
-                        services.recalculate_employee_dates(conn, emp_id)
-                    conn.commit()
-                    clear_read_caches()
-                    st.success(f"Point total adjusted by {adjustment:+.1f} → new total: {new_total:.1f}")
-                    st.rerun()
-                except Exception as exc:
-                    st.error(str(exc))
-
-    divider()
-    section_label("Point History (all events)")
-    hist = [dict(r) for r in repo.get_points_history(conn, emp_id, limit=5000)]
-
-    pdf_bytes = build_point_history_pdf(emp, hist)
-    safe_last = str(emp.get("last_name") or "employee").replace(" ", "_")
-    safe_first = str(emp.get("first_name") or "").replace(" ", "_")
-    report_date = date.today().strftime("%Y%m%d")
-    st.download_button(
-        "Download Point History PDF",
-        data=pdf_bytes,
-        file_name=f"Points_History_{safe_last}_{safe_first}.pdf",
-        mime="application/pdf",
-        use_container_width=False,
-    )
-
-    if hist:
-        df_h = pd.DataFrame(hist)[["point_date", "points", "reason", "note", "point_total"]]
-        df_h["point_date"] = df_h["point_date"].apply(fmt_date)
-        df_h["points"] = df_h["points"].apply(lambda v: f"{float(v or 0):.1f}")
-        df_h["point_total"] = df_h["point_total"].apply(lambda v: f"{float(v or 0):.1f}")
-        df_h.columns = ["Date", "Points", "Reason", "Note", "Running Total"]
-        st.dataframe(df_h, use_container_width=True, hide_index=True)
-    else:
-        info_box("No history entries yet for this employee.")
-
-
 # ── Points Ledger ─────────────────────────────────────────────────────────────
 def points_ledger_page(conn, building: str) -> None:
     page_heading("Points Ledger", "Record attendance transactions and maintain a complete audit trail.")
@@ -4525,36 +4417,24 @@ def points_ledger_page(conn, building: str) -> None:
             except Exception as exc:
                 st.error(str(exc))
 
-        section_label("Repair Totals")
-        st.caption("Employee totals are calculated from transaction history. Recalculate after correcting a bad roll-off or manual entry.")
-        repair_col1, repair_col2 = st.columns(2)
-        with repair_col1:
-            if st.button("Recalculate Employee", key=f"repair_emp_{emp_id}", use_container_width=True):
-                try:
-                    with db.tx(conn):
-                        services.recalculate_employee_dates(conn, emp_id)
-                    clear_read_caches()
-                    set_ledger_notice(f"Recalculated point totals for employee #{emp_id}.")
-                    st.toast(f"Recalculated employee #{emp_id}.")
-                    st.rerun()
-                except Exception as exc:
-                    st.error(str(exc))
-        with repair_col2:
-            if st.button("Recalculate Everyone", key="repair_all_employees", use_container_width=True):
-                try:
-                    services.recalculate_all_employee_dates(conn)
-                    clear_read_caches()
-                    set_ledger_notice("Recalculated point totals for all employees.")
-                    st.toast("All employees recalculated.")
-                    st.rerun()
-                except Exception as exc:
-                    st.error(str(exc))
 
     with col_hist:
         section_label("Transaction History (all events)")
         history_limit_key = f"ledger_history_limit_{emp_id}"
         current_history_limit = int(st.session_state.get(history_limit_key, LEDGER_HISTORY_DEFAULT_LIMIT))
         hist = [dict(r) for r in repo.get_points_history(conn, emp_id, limit=current_history_limit)]
+        pdf_hist = [dict(r) for r in repo.get_points_history(conn, emp_id, limit=5000)]
+        pdf_bytes = build_point_history_pdf(emp, pdf_hist)
+        safe_last = str(emp.get("last_name") or "employee").replace(" ", "_")
+        safe_first = str(emp.get("first_name") or "").replace(" ", "_")
+        st.download_button(
+            "Download Point History PDF",
+            data=pdf_bytes,
+            file_name=f"Points_History_{safe_last}_{safe_first}.pdf",
+            mime="application/pdf",
+            use_container_width=False,
+            key=f"ledger_pdf_{emp_id}",
+        )
         if hist:
             df_h = pd.DataFrame(hist)[["id", "point_date", "points", "reason", "note", "point_total"]]
             df_h["point_date"] = df_h["point_date"].apply(fmt_date)
@@ -5114,6 +4994,30 @@ def exports_page(conn, building: str) -> None:
         "Generate and download operational reports for roll-offs, perfect attendance, and point history.",
     )
 
+    # ── Database Backup ──────────────────────────────────────────────────
+    section_label("Database Backup")
+    st.caption("Download a full snapshot of all employees and point history as an Excel file. "
+               "Recommended before running bulk operations in Maintenance.")
+    bk_col1, bk_col2 = st.columns([1, 2])
+    with bk_col1:
+        if st.button("Generate Backup", use_container_width=True, key="gen_backup"):
+            with st.spinner("Building backup..."):
+                st.session_state["_backup_bytes"] = _build_full_backup_excel(conn)
+                st.session_state["_backup_downloaded"] = True
+            st.toast("Backup ready for download.")
+    with bk_col2:
+        if st.session_state.get("_backup_bytes"):
+            st.download_button(
+                "Download Full Backup (Excel)",
+                data=st.session_state["_backup_bytes"],
+                file_name=f"atp_full_backup_{date.today()}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                key="dl_backup",
+            )
+
+    divider()
+
     col_ctrl, col_data = st.columns([1, 2.8], gap="large")
 
     with col_ctrl:
@@ -5155,7 +5059,7 @@ def exports_page(conn, building: str) -> None:
             info_box("Choose a report type and date range, then click <b>Run Report</b>.")
 
 
-# ── System Updates ────────────────────────────────────────────────────────────
+# ── Maintenance / Run Operations ──────────────────────────────────────────────
 def _build_full_backup_excel(conn) -> bytes:
     """Build an Excel workbook with Employees and Point History sheets."""
     import io
@@ -5175,62 +5079,52 @@ def _build_full_backup_excel(conn) -> bytes:
     return buf.getvalue()
 
 
-def system_updates_page(conn) -> None:
+def maintenance_page(conn) -> None:
     page_heading(
-        "System Updates",
-        "Run automated maintenance jobs: 2-month roll-offs, perfect attendance advancement, and YTD roll-offs.",
+        "Maintenance",
+        "Repair point totals and apply bulk employee overrides. Download a backup first from Exports & Forecasts.",
     )
 
-    if "maintenance_log" not in st.session_state:
-        st.session_state["maintenance_log"] = []
+    # ── Recalculate Totals ───────────────────────────────────────────────
+    section_label("Recalculate Employee Totals")
+    st.caption("Recomputes point totals, roll-off dates, and perfect attendance dates from transaction history. "
+               "Use after correcting a bad roll-off or manual entry. "
+               "Tip: download a backup from Exports & Forecasts before running bulk operations.")
 
-    # ── Database Backup ──────────────────────────────────────────────────
-    section_label("Database Backup")
-    st.caption("Download a full snapshot of all employees and point history as an Excel file. "
-               "Always download a backup before running bulk operations.")
-    bk_col1, bk_col2 = st.columns([1, 2])
-    with bk_col1:
-        if st.button("Generate Backup", use_container_width=True, key="gen_backup"):
-            with st.spinner("Building backup..."):
-                st.session_state["_backup_bytes"] = _build_full_backup_excel(conn)
-                st.session_state["_backup_downloaded"] = True
-            st.toast("Backup ready for download.")
-    with bk_col2:
-        if st.session_state.get("_backup_bytes"):
-            st.download_button(
-                "Download Full Backup (Excel)",
-                data=st.session_state["_backup_bytes"],
-                file_name=f"atp_full_backup_{date.today()}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
-                key="dl_backup",
-            )
+    all_emp_rows = [dict(r) for r in fetchall(conn, "SELECT employee_id, last_name, first_name FROM employees ORDER BY last_name, first_name")]
+    emp_opts = [(int(r["employee_id"]), f"#{r['employee_id']} - {r['last_name']}, {r['first_name']}") for r in all_emp_rows]
 
-    divider()
-
-    # ── Recalculate All ──────────────────────────────────────────────────
-    section_label("Recalculate All Employee Totals")
-    st.caption("Recomputes every employee's point total, roll-off date, and perfect attendance date "
-               "from their full point history. Use this after fixing calculation bugs.")
-    backup_done = st.session_state.get("_backup_downloaded", False)
-    if not backup_done:
-        st.markdown("<div class='warn-box'>You must generate a backup above before recalculating.</div>", unsafe_allow_html=True)
-    recalc_confirm = st.checkbox("I confirm — recalculate all employee totals", disabled=not backup_done, key="recalc_confirm")
-    if st.button("Recalculate All", disabled=not (backup_done and recalc_confirm), use_container_width=False, key="btn_recalc_all"):
-        try:
-            with st.spinner("Recalculating all employees..."):
-                emp_rows = fetchall(conn, "SELECT employee_id FROM employees ORDER BY employee_id")
-                count = 0
-                with db.tx(conn):
-                    for row in emp_rows:
-                        services.recalculate_employee_dates(conn, int(row["employee_id"]))
-                        count += 1
-                conn.commit()
-                clear_read_caches()
-            st.success(f"Recalculated {count} employee(s). Point totals and dates are now recomputed from history.")
-            st.toast(f"Recalculated {count} employee(s).")
-        except Exception as exc:
-            st.error(str(exc))
+    recalc_col1, recalc_col2 = st.columns([2, 1], gap="large")
+    with recalc_col1:
+        if emp_opts:
+            sel_recalc = st.selectbox("Employee to recalculate", emp_opts, format_func=lambda x: x[1], key="maint_recalc_emp")
+            if st.button("Recalculate Employee", key="maint_recalc_one", use_container_width=False):
+                try:
+                    with db.tx(conn):
+                        services.recalculate_employee_dates(conn, sel_recalc[0])
+                    conn.commit()
+                    clear_read_caches()
+                    st.success(f"Recalculated point totals for employee #{sel_recalc[0]}.")
+                    st.toast(f"Recalculated employee #{sel_recalc[0]}.")
+                except Exception as exc:
+                    st.error(str(exc))
+    with recalc_col2:
+        st.markdown("<div style='height:2.1rem'></div>", unsafe_allow_html=True)
+        recalc_all_confirm = st.checkbox("I confirm — recalculate all employees", key="recalc_confirm")
+        if st.button("Recalculate All", disabled=not recalc_all_confirm, use_container_width=True, key="btn_recalc_all"):
+            try:
+                with st.spinner("Recalculating all employees..."):
+                    count = 0
+                    with db.tx(conn):
+                        for row in all_emp_rows:
+                            services.recalculate_employee_dates(conn, int(row["employee_id"]))
+                            count += 1
+                    conn.commit()
+                    clear_read_caches()
+                st.success(f"Recalculated {count} employee(s).")
+                st.toast(f"Recalculated {count} employee(s).")
+            except Exception as exc:
+                st.error(str(exc))
 
     divider()
 
@@ -5487,9 +5381,17 @@ def system_updates_page(conn) -> None:
             }
             st.rerun()
 
-    divider()
 
-    # ── Automated Jobs ───────────────────────────────────────────────────
+
+def run_operations_page(conn) -> None:
+    page_heading(
+        "Run Operations",
+        "Apply 2-month roll-offs, perfect attendance advancement, and YTD roll-offs.",
+    )
+
+    if "ops_log" not in st.session_state:
+        st.session_state["ops_log"] = []
+
     col_ctrl, col_results = st.columns([1, 2.2], gap="large")
 
     with col_ctrl:
@@ -5527,7 +5429,7 @@ def system_updates_page(conn) -> None:
                     rows = services.apply_2mo_rolloffs(conn, run_date=run_date, dry_run=dry_run)
                 if not dry_run:
                     clear_read_caches()
-                st.session_state["maintenance_log"].append({
+                st.session_state["ops_log"].append({
                     "Time": datetime.now().strftime("%H:%M:%S"),
                     "Job": "2-Month Roll-offs",
                     "Dry Run": dry_run,
@@ -5551,7 +5453,7 @@ def system_updates_page(conn) -> None:
                     rows = services.advance_due_perfect_attendance_dates(conn, run_date=run_date, dry_run=dry_run)
                 if not dry_run:
                     clear_read_caches()
-                st.session_state["maintenance_log"].append({
+                st.session_state["ops_log"].append({
                     "Time": datetime.now().strftime("%H:%M:%S"),
                     "Job": "Perfect Attendance",
                     "Dry Run": dry_run,
@@ -5575,7 +5477,7 @@ def system_updates_page(conn) -> None:
                     rows = services.apply_ytd_rolloffs(conn, run_date=run_date, dry_run=dry_run)
                 if not dry_run:
                     clear_read_caches()
-                st.session_state["maintenance_log"].append({
+                st.session_state["ops_log"].append({
                     "Time": datetime.now().strftime("%H:%M:%S"),
                     "Job": "YTD Roll-offs",
                     "Dry Run": dry_run,
@@ -5598,11 +5500,11 @@ def system_updates_page(conn) -> None:
             except Exception as exc:
                 st.error(str(exc))
 
-        if st.session_state["maintenance_log"]:
+        if st.session_state["ops_log"]:
             divider()
             section_label("Session Run Log")
             st.dataframe(
-                pd.DataFrame(st.session_state["maintenance_log"]),
+                pd.DataFrame(st.session_state["ops_log"]),
                 use_container_width=True,
                 hide_index=True,
             )
@@ -6059,7 +5961,7 @@ def main() -> None:
         st.markdown("<span class='sidebar-nav-label'>Navigation</span>", unsafe_allow_html=True)
         page = st.radio(
             "",
-            ["Dashboard", "PTO Usage Analytics", "Employees", "Points Ledger", "Corrective Action", "Manage Employees", "Exports & Forecasts", "System Updates"],
+            ["Dashboard", "PTO Usage Analytics", "Points Ledger", "Corrective Action", "Manage Employees", "Exports & Forecasts", "Maintenance", "Run Operations"],
             key="page",
             label_visibility="collapsed",
         )
@@ -6079,8 +5981,6 @@ def main() -> None:
         dashboard_page(conn, building)
     elif page == "PTO Usage Analytics":
         pto_page(conn, building)
-    elif page == "Employees":
-        employees_page(conn, building)
     elif page == "Points Ledger":
         points_ledger_page(conn, building)
     elif page == "Corrective Action":
@@ -6089,8 +5989,10 @@ def main() -> None:
         manage_employees_page(conn)
     elif page == "Exports & Forecasts":
         exports_page(conn, building)
+    elif page == "Maintenance":
+        maintenance_page(conn)
     else:
-        system_updates_page(conn)
+        run_operations_page(conn)
 
     # Render spotlight only on Dashboard (after page runs so it reflects current selection)
     with spotlight_placeholder.container():
