@@ -5407,10 +5407,9 @@ def run_operations_page(conn) -> None:
             ok = st.checkbox("I confirm — apply changes to the database")
 
         st.markdown("<div style='height:.5rem'></div>", unsafe_allow_html=True)
-        btn_roll   = st.button("Run 2-Month Roll-offs",      use_container_width=True, disabled=not ok)
-        btn_perf   = st.button("Advance Perfect Attendance", use_container_width=True, disabled=not ok)
-        btn_ytd    = st.button("Apply YTD Roll-offs",        use_container_width=True, disabled=not ok)
-        btn_repair = st.button("Repair Perfect Attendance Dates", use_container_width=True, disabled=not ok)
+        btn_roll = st.button("Run 2-Month Roll-offs",      use_container_width=True, disabled=not ok)
+        btn_perf = st.button("Advance Perfect Attendance", use_container_width=True, disabled=not ok)
+        btn_ytd  = st.button("Apply YTD Roll-offs",        use_container_width=True, disabled=not ok)
 
         st.markdown(
             "<div style='margin-top:.9rem;font-size:.79rem;color:#6a8ab8'>"
@@ -5419,10 +5418,7 @@ def run_operations_page(conn) -> None:
             "<b style='color:#7eb3ff'>Perfect Attendance</b> — advances eligible milestone dates "
             "by one month per overdue period. No points are removed.<br><br>"
             "<b style='color:#7eb3ff'>YTD Roll-offs</b> — applies a rolling 12-month net point "
-            "reduction. Does not move roll-off or perfect attendance anchors.<br><br>"
-            "<b style='color:#7eb3ff'>Repair Perfect Attendance Dates</b> — corrects dates that "
-            "were moved backwards by a past bug. Restores each employee's date to the correct "
-            "next milestone without awarding duplicate bonuses.</div>",
+            "reduction. Does not move roll-off or perfect attendance anchors.</div>",
             unsafe_allow_html=True,
         )
 
@@ -5501,30 +5497,6 @@ def run_operations_page(conn) -> None:
                 else:
                     info_box("No YTD roll-offs are applicable for the selected date.")
                     st.toast("No YTD roll-offs applicable.")
-            except Exception as exc:
-                st.error(str(exc))
-
-        if btn_repair and ok:
-            try:
-                with st.spinner("Repairing perfect attendance dates..."):
-                    rows = services.repair_perfect_attendance_dates(conn, run_date=run_date, dry_run=dry_run)
-                if not dry_run:
-                    clear_read_caches()
-                st.session_state["ops_log"].append({
-                    "Time": datetime.now().strftime("%H:%M:%S"),
-                    "Job": "Repair Perfect Attendance",
-                    "Dry Run": dry_run,
-                    "Affected": len(rows),
-                })
-                if rows:
-                    df = pd.DataFrame(rows)
-                    st.success(f"{'Preview:' if dry_run else 'Repaired:'} {len(rows)} employee(s).")
-                    st.toast(f"Repair: {len(rows)} employee(s) corrected.")
-                    st.dataframe(df, use_container_width=True, hide_index=True)
-                    st.download_button("Download CSV", to_csv(df), file_name=f"pa_repair_{run_date}.csv", mime="text/csv", key="dl_repair")
-                else:
-                    info_box("No perfect attendance dates need repair.")
-                    st.toast("No dates needed repair.")
             except Exception as exc:
                 st.error(str(exc))
 
