@@ -742,7 +742,7 @@ def repair_perfect_attendance_dates(
             """
             SELECT employee_id, first_name, last_name, perfect_attendance, start_date
               FROM employees
-             WHERE status = 'Active'
+             WHERE is_active = 1
                AND (
                      perfect_attendance IS NULL
                   OR (perfect_attendance::date) <= (%s::date)
@@ -770,7 +770,7 @@ def repair_perfect_attendance_dates(
             """
             SELECT employee_id, first_name, last_name, perfect_attendance, start_date
               FROM employees
-             WHERE status = 'Active'
+             WHERE is_active = 1
                AND (
                      perfect_attendance IS NULL
                   OR date(perfect_attendance) <= date(?)
