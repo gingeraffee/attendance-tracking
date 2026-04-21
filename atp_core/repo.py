@@ -16,14 +16,37 @@ def _adapt_sql(sql: str, pg: bool) -> str:
     return sql.replace("?", "%s")
 
 
+def _pg_recover(conn):
+    """Roll back any aborted transaction on a cached psycopg2 connection."""
+    try:
+        conn.rollback()
+    except Exception:
+        pass
+
+
 def _fetchall(conn, sql: str, params=()):
     sql = _adapt_sql(sql, _is_pg(conn))
     if _is_pg(conn):
-        cur = conn.cursor()
-        cur.execute(sql, params)
-        rows = cur.fetchall()
-        cur.close()
-        return rows
+        try:
+            cur = conn.cursor()
+            cur.execute(sql, params)
+            rows = cur.fetchall()
+            cur.close()
+            return rows
+        except Exception as exc:
+            # If a previous query left the connection in an aborted transaction,
+            # roll back and retry once so a stale cached connection never
+            # permanently breaks the app.
+            if "InFailedSqlTransaction" in type(exc).__name__ or (
+                hasattr(exc, "pgcode") and exc.pgcode == "25P02"
+            ):
+                _pg_recover(conn)
+                cur = conn.cursor()
+                cur.execute(sql, params)
+                rows = cur.fetchall()
+                cur.close()
+                return rows
+            raise
     return conn.execute(sql, params).fetchall()
 
 
