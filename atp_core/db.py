@@ -39,14 +39,17 @@ def get_db_path() -> str:
 def connect():
     """
     Returns a DB connection.
-    - If DATABASE_URL is set => Postgres (persistent)
+    - If DATABASE_URL is set => Postgres (autocommit=True so a failed read
+      query never poisons the shared cached connection for subsequent queries)
     - Else => SQLite (local dev fallback)
     """
     url = _database_url()
     if url:
         import psycopg2
         from psycopg2.extras import RealDictCursor
-        return psycopg2.connect(url, cursor_factory=RealDictCursor)
+        conn = psycopg2.connect(url, cursor_factory=RealDictCursor)
+        conn.autocommit = True
+        return conn
 
     path = Path(_sqlite_path())
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -63,11 +66,19 @@ def connect():
 def tx(conn=None):
     """
     Transaction context manager that works for sqlite3 + psycopg2.
+
+    For psycopg2 connections running in autocommit mode (the default set by
+    connect() above), this temporarily disables autocommit so the block runs
+    as a single atomic transaction, then restores autocommit on exit.
     """
     own = False
     if conn is None:
         conn = connect()
         own = True
+
+    was_autocommit = getattr(conn, 'autocommit', False)
+    if was_autocommit:
+        conn.autocommit = False
     try:
         yield conn
         conn.commit()
@@ -75,5 +86,7 @@ def tx(conn=None):
         conn.rollback()
         raise
     finally:
+        if was_autocommit:
+            conn.autocommit = True
         if own:
             conn.close()
