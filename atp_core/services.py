@@ -735,6 +735,15 @@ def repair_perfect_attendance_dates(
     """
     run_date = run_date or date.today()
 
+    # Ensure the connection is in a clean state. A previous failed query on a
+    # cached psycopg2 connection can leave it in an aborted transaction, which
+    # causes all subsequent commands to fail. Rolling back here is safe because
+    # this function only reads until the final UPDATE.
+    try:
+        conn.rollback()
+    except Exception:
+        pass
+
     # Find active employees whose perfect_attendance is past or missing
     if _is_pg(conn):
         candidates = _fetchall(
