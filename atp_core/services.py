@@ -181,6 +181,15 @@ def recalculate_employee_dates(conn: sqlite3.Connection, employee_id: int) -> No
 
     # --- Step 4: decide what to write ---
     if not rolloff_anchor_iso and not perfect_anchor_iso:
+        # No history at all. Use the existing stored date if it is already
+        # ahead of the start-date formula (e.g. manually corrected or previously
+        # advanced), so we never move perfect_attendance backwards here either.
+        if existing_perfect_iso and (
+            not start_based_perfect_iso or existing_perfect_iso > start_based_perfect_iso
+        ):
+            no_history_perfect_iso = existing_perfect_iso
+        else:
+            no_history_perfect_iso = start_based_perfect_iso
         _exec(conn,
             """
             UPDATE employees
@@ -190,7 +199,7 @@ def recalculate_employee_dates(conn: sqlite3.Connection, employee_id: int) -> No
                    perfect_attendance = ?
              WHERE employee_id = ?
             """,
-            (new_total, start_based_perfect_iso, employee_id),
+            (new_total, no_history_perfect_iso, employee_id),
         )
         return
 
