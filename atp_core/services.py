@@ -224,6 +224,13 @@ def recalculate_employee_dates(conn: sqlite3.Connection, employee_id: int) -> No
         rolloff_date_iso = None
         perfect_date_iso = existing_perfect_iso or start_based_perfect_iso
 
+    # Never let recalculation move perfect_attendance backwards.  Once a
+    # milestone has been advanced by advance_due_perfect_attendance_dates the
+    # stored date is ahead of what the raw-anchor formula would produce.
+    # Roll-offs and other non-positive entries must not undo that advancement.
+    if perfect_date_iso and existing_perfect_iso and perfect_date_iso < existing_perfect_iso:
+        perfect_date_iso = existing_perfect_iso
+
     _exec(conn,
         """
         UPDATE employees
@@ -703,6 +710,139 @@ def advance_due_perfect_attendance_dates(
             )
 
     return advanced
+
+
+def repair_perfect_attendance_dates(
+    conn,
+    run_date: date | None = None,
+    dry_run: bool = False,
+):
+    """
+    Repair perfect_attendance dates that were incorrectly moved backwards by
+    the recalculate_employee_dates bug (where a roll-off could reset the date
+    to a past value that had already been awarded and advanced).
+
+    For each active employee whose perfect_attendance is NULL or in the past:
+      1. Find the most recent 'Perfect Attendance' AUTO entry already in their
+         history — that was the last awarded milestone.
+      2. Step the date forward from there until it is in the future.
+      3. If they have no awarded history but do have positive points, compute
+         the date from the raw positive-point anchor.
+      4. Update perfect_attendance WITHOUT inserting new history entries
+         (the bonuses were already awarded; we are only restoring the stored date).
+
+    Returns a list of dicts describing each employee whose date was corrected.
+    """
+    run_date = run_date or date.today()
+
+    # Find active employees whose perfect_attendance is past or missing
+    if _is_pg(conn):
+        candidates = _fetchall(
+            conn,
+            """
+            SELECT employee_id, first_name, last_name, perfect_attendance, start_date
+              FROM employees
+             WHERE status = 'Active'
+               AND (
+                     perfect_attendance IS NULL
+                  OR (perfect_attendance::date) <= (%s::date)
+               )
+             ORDER BY last_name, first_name
+            """,
+            (run_date.isoformat(),),
+        )
+        ph_query = """
+            SELECT MAX(point_date) AS last_date
+              FROM points_history
+             WHERE employee_id = %s
+               AND reason = 'Perfect Attendance'
+               AND flag_code = 'AUTO'
+        """
+        pos_query = """
+            SELECT MAX(point_date) AS last_date
+              FROM points_history
+             WHERE employee_id = %s
+               AND points > 0
+        """
+    else:
+        candidates = _fetchall(
+            conn,
+            """
+            SELECT employee_id, first_name, last_name, perfect_attendance, start_date
+              FROM employees
+             WHERE status = 'Active'
+               AND (
+                     perfect_attendance IS NULL
+                  OR date(perfect_attendance) <= date(?)
+               )
+             ORDER BY last_name, first_name
+            """,
+            (run_date.isoformat(),),
+        )
+        ph_query = """
+            SELECT MAX(point_date) AS last_date
+              FROM points_history
+             WHERE employee_id = ?
+               AND reason = 'Perfect Attendance'
+               AND flag_code = 'AUTO'
+        """
+        pos_query = """
+            SELECT MAX(point_date) AS last_date
+              FROM points_history
+             WHERE employee_id = ?
+               AND points > 0
+        """
+
+    repaired = []
+
+    for rec in candidates:
+        emp_id = int(rec["employee_id"])
+        old_date_iso = str(rec["perfect_attendance"] or "")[:10] or None
+
+        # Find the last milestone that was already awarded
+        last_awarded_row = _fetchone(conn, ph_query, (emp_id,))
+        last_awarded_iso = last_awarded_row["last_date"] if last_awarded_row else None
+
+        if last_awarded_iso:
+            # Step forward from the last awarded milestone until future
+            new_due = _coerce_iso_date(last_awarded_iso)
+            while new_due <= run_date:
+                new_due = step_next_perfect_attendance(new_due)
+            new_date_iso = new_due.isoformat()
+        else:
+            # Never awarded — compute from the raw positive-point anchor
+            pos_row = _fetchone(conn, pos_query, (emp_id,))
+            pos_iso = pos_row["last_date"] if pos_row else None
+            if not pos_iso:
+                # No positive history at all; nothing to repair
+                continue
+            new_date_iso = three_months_then_first(
+                datetime.strptime(pos_iso, "%Y-%m-%d").date()
+            ).isoformat()
+
+        if new_date_iso == old_date_iso:
+            continue
+
+        repaired.append({
+            "employee_id": emp_id,
+            "first_name": rec["first_name"],
+            "last_name": rec["last_name"],
+            "old_perfect_attendance": old_date_iso,
+            "new_perfect_attendance": new_date_iso,
+        })
+
+        if dry_run:
+            continue
+
+        _exec(
+            conn,
+            "UPDATE employees SET perfect_attendance = ? WHERE employee_id = ?"
+            if not _is_pg(conn)
+            else "UPDATE employees SET perfect_attendance = %s WHERE employee_id = %s",
+            (new_date_iso, emp_id),
+        )
+
+    return repaired
 
 
 # ---------------------------------------------------------------------------
