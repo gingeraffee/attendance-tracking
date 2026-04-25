@@ -5551,7 +5551,7 @@ def corrective_action_page(conn, building: str) -> None:
                    ) AS points_at_warning,
                    (
                        SELECT (DATE_TRUNC('month', MIN(ph5.point_date::date)::timestamp)::date
-                               + INTERVAL '1 year')::text
+                               + INTERVAL '1 year')::date::text
                          FROM points_history ph5
                         WHERE ph5.employee_id = e.employee_id
                           AND ph5.points > 0
