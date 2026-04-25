@@ -5984,11 +5984,10 @@ def corrective_action_page(conn, building: str) -> None:
                             rolloff_ytd=fmt_date(row.get("next_ytd_rolloff")),
                             point_history=history_by_emp.get(eid),
                         )
-                        safe_name = f"{row['last_name']}_{row['first_name']}".replace(" ", "_")
                         st.download_button(
                             "Generate PDF",
                             data=pdf_bytes,
-                            file_name=f"CA_{safe_name}_{today.isoformat()}.pdf",
+                            file_name=f"{today.isoformat()} {label} - {row['first_name']} {row['last_name']}.pdf",
                             mime="application/pdf",
                             key=f"ca_pdf_{group_key}_{eid}",
                             use_container_width=True,
