@@ -5539,7 +5539,13 @@ def corrective_action_page(conn, building: str) -> None:
                         WHERE ph3.employee_id = e.employee_id
                           AND COALESCE(ph3.points, 0.0) > 0.0
                    ) AS last_point_date,
-                   e.point_warning_date::text AS point_warning_date
+                   e.point_warning_date::text AS point_warning_date,
+                   (
+                       SELECT COALESCE(SUM(ph4.points), 0.0)
+                         FROM points_history ph4
+                        WHERE ph4.employee_id = e.employee_id
+                          AND ph4.point_date::date <= e.point_warning_date
+                   ) AS points_at_warning
               FROM employees e
              WHERE e.employee_id IN ({ph})
                AND COALESCE(e.is_active, 1) = 1
@@ -5550,7 +5556,7 @@ def corrective_action_page(conn, building: str) -> None:
     else:
         sql_ca = f"""
             SELECT employee_id, last_name, first_name, building, point_total,
-                   last_point_date, point_warning_date
+                   last_point_date, point_warning_date, points_at_warning
               FROM (
                 SELECT e.employee_id, e.last_name, e.first_name,
                        COALESCE(e."Location", '') AS building,
@@ -5559,7 +5565,11 @@ def corrective_action_page(conn, building: str) -> None:
                          WHERE ph3.employee_id = e.employee_id
                            AND COALESCE(ph3.points,0.0) > 0.0
                        ) AS last_point_date,
-                       e.point_warning_date
+                       e.point_warning_date,
+                       (SELECT COALESCE(SUM(ph4.points), 0.0) FROM points_history ph4
+                         WHERE ph4.employee_id = e.employee_id
+                           AND date(ph4.point_date) <= e.point_warning_date
+                       ) AS points_at_warning
                   FROM employees e
                  WHERE e.employee_id IN ({ph})
                    AND COALESCE(e.is_active, 1) = 1
@@ -5578,12 +5588,25 @@ def corrective_action_page(conn, building: str) -> None:
         except Exception:
             return None
 
+    def threshold_level(pts: float) -> int:
+        """Returns 0-3 for the highest corrective action tier crossed, -1 if below 5.0."""
+        if pts > 7.5:
+            return 3  # termination
+        if pts >= 7.0:
+            return 2  # written warning
+        if pts >= 6.0:
+            return 1  # verbal warning
+        if pts >= 5.0:
+            return 0  # coaching
+        return -1
+
     def needs_new_warning(row: dict) -> bool:
         warning_dt = parse_iso_date(row.get("point_warning_date"))
         if warning_dt is None:
             return True
-        last_positive_dt = parse_iso_date(row.get("last_point_date"))
-        return last_positive_dt is not None and last_positive_dt > warning_dt
+        current_level = threshold_level(float(row.get("point_total") or 0))
+        warned_level = threshold_level(float(row.get("points_at_warning") or 0))
+        return current_level > warned_level
 
     needs_warning_rows = [row for row in ca_rows if needs_new_warning(row)]
     already_warned_rows = [row for row in ca_rows if not needs_new_warning(row)]
