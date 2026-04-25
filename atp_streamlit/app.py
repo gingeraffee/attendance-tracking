@@ -5556,6 +5556,8 @@ def corrective_action_page(conn, building: str) -> None:
                         WHERE ph5.employee_id = e.employee_id
                           AND ph5.points > 0
                           AND COALESCE(ph5.flag_code, '') != 'AUTO'
+                          AND (DATE_TRUNC('month', ph5.point_date::date)::date
+                               + INTERVAL '1 year') > CURRENT_DATE
                    ) AS next_ytd_rolloff
               FROM employees e
              WHERE e.employee_id IN ({ph})
