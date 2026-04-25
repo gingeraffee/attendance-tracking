@@ -41,6 +41,7 @@ import atp_core.db as db
 from atp_core.schema import ensure_schema
 from atp_core import repo, services
 from atp_core.rules import REASON_OPTIONS
+from atp_streamlit.ca_pdf import generate_ca_pdf
 
 BUILDINGS = ["APIM", "APIS", "AAP"]
 POINT_BALANCE_REPAIR_VERSION = 2
@@ -5533,6 +5534,8 @@ def corrective_action_page(conn, building: str) -> None:
                    e.first_name,
                    COALESCE(e."Location", '') AS building,
                    COALESCE(e.point_total, 0.0) AS point_total,
+                   COALESCE(e.manager, '') AS manager,
+                   e.rolloff_date::text AS rolloff_date,
                    (
                        SELECT MAX(ph3.point_date::date)::text
                          FROM points_history ph3
@@ -5545,7 +5548,15 @@ def corrective_action_page(conn, building: str) -> None:
                          FROM points_history ph4
                         WHERE ph4.employee_id = e.employee_id
                           AND ph4.point_date::date <= e.point_warning_date::date
-                   ) AS points_at_warning
+                   ) AS points_at_warning,
+                   (
+                       SELECT (DATE_TRUNC('month', MIN(ph5.point_date))::date
+                               + INTERVAL '1 year')::text
+                         FROM points_history ph5
+                        WHERE ph5.employee_id = e.employee_id
+                          AND ph5.points > 0
+                          AND COALESCE(ph5.flag_code, '') != 'AUTO'
+                   ) AS next_ytd_rolloff
               FROM employees e
              WHERE e.employee_id IN ({ph})
                AND COALESCE(e.is_active, 1) = 1
@@ -5556,11 +5567,14 @@ def corrective_action_page(conn, building: str) -> None:
     else:
         sql_ca = f"""
             SELECT employee_id, last_name, first_name, building, point_total,
-                   last_point_date, point_warning_date, points_at_warning
+                   manager, rolloff_date, last_point_date, point_warning_date,
+                   points_at_warning, next_ytd_rolloff
               FROM (
                 SELECT e.employee_id, e.last_name, e.first_name,
                        COALESCE(e."Location", '') AS building,
                        COALESCE(e.point_total, 0.0) AS point_total,
+                       COALESCE(e.manager, '') AS manager,
+                       e.rolloff_date,
                        (SELECT MAX(date(ph3.point_date)) FROM points_history ph3
                          WHERE ph3.employee_id = e.employee_id
                            AND COALESCE(ph3.points,0.0) > 0.0
@@ -5569,7 +5583,13 @@ def corrective_action_page(conn, building: str) -> None:
                        (SELECT COALESCE(SUM(ph4.points), 0.0) FROM points_history ph4
                          WHERE ph4.employee_id = e.employee_id
                            AND date(ph4.point_date) <= e.point_warning_date
-                       ) AS points_at_warning
+                       ) AS points_at_warning,
+                       (SELECT date(strftime('%Y-%m-01', MIN(ph5.point_date)), '+1 year')
+                          FROM points_history ph5
+                         WHERE ph5.employee_id = e.employee_id
+                           AND ph5.points > 0
+                           AND COALESCE(ph5.flag_code, '') != 'AUTO'
+                       ) AS next_ytd_rolloff
                   FROM employees e
                  WHERE e.employee_id IN ({ph})
                    AND COALESCE(e.is_active, 1) = 1
@@ -5579,6 +5599,43 @@ def corrective_action_page(conn, building: str) -> None:
         """
 
     ca_rows = [dict(r) for r in fetchall(conn, sql_ca, tuple(emp_ids))]
+
+    # Pre-fetch YTD point history for termination-tier employees (used in PDF)
+    term_ids = [int(r["employee_id"]) for r in ca_rows
+                if float(r.get("point_total") or 0) > 7.5]
+    history_by_emp: dict[int, list[dict]] = {}
+    if term_ids:
+        year_start = date(today.year, 1, 1).isoformat()
+        ph_t = ",".join(["%s" if is_pg(conn) else "?"] * len(term_ids))
+        if is_pg(conn):
+            sql_hist = f"""
+                SELECT employee_id,
+                       point_date::date::text AS point_date,
+                       reason,
+                       ROUND(points::numeric, 1) AS points
+                  FROM points_history
+                 WHERE employee_id IN ({ph_t})
+                   AND (point_date::date) >= (%s::date)
+                   AND points > 0
+                   AND COALESCE(flag_code, '') != 'AUTO'
+                 ORDER BY employee_id, point_date
+            """
+        else:
+            sql_hist = f"""
+                SELECT employee_id,
+                       date(point_date) AS point_date,
+                       reason,
+                       ROUND(points, 1) AS points
+                  FROM points_history
+                 WHERE employee_id IN ({ph_t})
+                   AND date(point_date) >= date(?)
+                   AND points > 0
+                   AND COALESCE(flag_code, '') != 'AUTO'
+                 ORDER BY employee_id, point_date
+            """
+        for row in fetchall(conn, sql_hist, tuple(term_ids) + (year_start,)):
+            eid = int(row["employee_id"])
+            history_by_emp.setdefault(eid, []).append(dict(row))
 
     def parse_iso_date(value):
         if not value:
@@ -5854,7 +5911,8 @@ def corrective_action_page(conn, building: str) -> None:
                     st.rerun()
 
     # ── Tier sections ─────────────────────────────────────────────────────────
-    def render_ca_group(group_label: str, group_key: str, rows: list[dict], empty_text: str) -> None:
+    def render_ca_group(group_label: str, group_key: str, rows: list[dict],
+                        empty_text: str, show_actions: bool = False) -> None:
         st.markdown(
             f"<div class='ca-section'>"
             f"<span>{group_label}</span>"
@@ -5912,15 +5970,51 @@ def corrective_action_page(conn, building: str) -> None:
                     f"</div>",
                     unsafe_allow_html=True,
                 )
-                if st.button("Set date", key=f"ca_edit_{group_key}_{eid}", use_container_width=False):
-                    st.session_state["ca_edit_id"] = eid
-                    st.rerun()
+
+                if show_actions:
+                    bcol1, bcol2, _ = st.columns([1, 1, 3])
+                    with bcol1:
+                        pdf_bytes = generate_ca_pdf(
+                            tier_key=key,
+                            employee_name=f"{row['first_name']} {row['last_name']}",
+                            manager=row.get("manager") or "",
+                            gen_date=today.strftime("%m/%d/%Y"),
+                            point_total=pts,
+                            rolloff_2m=fmt_date(row.get("rolloff_date")),
+                            rolloff_ytd=fmt_date(row.get("next_ytd_rolloff")),
+                            point_history=history_by_emp.get(eid),
+                        )
+                        safe_name = f"{row['last_name']}_{row['first_name']}".replace(" ", "_")
+                        st.download_button(
+                            "Generate PDF",
+                            data=pdf_bytes,
+                            file_name=f"CA_{safe_name}_{today.isoformat()}.pdf",
+                            mime="application/pdf",
+                            key=f"ca_pdf_{group_key}_{eid}",
+                            use_container_width=True,
+                        )
+                    with bcol2:
+                        if st.button("Log Warning", key=f"ca_log_{group_key}_{eid}",
+                                     use_container_width=True):
+                            sym = "%s" if is_pg(conn) else "?"
+                            exec_sql(conn,
+                                     f"UPDATE employees SET point_warning_date={sym} "
+                                     f"WHERE employee_id={sym}",
+                                     (today.isoformat(), eid))
+                            conn.commit()
+                            st.rerun()
+                else:
+                    if st.button("Set date", key=f"ca_edit_{group_key}_{eid}",
+                                 use_container_width=False):
+                        st.session_state["ca_edit_id"] = eid
+                        st.rerun()
 
     render_ca_group(
         "Needs Corrective Action",
         "needs",
         needs_warning_rows,
         "No employees currently need a new warning.",
+        show_actions=True,
     )
     with st.expander("Threshold Met - Warning Up To Date", expanded=False):
         render_ca_group(
