@@ -5544,7 +5544,7 @@ def corrective_action_page(conn, building: str) -> None:
                        SELECT COALESCE(SUM(ph4.points), 0.0)
                          FROM points_history ph4
                         WHERE ph4.employee_id = e.employee_id
-                          AND ph4.point_date::date <= e.point_warning_date
+                          AND ph4.point_date::date <= e.point_warning_date::date
                    ) AS points_at_warning
               FROM employees e
              WHERE e.employee_id IN ({ph})
