@@ -5067,8 +5067,8 @@ def _build_full_backup_excel(conn) -> bytes:
     buf = io.BytesIO()
     emp_df = pd.DataFrame([dict(r) for r in fetchall(conn,
         'SELECT employee_id, last_name, first_name, COALESCE("Location",\'\') AS "Location", '
-        'start_date, point_total, last_point_date, rolloff_date, perfect_attendance, '
-        'point_warning_date, is_active FROM employees ORDER BY last_name, first_name'
+        'start_date, point_total, last_point_date, perfect_attendance, '
+        'is_active, manager FROM employees ORDER BY last_name, first_name'
     )])
     hist_df = pd.DataFrame([dict(r) for r in fetchall(conn,
         'SELECT id, employee_id, point_date, points, reason, note, flag_code '
