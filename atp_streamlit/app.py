@@ -5065,11 +5065,32 @@ def _build_full_backup_excel(conn) -> bytes:
     """Build an Excel workbook with Employees and Point History sheets."""
     import io
     buf = io.BytesIO()
-    emp_df = pd.DataFrame([dict(r) for r in fetchall(conn,
-        'SELECT employee_id, last_name, first_name, COALESCE("Location",\'\') AS "Location", '
-        'start_date, point_total, last_point_date, perfect_attendance, '
-        'is_active, manager FROM employees ORDER BY last_name, first_name'
-    )])
+    if is_pg(conn):
+        emp_sql = (
+            'SELECT employee_id, last_name, first_name, COALESCE("Location",\'\') AS "Location",'
+            ' start_date, point_total, last_point_date, perfect_attendance,'
+            ' point_warning_date, is_active, manager,'
+            " (SELECT (DATE_TRUNC('month', MIN(ph.point_date::date)::timestamp)::date"
+            "  + INTERVAL '1 year')::date::text FROM points_history ph"
+            '  WHERE ph.employee_id = employees.employee_id AND ph.points > 0'
+            "  AND COALESCE(ph.flag_code, '') != 'AUTO'"
+            "  AND (DATE_TRUNC('month', ph.point_date::date)::date + INTERVAL '1 year') > CURRENT_DATE"
+            ') AS next_ytd_rolloff'
+            ' FROM employees ORDER BY last_name, first_name'
+        )
+    else:
+        emp_sql = (
+            'SELECT employee_id, last_name, first_name, COALESCE("Location",\'\') AS "Location",'
+            ' start_date, point_total, last_point_date, perfect_attendance,'
+            ' point_warning_date, is_active, manager,'
+            " (SELECT date(strftime('%Y-%m-01', MIN(ph.point_date)), '+1 year')"
+            '  FROM points_history ph WHERE ph.employee_id = employees.employee_id'
+            "  AND ph.points > 0 AND COALESCE(ph.flag_code, '') != 'AUTO'"
+            "  AND date(strftime('%Y-%m-01', ph.point_date), '+1 year') > date('now')"
+            ') AS next_ytd_rolloff'
+            ' FROM employees ORDER BY last_name, first_name'
+        )
+    emp_df = pd.DataFrame([dict(r) for r in fetchall(conn, emp_sql)])
     hist_df = pd.DataFrame([dict(r) for r in fetchall(conn,
         'SELECT id, employee_id, point_date, points, reason, note, flag_code '
         'FROM points_history ORDER BY employee_id, point_date, id'
