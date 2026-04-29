@@ -4933,8 +4933,15 @@ def run_export_query(conn, export_type: str, building: str, start_date: date, en
         params = [start_date.isoformat(), end_date.isoformat()]
 
     elif export_type == "pending ytd roll-offs":
-        # Show pending YTD roll-offs for the current month (not yet applied)
-        pending = services.preview_ytd_rolloffs(conn, run_date=date.today(), exclude_applied=True)
+        # Preview the next upcoming 1st-of-month roll-off (or today if it is the 1st)
+        _today = date.today()
+        if _today.day == 1:
+            _ytd_run_date = _today
+        elif _today.month == 12:
+            _ytd_run_date = date(_today.year + 1, 1, 1)
+        else:
+            _ytd_run_date = date(_today.year, _today.month + 1, 1)
+        pending = services.preview_ytd_rolloffs(conn, run_date=_ytd_run_date, exclude_applied=True)
         rows_out = []
         for employee_id, net_points, roll_date, label in pending:
             emp = repo.get_employee(conn, int(employee_id))
