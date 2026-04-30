@@ -209,8 +209,8 @@ def generate_manager_pto_pdf(
         story.append(Paragraph("PTO by Type", s["label"]))
         story.append(Spacer(1, 0.04 * inch))
         story.append(_data_table(
-            ["PTO Type", "Hours", "Request Total"],
-            [[r["pto_type"], f"{r['hours']:.0f}", str(int(r["events"]))]
+            ["PTO Type", "Hours", "Avg Hrs / Request"],
+            [[r["pto_type"], f"{r['hours']:.0f}", f"{r['hours'] / r['events']:.1f}"]
              for _, r in type_summary.iterrows()],
             [3.5, 1.25, 1.25],
             s,
@@ -227,12 +227,12 @@ def generate_manager_pto_pdf(
         story.append(Paragraph("Employee Breakdown", s["label"]))
         story.append(Spacer(1, 0.04 * inch))
         story.append(_data_table(
-            ["Employee", "Hours", "Request Total"],
+            ["Employee", "Hours", "Avg Hrs / Request"],
             [
                 [
                     r["employee"],
                     f"{r['hours']:.0f}",
-                    str(int(r["events"])),
+                    f"{r['hours'] / r['events']:.1f}",
                 ]
                 for _, r in emp_summary.iterrows()
             ],
