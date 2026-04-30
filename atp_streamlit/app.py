@@ -45,7 +45,7 @@ from atp_streamlit.ca_pdf import generate_ca_pdf
 from atp_streamlit.pto_pdf import generate_manager_pto_pdf
 
 BUILDINGS = ["APIM", "APIS", "AAP"]
-POINT_BALANCE_REPAIR_VERSION = 2
+POINT_BALANCE_REPAIR_VERSION = 3
 EMPLOYEE_CACHE_TTL_SECONDS = 60
 DASHBOARD_CACHE_TTL_SECONDS = 90
 LEDGER_HISTORY_DEFAULT_LIMIT = 500
