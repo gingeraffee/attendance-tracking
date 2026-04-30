@@ -4348,10 +4348,12 @@ def pto_page(conn, building: str) -> None:
     # ── Export ──────────────────────────────────────────────────────────────
     divider()
     section_label("Export Filtered Data")
-    exp_cols = ["employee_id", "employee", "building", "pto_type", "start_date", "end_date", "hours", "days"]
+    exp_cols = ["employee_id", "employee", "building", "pto_type", "start_date", "end_date", "hours", "days", "request_date"]
     exp_df = df[[c for c in exp_cols if c in df.columns]].copy()
     exp_df["start_date"] = exp_df["start_date"].dt.strftime("%Y-%m-%d")
     exp_df["end_date"] = exp_df["end_date"].dt.strftime("%Y-%m-%d")
+    if "request_date" in exp_df.columns:
+        exp_df["request_date"] = exp_df["request_date"].dt.strftime("%Y-%m-%d")
     st.download_button(
         "Download filtered PTO as CSV",
         data=to_csv(exp_df),
