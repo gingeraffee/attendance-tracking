@@ -3785,7 +3785,7 @@ def pto_page(conn, building: str) -> None:
             df.groupby(["employee", "building"])
             .agg(hours=("hours", "sum"), Days=("days", "sum"))
             .reset_index()
-            .sort_values("hours", ascending=False)
+            .sort_values("Days", ascending=False)
             .head(15)
         )
         top_users["Days"] = top_users["Days"].round(1)
@@ -3962,7 +3962,7 @@ def pto_page(conn, building: str) -> None:
                 pass
 
     # emp_hrs / n_total_emp used by Burnout section below
-    emp_hrs = df.groupby("employee").agg(hours=("hours", "sum"), days=("days", "sum")).sort_values("hours", ascending=False).reset_index()
+    emp_hrs = df.groupby("employee").agg(hours=("hours", "sum"), days=("days", "sum")).sort_values("days", ascending=False).reset_index()
     n_total_emp = len(emp_hrs)
 
     # ── Module 3: Burnout & Retention Risk ──────────────────────────────────
