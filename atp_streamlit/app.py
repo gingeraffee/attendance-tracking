@@ -3269,6 +3269,13 @@ _PTO_TYPE_COLORS = {
     "Other":    "#6b7280",  # dark gray
 }
 
+_BULK_OVERRIDE_TEMPLATE_CSV = (
+    "Employee #,Point Total,2 Month Roll Off Date,Perfect Attendance Date,Manager,Status\n"
+    "1001,3.5,05/01/2025,03/01/2025,Smith John,Full-Time\n"
+    "1002,6.0,,,Jones Mary,Part-Time\n"
+    "1003,,04/01/2025,,,\n"
+)
+
 _PTO_SAMPLE_CSV = (
     "employee_id,last_name,first_name,building,pto_type,start_date,end_date,hours\n"
     "101,Smith,Jane,APIM,Vacation,2025-01-06,2025-01-10,40\n"
@@ -5311,7 +5318,17 @@ def maintenance_page(conn) -> None:
     st.caption("Upload a CSV with corrected employee data. Required column: **Employee #**. "
                "Optional columns: **Point Total**, **2 Month Roll Off Date**, **Perfect Attendance Date**, **Manager**, **Status**. "
                "Point adjustments are inserted as history entries; dates, manager, and status are set directly.")
-    uploaded = st.file_uploader("Upload corrections CSV", type=["csv"], key="bulk_override_csv")
+    _bo_col_up, _bo_col_dl = st.columns([3, 1])
+    with _bo_col_dl:
+        st.download_button(
+            "Download template",
+            data=_BULK_OVERRIDE_TEMPLATE_CSV,
+            file_name="bulk_override_template.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+    with _bo_col_up:
+        uploaded = st.file_uploader("Upload corrections CSV", type=["csv"], key="bulk_override_csv", label_visibility="collapsed")
     current_upload_sig = None
     if uploaded is None:
         for key in (
