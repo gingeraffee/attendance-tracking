@@ -165,8 +165,8 @@ def generate_manager_pto_pdf(
     total_hrs  = df["hours"].sum()
     total_days = df["days"].sum()
     total_emps = df["employee"].nunique()
-    _unplan = {"personal", "absence", "absence (sick)", "absence (covid)", "long term sick leave"}
-    _plan   = {"vacation", "floating holiday", "reward pto"}
+    _unplan = {"absence", "absence (sick)", "absence (covid)", "long term sick leave"}
+    _plan   = {"vacation", "floating holiday", "reward pto", "personal"}
     unplan_days = df[df["pto_type"].str.strip().str.lower().isin(_unplan)]["days"].sum()
     plan_days   = df[df["pto_type"].str.strip().str.lower().isin(_plan)]["days"].sum()
 

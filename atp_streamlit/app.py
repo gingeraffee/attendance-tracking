@@ -3847,8 +3847,8 @@ def pto_page(conn, building: str) -> None:
     divider()
     section_header("Planned vs Unplanned PTO")
 
-    _PLANNED_TYPES   = {"vacation", "floating holiday", "reward pto"}
-    _UNPLANNED_TYPES = {"personal", "absence", "absence (sick)", "absence (covid)", "long term sick leave"}
+    _PLANNED_TYPES   = {"vacation", "floating holiday", "reward pto", "personal"}
+    _UNPLANNED_TYPES = {"absence", "absence (sick)", "absence (covid)", "long term sick leave"}
     _PROTECTED_TYPES = {"jury duty", "bereavement", "fmla"}
 
     def _classify_pto(t: str) -> str:
@@ -4003,7 +4003,7 @@ def pto_page(conn, building: str) -> None:
     # ── Monday / Friday Absence Pattern ─────────────────────────────────────
     divider()
     section_header("Monday / Friday Absence Pattern")
-    _UNPLANNED_LOWER = {"personal", "absence", "absence (sick)", "absence (covid)", "long term sick leave"}
+    _UNPLANNED_LOWER = {"absence", "absence (sick)", "absence (covid)", "long term sick leave"}
     df_unplan = df[df["pto_type"].str.strip().str.lower().isin(_UNPLANNED_LOWER)].copy()
     if df_unplan.empty:
         info_box("No unplanned absence records in the selected period.")
