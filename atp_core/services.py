@@ -622,7 +622,7 @@ def apply_2mo_rolloffs(
                 repo.insert_points_history(
                     conn,
                     employee_id=emp_id,
-                    point_date=run_date,
+                    point_date=_first_of_month(run_date),
                     points=-float(removed),
                     reason="2 Month Roll Off",
                     note="",
@@ -703,7 +703,7 @@ def advance_due_perfect_attendance_dates(
             repo.insert_points_history(
                 conn,
                 employee_id=int(rec["employee_id"]),
-                point_date=run_date,
+                point_date=_first_of_month(run_date),
                 points=0.0,
                 reason="Perfect Attendance",
                 note=(
