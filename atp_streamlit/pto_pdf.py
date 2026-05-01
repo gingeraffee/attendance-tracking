@@ -144,6 +144,7 @@ def generate_manager_pto_pdf(
         df["request_date"] = pd.NaT
     else:
         df["request_date"] = pd.to_datetime(df["request_date"], errors="coerce")
+    df["start_date"] = pd.to_datetime(df.get("start_date"), errors="coerce")
 
     _PROTECTED = {"jury duty", "bereavement", "fmla"}
     _PLANNED_TYPES_FB   = {"vacation", "floating holiday", "reward pto", "personal"}
@@ -208,7 +209,7 @@ def generate_manager_pto_pdf(
         ["Total Leave Hours",            f"{total_hrs:,.0f}"],
         ["Total Leave Days",             f"{total_days:,.1f}"],
         ["Employees with Recorded Leave",str(total_emps)],
-        ["Paid Leave Days",              f"{plan_days:,.1f}"],
+        ["Pre-Planned Days",              f"{plan_days:,.1f}"],
         ["Unplanned Absence Days",       f"{unplan_days:,.1f}"],
     ]
     ov_tbl = Table(
@@ -245,26 +246,31 @@ def generate_manager_pto_pdf(
         ))
         story.append(Spacer(1, 0.1 * inch))
 
-        # Leave by type — split into Paid Leave / Unplanned Absences / Protected Leave
-        type_summary = (
-            mgr_df.groupby("pto_type")
+        # Leave by type — split into Pre-Planned / Unplanned / Protected Leave
+        type_detail = (
+            mgr_df.groupby(["_category", "pto_type"])
             .agg(hours=("hours", "sum"), days=("days", "sum"), events=("hours", "count"))
             .sort_values("days", ascending=False)
             .reset_index()
         )
-        type_summary["_group"] = type_summary["pto_type"].apply(_leave_group)
 
-        _GROUP_ORDER = ["Paid Leave", "Unplanned Absences", "Protected Leave"]
-        for _grp in _GROUP_ORDER:
-            _grp_rows = type_summary[type_summary["_group"] == _grp]
-            if _grp_rows.empty:
+        _CATEGORY_LABELS = {
+            "Planned":           "Pre-Planned Leave",
+            "Unplanned":         "Unplanned Absences",
+            "Protected / Neutral": "Protected Leave",
+            "Other":             "Other",
+        }
+        _CATEGORY_ORDER = ["Planned", "Unplanned", "Protected / Neutral", "Other"]
+        for _cat in _CATEGORY_ORDER:
+            _cat_rows = type_detail[type_detail["_category"] == _cat]
+            if _cat_rows.empty:
                 continue
-            story.append(Paragraph(_grp, s["label"]))
+            story.append(Paragraph(_CATEGORY_LABELS.get(_cat, _cat), s["label"]))
             story.append(Spacer(1, 0.04 * inch))
             story.append(_data_table(
                 ["PTO Type", "Hours", "Avg Days / Request"],
                 [[r["pto_type"], f"{r['hours']:.0f}", f"{r['days'] / r['events']:.1f}"]
-                 for _, r in _grp_rows.iterrows()],
+                 for _, r in _cat_rows.iterrows()],
                 [3.5, 1.25, 1.25],
                 s,
             ))
