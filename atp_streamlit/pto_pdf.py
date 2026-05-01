@@ -146,14 +146,14 @@ def generate_manager_pto_pdf(
         df["request_date"] = pd.to_datetime(df["request_date"], errors="coerce")
     df["start_date"] = pd.to_datetime(df.get("start_date"), errors="coerce")
 
-    _PROTECTED = {"jury duty", "bereavement", "fmla"}
+    _PROTECTED = {"jury duty", "bereavement", "fmla", "long term sick leave"}
     _PLANNED_TYPES_FB   = {"vacation", "floating holiday", "reward pto", "personal"}
-    _UNPLANNED_TYPES_FB = {"absence", "absence (sick)", "absence (covid)", "long term sick leave"}
+    _UNPLANNED_TYPES_FB = {"absence", "absence (sick)", "absence (covid)"}
 
     _PAID_LEAVE_TYPES    = {"vacation", "floating holiday", "reward pto", "personal",
                             "bereavement", "jury duty"}
     _UNPAID_ABSENCE_TYPES = {"absent", "absence", "absent (sick)", "absence (sick)",
-                             "absent (covid)", "absence (covid)", "long term sick leave"}
+                             "absent (covid)", "absence (covid)"}
 
     def _leave_group(pto_type: str) -> str:
         tl = pto_type.strip().lower()
@@ -278,26 +278,34 @@ def generate_manager_pto_pdf(
 
         story.append(Spacer(1, 0.05 * inch))
 
-        # Employee breakdown — days respects PT/FT shift length
-        emp_summary = (
-            mgr_df.groupby("employee")
-            .agg(hours=("hours", "sum"), days=("days", "sum"), events=("hours", "count"))
-            .sort_values("days", ascending=False)
+        # Employee breakdown — hours split by category
+        emp_pivot = (
+            mgr_df.groupby(["employee", "_category"])["hours"]
+            .sum()
+            .unstack(fill_value=0)
             .reset_index()
         )
+        for _col in ["Planned", "Unplanned", "Protected / Neutral"]:
+            if _col not in emp_pivot.columns:
+                emp_pivot[_col] = 0
+        emp_pivot["Total"] = emp_pivot[["Planned", "Unplanned", "Protected / Neutral"]].sum(axis=1)
+        emp_pivot = emp_pivot.sort_values("Total", ascending=False)
+
         story.append(Paragraph("Employee Breakdown", s["label"]))
         story.append(Spacer(1, 0.04 * inch))
         story.append(_data_table(
-            ["Employee", "Hours", "Avg Days / Request"],
+            ["Employee", "Pre-Planned Hrs", "Unplanned Hrs", "Protected Hrs", "Total Hrs"],
             [
                 [
                     r["employee"],
-                    f"{r['hours']:.0f}",
-                    f"{r['days'] / r['events']:.1f}",
+                    f"{r['Planned']:.0f}",
+                    f"{r['Unplanned']:.0f}",
+                    f"{r['Protected / Neutral']:.0f}",
+                    f"{r['Total']:.0f}",
                 ]
-                for _, r in emp_summary.iterrows()
+                for _, r in emp_pivot.iterrows()
             ],
-            [3.5, 1.25, 1.25],
+            [2.5, 1.0, 1.0, 1.0, 1.0],
             s,
         ))
         # Attendance points accrued this period
