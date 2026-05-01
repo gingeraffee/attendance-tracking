@@ -5202,6 +5202,8 @@ def run_export_query(conn, export_type: str, building: str, start_date: date, en
             "new_point_total": "New Point Total",
             "rolloff_date": "Point Date",
         })
+        df["Current Point Total"] = pd.to_numeric(df["Current Point Total"], errors="coerce")
+        df["New Point Total"] = pd.to_numeric(df["New Point Total"], errors="coerce")
         df["Points Rolling Off"] = (df["Current Point Total"] - df["New Point Total"]).round(1)
         df["Reason"] = "2-Month Roll-Off"
         df["Note"] = ""
