@@ -329,10 +329,15 @@ div[data-testid="stRadio"] label:hover p {
     border-radius: 10px 10px 0 0;
     padding: 4px 4px 0 4px;
 }
-.stTabs [data-baseweb="tab"] {
+.stTabs [data-baseweb="tab"],
+.stTabs [data-baseweb="tab"] p,
+.stTabs [data-baseweb="tab"] span,
+button[data-baseweb="tab"],
+button[data-baseweb="tab"] p,
+button[data-baseweb="tab"] span {
     border-radius: 8px 8px 0 0; border: none !important;
     font-size: .82rem !important; font-weight: 600 !important;
-    letter-spacing: .035em !important; color: var(--text) !important;
+    letter-spacing: .035em !important; color: #b8d0ee !important;
     padding: .52rem 1.05rem !important;
     transition: all .18s ease !important; background: transparent !important;
 }
@@ -449,7 +454,7 @@ p, label { color: var(--muted) !important; }
     text-shadow: 0 0 44px rgba(0,200,240,.22);
 }
 .page-heading p {
-    color: #7eb3d8; font-size: .82rem; margin: 0; letter-spacing: .01em;
+    color: #7eb3d8 !important; font-size: .82rem; margin: 0; letter-spacing: .01em;
 }
 .accent-bar {
     width: 38px; height: 2px; border-radius: 99px; margin: .18rem 0 .32rem 0;
