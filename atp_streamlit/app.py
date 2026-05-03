@@ -1563,6 +1563,7 @@ def login_page() -> None:
             st.session_state["_auth_redirect_pending"] = True
             st.session_state["login_error"] = False
             st.query_params["_s"] = token
+            st.rerun()
         else:
             st.session_state["login_error"] = True
     # Embed logo as base64 so it renders inside custom HTML

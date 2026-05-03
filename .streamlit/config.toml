@@ -1,16 +1,7 @@
 [theme]
-base="dark"
+base="light"
 
 # Cyan accent — primary interactive element color
 primaryColor="#00c8f0"
-
-# Near-black main canvas
-backgroundColor="#02060e"
-
-# Deep navy surface
-secondaryBackgroundColor="#040c1a"
-
-# Light blue-white text
-textColor="#b8d0ee"
 
 font="sans serif"
