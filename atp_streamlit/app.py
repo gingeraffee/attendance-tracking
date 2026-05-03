@@ -4775,7 +4775,12 @@ def points_ledger_page(conn, building: str) -> None:
 def manage_employees_page(conn) -> None:
     page_heading("Manage Employees", "Onboard new employees, update details, archive, or permanently delete records.")
     st.markdown(
-        "<style>div[data-testid='stWidgetLabel'] p, div[data-testid='stWidgetLabel'] label { color: #b8d0ee !important; }</style>",
+        "<style>"
+        "[data-testid='stWidgetLabel'], [data-testid='stWidgetLabel'] p,"
+        ".stTextInput label, .stNumberInput label, .stSelectbox label,"
+        ".stDateInput label, .stTextArea label, .stCheckbox label,"
+        ".stForm label { color: #b8d0ee !important; }"
+        "</style>",
         unsafe_allow_html=True,
     )
 
