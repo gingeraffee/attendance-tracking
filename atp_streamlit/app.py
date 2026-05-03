@@ -3575,8 +3575,9 @@ def pto_page(conn, building: str) -> None:
 
     date_min = df_all["start_date"].min().date()
     date_max = df_all["end_date"].max().date()
+    _default_from = max(date_min, date.today() - timedelta(days=30))
     with fc1:
-        date_start = st.date_input("From", value=date_min, min_value=date_min, max_value=date_max, key="pto_from")
+        date_start = st.date_input("From", value=_default_from, min_value=date_min, max_value=date_max, key="pto_from")
     with fc2:
         date_end = st.date_input("To", value=date_max, min_value=date_min, max_value=date_max, key="pto_to")
 
