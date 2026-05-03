@@ -275,9 +275,9 @@ div[data-testid="stMetric"] [data-testid="stMetricDelta"] {
 .stButton > button {
     border-radius: 7px !important; font-weight: 600 !important;
     font-size: .84rem !important; letter-spacing: .025em !important;
-    border: 1px solid rgba(0,120,255,.28) !important;
-    background: linear-gradient(135deg, rgba(0,80,200,.12) 0%, rgba(0,120,255,.05) 100%) !important;
-    color: #4a9ee8 !important;
+    border: 1px solid rgba(0,150,255,.55) !important;
+    background: linear-gradient(135deg, rgba(0,80,200,.28) 0%, rgba(0,120,255,.18) 100%) !important;
+    color: #90d0ff !important;
     transition: all .22s ease !important;
     position: relative; overflow: hidden;
 }
@@ -289,15 +289,15 @@ div[data-testid="stMetric"] [data-testid="stMetricDelta"] {
 }
 .stButton > button:hover {
     border-color: var(--cyan) !important;
-    background: rgba(0,120,255,.16) !important;
-    box-shadow: 0 0 20px rgba(0,120,255,.22), 0 0 40px rgba(0,120,255,.08),
-                inset 0 0 18px rgba(0,120,255,.06) !important;
-    color: #7ac8f8 !important;
+    background: rgba(0,120,255,.38) !important;
+    box-shadow: 0 0 20px rgba(0,120,255,.28), 0 0 40px rgba(0,120,255,.10),
+                inset 0 0 18px rgba(0,120,255,.08) !important;
+    color: #b8e8ff !important;
     transform: translateY(-1px) !important;
 }
 .stButton > button:active {
     transform: translateY(0) !important;
-    box-shadow: 0 0 10px rgba(0,120,255,.18) !important;
+    box-shadow: 0 0 10px rgba(0,120,255,.22) !important;
 }
 
 /* ══════════════════════════════════════════════════════════════
