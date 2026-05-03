@@ -306,6 +306,20 @@ div[data-testid="stMetric"] [data-testid="stMetricDelta"] {
 }
 
 /* ══════════════════════════════════════════════════════════════
+   RADIO BUTTONS
+══════════════════════════════════════════════════════════════ */
+div[data-testid="stRadio"] label {
+    color: var(--text) !important;
+}
+div[data-testid="stRadio"] label p {
+    color: var(--text) !important;
+    font-size: .88rem !important;
+}
+div[data-testid="stRadio"] label:hover p {
+    color: var(--text-hi) !important;
+}
+
+/* ══════════════════════════════════════════════════════════════
    TABS
 ══════════════════════════════════════════════════════════════ */
 .stTabs [data-baseweb="tab-list"] {
@@ -5275,6 +5289,10 @@ def exports_page(conn, building: str) -> None:
 
     with col_ctrl:
         section_label("Report Settings")
+        st.markdown(
+            "<style>div[data-testid='stRadio'] label p { color: #b8d0ee !important; }</style>",
+            unsafe_allow_html=True,
+        )
         export_type = st.radio(
             "Report type",
             list(EXPORT_LABELS.keys()),
