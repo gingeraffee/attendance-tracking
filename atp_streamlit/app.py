@@ -3718,33 +3718,28 @@ def pto_page(conn, building: str) -> None:
         )
 
     with trend_col:
-        _day_range = (date_end - date_start).days
-        _use_weekly = _day_range <= 90
-        _period = "W" if _use_weekly else "M"
-        _tick_fmt = "%b %d" if _use_weekly else "%b %Y"
-        _hover_fmt = "%b %d, %Y" if _use_weekly else "%b %Y"
-        _chart_title = "PTO Trend — Weekly (hours)" if _use_weekly else "PTO Trend — Monthly (hours)"
-        section_header(_chart_title)
-
+        section_header("PTO Hours by Date")
         df_trend = df.copy()
-        df_trend["bucket"] = df_trend["start_date"].dt.to_period(_period).dt.to_timestamp()
-        bucketed = df_trend.groupby(["bucket", "pto_type"])["hours"].sum().reset_index()
+        df_trend["start_date"] = pd.to_datetime(df_trend["start_date"])
+        daily = df_trend.groupby(["start_date", "pto_type"])["hours"].sum().reset_index()
 
         trend_fig = go.Figure()
-        for pto_type in bucketed["pto_type"].unique():
-            sub = bucketed[bucketed["pto_type"] == pto_type]
-            trend_fig.add_trace(go.Bar(
-                x=sub["bucket"], y=sub["hours"], name=pto_type,
-                marker_color=type_colors.get(pto_type, "#00d4ff"),
-                hovertemplate=f"<b>{pto_type}</b><br>%{{x|{_hover_fmt}}}: %{{y:.0f}} hrs<extra></extra>",
+        for pto_type in sorted(daily["pto_type"].unique()):
+            sub = daily[daily["pto_type"] == pto_type].sort_values("start_date")
+            trend_fig.add_trace(go.Scatter(
+                x=sub["start_date"], y=sub["hours"], name=pto_type,
+                mode="lines+markers",
+                line=dict(color=type_colors.get(pto_type, "#00d4ff"), width=2),
+                marker=dict(size=7),
+                connectgaps=False,
+                hovertemplate=f"<b>{pto_type}</b><br>%{{x|%b %d, %Y}}: %{{y:.0f}} hrs<extra></extra>",
             ))
         trend_fig.update_layout(
-            barmode="stack",
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)",
             font=dict(color="#c8dff0", family="SF Mono, Fira Code, monospace"),
-            xaxis=dict(showgrid=False, color="#4a7fa5", tickformat=_tick_fmt),
-            yaxis=dict(showgrid=True, gridcolor="#0d1b2e", color="#4a7fa5"),
+            xaxis=dict(showgrid=False, color="#4a7fa5", tickformat="%b %d"),
+            yaxis=dict(showgrid=True, gridcolor="#0d1b2e", color="#4a7fa5", title="Hours"),
             legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(size=11, color="#4a7fa5")),
             margin=dict(t=10, b=10, l=10, r=10),
             hovermode="x unified",
