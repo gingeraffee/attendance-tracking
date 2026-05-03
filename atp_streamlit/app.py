@@ -5163,7 +5163,7 @@ def run_export_query(conn, export_type: str, building: str, start_date: date, en
                 if not emp:
                     continue
                 emp = dict(emp)
-                loc = (emp.get("Location") or "")
+                loc = (emp.get("location") or emp.get("Location") or "")
                 if building != "All" and loc != building:
                     continue
                 current_total = round(float(emp.get("point_total", 0) or 0), 1)
