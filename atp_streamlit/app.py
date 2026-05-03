@@ -2174,6 +2174,7 @@ def selected_employee_sidebar(conn, employee_id: int | None) -> None:
     )
     if st.button("⊕  Add Point to Record", key="spotlight_add_point", use_container_width=True):
         st.session_state["ledger_emp_id"] = int(emp["employee_id"])
+        st.session_state.pop("ledger_emp_select", None)
         st.session_state["_nav_to"] = "Points Ledger"
         st.rerun()
 
@@ -4456,17 +4457,21 @@ def points_ledger_page(conn, building: str) -> None:
     ]
 
     prev_emp = st.session_state.get("ledger_emp_id")
-    default_idx = 0
-    if prev_emp is not None:
-        for i, o in enumerate(opts):
-            if o[0] == prev_emp:
-                default_idx = i
-                break
+
+    # If the stored selectbox value is missing or no longer in the current options
+    # (e.g. building filter changed, or spotlight navigation set ledger_emp_id),
+    # re-derive it from ledger_emp_id so the selectbox shows the right employee.
+    current_sel = st.session_state.get("ledger_emp_select")
+    if current_sel not in opts:
+        matching = next((o for o in opts if o[0] == prev_emp), None) if prev_emp is not None else None
+        if matching is not None:
+            st.session_state["ledger_emp_select"] = matching
+        else:
+            st.session_state.pop("ledger_emp_select", None)
 
     selected = st.selectbox(
         "Employee",
         opts,
-        index=default_idx,
         format_func=lambda x: x[1],
         key="ledger_emp_select",
     )
