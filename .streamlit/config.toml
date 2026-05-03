@@ -4,7 +4,4 @@ base="light"
 # Cyan accent — primary interactive element color
 primaryColor="#00c8f0"
 
-# Light blue-white — matches the app's dark-canvas text style
-textColor="#b8d0ee"
-
 font="sans serif"
