@@ -6587,25 +6587,28 @@ def build_manager_report_pdf(
     if not point_events:
         story.append(Paragraph("No point events recorded for this team in the selected period.", cell_s))
     else:
+        # One row per employee: name, points earned in period, current total
+        _pdf_summary: dict[int, dict] = {}
+        for ev in point_events:
+            eid = ev["employee_id"]
+            if eid not in _pdf_summary:
+                _pdf_summary[eid] = {"name": ev.get("name", ""), "pts_in_period": 0.0,
+                                     "point_total": float(ev.get("point_total") or 0)}
+            _pdf_summary[eid]["pts_in_period"] += float(ev.get("points") or 0)
+
         ev_header = [
             Paragraph("EMPLOYEE", hdr_s),
-            Paragraph("TOTAL PTS", hdr_s),
-            Paragraph("DATE", hdr_s),
-            Paragraph("EVENT PTS", hdr_s),
-            Paragraph("REASON", hdr_s),
-            Paragraph("NOTE", hdr_s),
+            Paragraph("PTS IN PERIOD", hdr_s),
+            Paragraph("CURRENT TOTAL", hdr_s),
         ]
         ev_rows = [ev_header]
-        for i, ev in enumerate(point_events):
+        for row in sorted(_pdf_summary.values(), key=lambda x: x["name"].lower()):
             ev_rows.append([
-                Paragraph(str(ev.get("name") or ""), cell_s),
-                Paragraph(f"{float(ev.get('point_total') or 0):.1f}", bold_s),
-                Paragraph(fmt_date(ev.get("point_date")), cell_s),
-                Paragraph(f"{float(ev.get('points') or 0):.1f}", cell_s),
-                Paragraph(str(ev.get("reason") or "—"), cell_s),
-                Paragraph(str(ev.get("note") or ""), cell_s),
+                Paragraph(str(row["name"]), cell_s),
+                Paragraph(f"{row['pts_in_period']:.1f}", bold_s),
+                Paragraph(f"{row['point_total']:.1f}", cell_s),
             ])
-        ev_cw = [CW * 0.21, CW * 0.09, CW * 0.10, CW * 0.08, CW * 0.27, CW * 0.25]
+        ev_cw = [CW * 0.55, CW * 0.225, CW * 0.225]
         ev_t = Table(ev_rows, colWidths=ev_cw, repeatRows=1)
         ev_style = [
             ("BACKGROUND",    (0, 0), (-1, 0),  C_NAVY),
@@ -6912,17 +6915,21 @@ def manager_report_page(conn) -> None:
     if not point_events:
         info_box(f"No point events recorded for this team between {fmt_date(pts_from)} and {fmt_date(pts_to)}.")
     else:
-        affected = len({ev["employee_id"] for ev in point_events})
-        st.caption(f"{len(point_events)} event{'s' if len(point_events) != 1 else ''} — {affected} employee{'s' if affected != 1 else ''} affected")
+        # Summarise to one row per employee
+        _emp_summary: dict[int, dict] = {}
+        for ev in point_events:
+            eid = ev["employee_id"]
+            if eid not in _emp_summary:
+                _emp_summary[eid] = {"name": ev["name"], "pts_in_period": 0.0, "point_total": ev["point_total"]}
+            _emp_summary[eid]["pts_in_period"] += ev["points"]
+
+        summary_rows = sorted(_emp_summary.values(), key=lambda x: x["name"].lower())
         ev_df = pd.DataFrame([{
-            "Employee":    ev["name"],
-            "Point Total": ev["point_total"],
-            "Date":        fmt_date(ev["point_date"]),
-            "Day":         ev["day_of_week"],
-            "Points":      ev["points"],
-            "Reason":      ev["reason"],
-            "Note":        ev["note"],
-        } for ev in point_events])
+            "Employee":          row["name"],
+            "Pts in Period":     round(row["pts_in_period"], 1),
+            "Current Pt Total":  round(row["point_total"], 1),
+        } for row in summary_rows])
+        st.caption(f"{len(point_events)} event{'s' if len(point_events) != 1 else ''} across {len(summary_rows)} employee{'s' if len(summary_rows) != 1 else ''}")
         st.dataframe(ev_df, use_container_width=True, hide_index=True)
 
         # Day-of-week breakdown (Mon–Fri only)
