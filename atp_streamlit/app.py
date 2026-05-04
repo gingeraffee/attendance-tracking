@@ -6657,6 +6657,51 @@ def build_manager_report_pdf(
         story.append(Spacer(1, 0.18 * inch))
         story.append(Paragraph("PTO USAGE SUMMARY", sec_s))
 
+        # ── Pre-Planned / Unplanned / Protected breakdown ─────────────────────
+        _PDF_PROTECTED = {"jury duty", "bereavement", "fmla", "long term sick leave"}
+
+        def _pdf_classify(row) -> str:
+            tl = str(row["pto_type"]).strip().lower()
+            if tl in _PDF_PROTECTED:
+                return "Protected"
+            rd = row.get("request_date")
+            sd = row.get("start_date")
+            if pd.notna(rd) and pd.notna(sd):
+                return "Pre-Planned" if rd < sd else "Unplanned"
+            return "Pre-Planned" if tl in {"vacation", "floating holiday", "reward pto", "personal"} else "Unplanned"
+
+        _pto_classified = pto_df.copy()
+        _pto_classified["_cls"] = _pto_classified.apply(_pdf_classify, axis=1)
+        _total_h    = _pto_classified["hours"].sum()
+        _planned_h  = _pto_classified[_pto_classified["_cls"] == "Pre-Planned"]["hours"].sum()
+        _unplan_h   = _pto_classified[_pto_classified["_cls"] == "Unplanned"]["hours"].sum()
+        _protect_h  = _pto_classified[_pto_classified["_cls"] == "Protected"]["hours"].sum()
+
+        breakdown_data = [
+            [Paragraph("TOTAL HOURS", lbl_s), Paragraph("PRE-PLANNED", lbl_s),
+             Paragraph("UNPLANNED", lbl_s),   Paragraph("PROTECTED", lbl_s)],
+            [Paragraph(f"{_total_h:.0f} hrs", val_s),
+             Paragraph(f"{_planned_h:.0f} hrs", val_s),
+             Paragraph(f"{_unplan_h:.0f} hrs", val_s),
+             Paragraph(f"{_protect_h:.0f} hrs", val_s)],
+            [Paragraph(f"{_total_h/8:.1f} days", S("MBkSub", fontName="Helvetica", fontSize=8, textColor=C_MUTED)),
+             Paragraph(f"{_planned_h/8:.1f} days", S("MBkSub2", fontName="Helvetica", fontSize=8, textColor=C_MUTED)),
+             Paragraph(f"{_unplan_h/8:.1f} days", S("MBkSub3", fontName="Helvetica", fontSize=8, textColor=C_MUTED)),
+             Paragraph(f"{_protect_h/8:.1f} days", S("MBkSub4", fontName="Helvetica", fontSize=8, textColor=C_MUTED))],
+        ]
+        bk_t = Table(breakdown_data, colWidths=[CW / 4] * 4)
+        bk_t.setStyle(TableStyle([
+            ("BACKGROUND",    (0, 0), (-1, -1), colors.HexColor("#F8FAFC")),
+            ("BOX",           (0, 0), (-1, -1), 0.5, C_DIVIDER),
+            ("INNERGRID",     (0, 0), (-1, -1), 0.25, C_DIVIDER),
+            ("ALIGN",         (0, 0), (-1, -1), "CENTER"),
+            ("TOPPADDING",    (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("BACKGROUND",    (0, 0), (-1, 0),  colors.HexColor("#EEF4FF")),
+        ]))
+        story.append(bk_t)
+        story.append(Spacer(1, 0.14 * inch))
+
         # Hours by type summary table
         by_type = (
             pto_df.groupby("pto_type")["hours"]
