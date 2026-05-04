@@ -6384,6 +6384,543 @@ def corrective_action_page(conn, building: str) -> None:
     )
 
 
+# ── Manager Report ────────────────────────────────────────────────────────────
+def _mgr_tier_label(pts: float) -> str:
+    if pts > 7.5:   return "Termination"
+    if pts >= 7.0:  return "Written Warning"
+    if pts >= 6.0:  return "Verbal Warning"
+    if pts >= 5.0:  return "Verbal Coaching"
+    return "—"
+
+
+def build_manager_report_pdf(
+    manager_name: str,
+    team: list[dict],
+    pto_df,          # pd.DataFrame or None
+) -> bytes:
+    """Generate a manager department report PDF."""
+    buffer = BytesIO()
+
+    C_NAVY    = colors.HexColor("#0D2461")
+    C_RED     = colors.HexColor("#CC1F2D")
+    C_TEXT    = colors.HexColor("#0D1117")
+    C_MUTED   = colors.HexColor("#64748B")
+    C_DIVIDER = colors.HexColor("#E2E8F0")
+    C_ROW_ALT = colors.HexColor("#F5F7FF")
+    C_WHITE   = colors.white
+
+    PW, PH = letter
+    LM = RM = 0.5 * inch
+    HEADER_H = 0.82 * inch
+    TM = HEADER_H + 0.18 * inch
+    BM = 0.48 * inch
+    CW = PW - LM - RM
+
+    today = date.today()
+    gen_on = datetime.now().strftime("%m/%d/%Y  %I:%M %p")
+    headcount = len(team)
+
+    styles = getSampleStyleSheet()
+
+    def S(name, **kw):
+        return ParagraphStyle(name, parent=styles["Normal"], **kw)
+
+    lbl_s  = S("MLbl",  fontName="Helvetica-Bold", fontSize=7,   textColor=C_MUTED,  spaceAfter=2)
+    val_s  = S("MVal",  fontName="Helvetica-Bold", fontSize=11,  textColor=C_TEXT)
+    hdr_s  = S("MHdr",  fontName="Helvetica-Bold", fontSize=8,   textColor=C_WHITE)
+    cell_s = S("MCell", fontName="Helvetica",       fontSize=8.5, textColor=C_TEXT)
+    bold_s = S("MBold", fontName="Helvetica-Bold",  fontSize=8.5, textColor=C_TEXT)
+    sec_s  = S("MSec",  fontName="Helvetica-Bold",  fontSize=10,  textColor=C_NAVY,  spaceBefore=14, spaceAfter=4)
+    note_s = S("MNote", fontName="Helvetica",        fontSize=7.5, textColor=C_MUTED)
+
+    LOGO_PATH = Path(__file__).resolve().parent.parent / "assets" / "logo.png"
+
+    def draw_page(canvas, doc):
+        canvas.saveState()
+        stripe_y = PH - HEADER_H
+        canvas.setFillColor(C_NAVY)
+        canvas.rect(0, stripe_y - 3.5, PW, 3.5, fill=1, stroke=0)
+        canvas.setFillColor(C_RED)
+        canvas.rect(0, stripe_y - 6.0, PW, 2.5, fill=1, stroke=0)
+        logo_h = 0.52 * inch
+        logo_y = (PH - HEADER_H) + (HEADER_H - logo_h) / 2
+        if LOGO_PATH.exists():
+            try:
+                canvas.drawImage(str(LOGO_PATH), LM, logo_y, height=logo_h, width=2.6 * inch,
+                                 preserveAspectRatio=True, mask="auto")
+            except Exception:
+                pass
+        mid_y = PH - HEADER_H / 2
+        canvas.setFillColor(C_MUTED); canvas.setFont("Helvetica", 7.5)
+        canvas.drawRightString(PW - RM, mid_y + 15, "AMERICAN ASSOCIATED PHARMACIES")
+        canvas.setFillColor(C_NAVY); canvas.setFont("Helvetica-Bold", 17)
+        canvas.drawRightString(PW - RM, mid_y - 1, "MANAGER DEPARTMENT REPORT")
+        canvas.setFillColor(C_MUTED); canvas.setFont("Helvetica", 7.5)
+        canvas.drawRightString(PW - RM, mid_y - 15, f"Generated  {gen_on}")
+        foot_y = BM - 6
+        canvas.setStrokeColor(C_DIVIDER); canvas.setLineWidth(0.5)
+        canvas.line(LM, foot_y, PW - RM, foot_y)
+        canvas.setFillColor(C_MUTED); canvas.setFont("Helvetica", 7)
+        canvas.drawString(LM, foot_y - 11, "CONFIDENTIAL — FOR INTERNAL USE ONLY")
+        canvas.drawCentredString(PW / 2, foot_y - 11, f"Manager: {manager_name}")
+        canvas.drawRightString(PW - RM, foot_y - 11, f"Page {doc.page}")
+        canvas.restoreState()
+
+    doc = SimpleDocTemplate(buffer, pagesize=letter,
+                            leftMargin=LM, rightMargin=RM,
+                            topMargin=TM, bottomMargin=BM)
+    story = []
+
+    # ── Manager info card ─────────────────────────────────────────────────────
+    avg_pts = sum(float(e.get("point_total") or 0) for e in team) / headcount if headcount else 0
+    at_risk = sum(1 for e in team if float(e.get("point_total") or 0) >= 5.0)
+    in_30 = today + timedelta(days=30)
+
+    def _safe_date(val):
+        if not val:
+            return None
+        try:
+            return val if hasattr(val, "toordinal") else date.fromisoformat(str(val)[:10])
+        except Exception:
+            return None
+
+    pa_due = sum(1 for e in team if (d := _safe_date(e.get("perfect_attendance"))) and today <= d <= in_30)
+    ro_due = sum(1 for e in team if (d := _safe_date(e.get("rolloff_date")))
+                 and float(e.get("point_total") or 0) >= 0.5 and today <= d <= in_30)
+
+    summary_data = [
+        [Paragraph("MANAGER", lbl_s), Paragraph("HEADCOUNT", lbl_s),
+         Paragraph("AVG POINTS", lbl_s), Paragraph("AT RISK (≥5.0)", lbl_s)],
+        [Paragraph(manager_name, val_s), Paragraph(str(headcount), val_s),
+         Paragraph(f"{avg_pts:.1f}", val_s), Paragraph(str(at_risk), val_s)],
+    ]
+    sum_t = Table(summary_data, colWidths=[CW * 0.35, CW * 0.20, CW * 0.20, CW * 0.25])
+    sum_t.setStyle(TableStyle([
+        ("BACKGROUND",  (0, 0), (-1, -1), colors.HexColor("#F8FAFC")),
+        ("BOX",         (0, 0), (-1, -1), 0.5, C_DIVIDER),
+        ("INNERGRID",   (0, 0), (-1, -1), 0.25, C_DIVIDER),
+        ("TOPPADDING",  (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("LEFTPADDING", (0, 0), (-1, -1), 8),
+    ]))
+    story.append(sum_t)
+    story.append(Spacer(1, 0.25 * inch))
+
+    # ── Points table ──────────────────────────────────────────────────────────
+    story.append(Paragraph("ATTENDANCE POINTS BY EMPLOYEE", sec_s))
+
+    pts_header = [
+        Paragraph("EMPLOYEE NAME", hdr_s),
+        Paragraph("LOCATION", hdr_s),
+        Paragraph("POINTS", hdr_s),
+        Paragraph("TIER", hdr_s),
+        Paragraph("ROLL-OFF DATE", hdr_s),
+        Paragraph("PA DATE", hdr_s),
+    ]
+    pts_rows = [pts_header]
+    for i, e in enumerate(sorted(team, key=lambda x: (x.get("last_name") or "").lower())):
+        pts = float(e.get("point_total") or 0)
+        row_bg = C_ROW_ALT if i % 2 == 0 else C_WHITE
+        pts_rows.append([
+            Paragraph(f"{e.get('last_name','')}, {e.get('first_name','')}", cell_s),
+            Paragraph(str(e.get("location") or "—"), cell_s),
+            Paragraph(f"{pts:.1f}", bold_s),
+            Paragraph(_mgr_tier_label(pts), cell_s),
+            Paragraph(fmt_date(e.get("rolloff_date")), cell_s),
+            Paragraph(fmt_date(e.get("perfect_attendance")), cell_s),
+        ])
+
+    pts_cw = [CW * 0.28, CW * 0.12, CW * 0.10, CW * 0.18, CW * 0.16, CW * 0.16]
+    pts_t = Table(pts_rows, colWidths=pts_cw, repeatRows=1)
+    hdr_style = [
+        ("BACKGROUND",    (0, 0), (-1, 0),  C_NAVY),
+        ("TEXTCOLOR",     (0, 0), (-1, 0),  C_WHITE),
+        ("TOPPADDING",    (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("LEFTPADDING",   (0, 0), (-1, -1), 6),
+        ("GRID",          (0, 0), (-1, -1), 0.25, C_DIVIDER),
+    ]
+    for i in range(1, len(pts_rows)):
+        bg = C_ROW_ALT if i % 2 == 1 else C_WHITE
+        hdr_style.append(("BACKGROUND", (0, i), (-1, i), bg))
+    pts_t.setStyle(TableStyle(hdr_style))
+    story.append(pts_t)
+
+    # ── PTO section ──────────────────────────────────────────────────────────
+    if pto_df is not None and not pto_df.empty:
+        story.append(Spacer(1, 0.20 * inch))
+        story.append(Paragraph("PTO USAGE SUMMARY", sec_s))
+
+        team_ids = {int(e["employee_id"]) for e in team}
+        team_pto = pto_df[pto_df["employee_id"].isin(team_ids)].copy()
+
+        if not team_pto.empty:
+            # Hours by type
+            by_type = (
+                team_pto.groupby("pto_type")["hours"]
+                .sum()
+                .reset_index()
+                .sort_values("hours", ascending=False)
+            )
+            pto_type_hdr = [Paragraph("PTO TYPE", hdr_s), Paragraph("TOTAL HOURS", hdr_s), Paragraph("DAYS", hdr_s)]
+            pto_type_rows = [pto_type_hdr]
+            for i, row in by_type.iterrows():
+                pto_type_rows.append([
+                    Paragraph(str(row["pto_type"]), cell_s),
+                    Paragraph(f"{row['hours']:.1f}", cell_s),
+                    Paragraph(f"{row['hours']/8:.1f}", cell_s),
+                ])
+            total_hrs = team_pto["hours"].sum()
+            pto_type_rows.append([
+                Paragraph("TOTAL", bold_s),
+                Paragraph(f"{total_hrs:.1f}", bold_s),
+                Paragraph(f"{total_hrs/8:.1f}", bold_s),
+            ])
+            type_cw = [CW * 0.50, CW * 0.25, CW * 0.25]
+            pto_t = Table(pto_type_rows, colWidths=type_cw, repeatRows=1)
+            ts = [
+                ("BACKGROUND",    (0, 0), (-1, 0), C_NAVY),
+                ("TOPPADDING",    (0, 0), (-1, -1), 5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                ("LEFTPADDING",   (0, 0), (-1, -1), 6),
+                ("GRID",          (0, 0), (-1, -1), 0.25, C_DIVIDER),
+                ("BACKGROUND",    (0, len(pto_type_rows) - 1), (-1, -1), colors.HexColor("#EEF2FF")),
+            ]
+            for i in range(1, len(pto_type_rows) - 1):
+                bg = C_ROW_ALT if i % 2 == 1 else C_WHITE
+                ts.append(("BACKGROUND", (0, i), (-1, i), bg))
+            pto_t.setStyle(TableStyle(ts))
+            story.append(pto_t)
+
+            # Top 10 PTO users
+            story.append(Spacer(1, 0.15 * inch))
+            story.append(Paragraph("TOP PTO USERS (BY HOURS)", sec_s))
+            top_users = (
+                team_pto.groupby(["employee_id", "employee"])["hours"]
+                .sum()
+                .reset_index()
+                .sort_values("hours", ascending=False)
+                .head(10)
+            )
+            top_hdr = [Paragraph("EMPLOYEE", hdr_s), Paragraph("TOTAL HOURS", hdr_s), Paragraph("DAYS", hdr_s)]
+            top_rows = [top_hdr]
+            for i, row in top_users.iterrows():
+                top_rows.append([
+                    Paragraph(str(row["employee"]), cell_s),
+                    Paragraph(f"{row['hours']:.1f}", cell_s),
+                    Paragraph(f"{row['hours']/8:.1f}", cell_s),
+                ])
+            top_t = Table(top_rows, colWidths=type_cw, repeatRows=1)
+            top_ts = [
+                ("BACKGROUND",    (0, 0), (-1, 0), C_NAVY),
+                ("TOPPADDING",    (0, 0), (-1, -1), 5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                ("LEFTPADDING",   (0, 0), (-1, -1), 6),
+                ("GRID",          (0, 0), (-1, -1), 0.25, C_DIVIDER),
+            ]
+            for i in range(1, len(top_rows)):
+                bg = C_ROW_ALT if i % 2 == 1 else C_WHITE
+                top_ts.append(("BACKGROUND", (0, i), (-1, i), bg))
+            top_t.setStyle(TableStyle(top_ts))
+            story.append(top_t)
+
+    doc.build(story, onFirstPage=draw_page, onLaterPages=draw_page)
+    return buffer.getvalue()
+
+
+def manager_report_page(conn) -> None:
+    page_heading(
+        "Manager Report",
+        "Department-level breakdown of attendance points and PTO usage for your team.",
+    )
+
+    st.markdown(
+        "<style>"
+        "[data-testid='stWidgetLabel'], [data-testid='stWidgetLabel'] p,"
+        ".stSelectbox label, .stDateInput label { color: #b8d0ee !important; }"
+        "</style>",
+        unsafe_allow_html=True,
+    )
+
+    # ── Manager list ──────────────────────────────────────────────────────────
+    mgr_rows = fetchall(
+        conn,
+        "SELECT DISTINCT COALESCE(manager, '') AS manager FROM employees "
+        "WHERE is_active=1 AND manager IS NOT NULL AND manager != '' ORDER BY manager",
+    )
+    managers = [r["manager"] for r in mgr_rows]
+    if not managers:
+        info_box(
+            "No manager assignments found. "
+            "Assign managers to employees on the Manage Employees page first."
+        )
+        return
+
+    selected_mgr = st.selectbox("Select Manager", managers, key="mgr_report_sel")
+    if not selected_mgr:
+        return
+
+    divider()
+
+    # ── Load team ─────────────────────────────────────────────────────────────
+    if is_pg(conn):
+        team_rows = fetchall(
+            conn,
+            'SELECT employee_id, last_name, first_name, COALESCE("Location",\'\') AS location, '
+            "COALESCE(point_total, 0.0) AS point_total, rolloff_date, perfect_attendance, "
+            "point_warning_date, COALESCE(manager,'') AS manager "
+            "FROM employees WHERE is_active=1 AND manager=%s ORDER BY last_name, first_name",
+            (selected_mgr,),
+        )
+    else:
+        team_rows = fetchall(
+            conn,
+            "SELECT employee_id, last_name, first_name, COALESCE(\"Location\",'') AS location, "
+            "COALESCE(point_total, 0.0) AS point_total, rolloff_date, perfect_attendance, "
+            "point_warning_date, COALESCE(manager,'') AS manager "
+            "FROM employees WHERE is_active=1 AND manager=? ORDER BY last_name, first_name",
+            (selected_mgr,),
+        )
+    team = [dict(r) for r in team_rows]
+
+    if not team:
+        info_box(f"No active employees found under manager: {selected_mgr}")
+        return
+
+    team_ids = {int(e["employee_id"]) for e in team}
+    today = date.today()
+    in_30 = today + timedelta(days=30)
+
+    def _safe_date(val):
+        if not val:
+            return None
+        try:
+            return val if hasattr(val, "toordinal") else date.fromisoformat(str(val)[:10])
+        except Exception:
+            return None
+
+    # ── Summary metrics ───────────────────────────────────────────────────────
+    section_header("Team Overview")
+    headcount = len(team)
+    avg_pts = sum(float(e.get("point_total") or 0) for e in team) / headcount
+    at_risk = sum(1 for e in team if float(e.get("point_total") or 0) >= 5.0)
+    pa_due = sum(
+        1 for e in team
+        if (d := _safe_date(e.get("perfect_attendance"))) and today <= d <= in_30
+    )
+
+    m1, m2, m3, m4 = st.columns(4)
+    with m1:
+        _pto_metric("Headcount", str(headcount), "active employees")
+    with m2:
+        _pto_metric("Avg Points", f"{avg_pts:.1f}", "team average")
+    with m3:
+        _pto_metric("At Risk", str(at_risk), "≥ 5.0 pts")
+    with m4:
+        _pto_metric("PA Due (30d)", str(pa_due), "milestones")
+
+    divider()
+
+    # ── Points table ──────────────────────────────────────────────────────────
+    section_header("Attendance Points by Employee")
+
+    pts_data = []
+    for e in team:
+        pts = float(e.get("point_total") or 0)
+        ro = _safe_date(e.get("rolloff_date"))
+        pa = _safe_date(e.get("perfect_attendance"))
+        pts_data.append({
+            "Name":          f"{e.get('last_name','')}, {e.get('first_name','')}",
+            "Location":      e.get("location") or "—",
+            "Points":        pts,
+            "Tier":          _mgr_tier_label(pts),
+            "Roll-Off Date": fmt_date(e.get("rolloff_date")),
+            "PA Date":       fmt_date(e.get("perfect_attendance")),
+        })
+
+    pts_df = pd.DataFrame(pts_data)
+    st.dataframe(pts_df, use_container_width=True, hide_index=True)
+
+    # ── Upcoming events ───────────────────────────────────────────────────────
+    ro_soon = [e for e in team if (d := _safe_date(e.get("rolloff_date")))
+               and float(e.get("point_total") or 0) >= 0.5 and today <= d <= in_30]
+    pa_soon = [e for e in team if (d := _safe_date(e.get("perfect_attendance")))
+               and today <= d <= in_30]
+
+    if ro_soon or pa_soon:
+        divider()
+        col_ro, col_pa = st.columns(2)
+        with col_ro:
+            section_header("Roll-Offs Due in 30 Days")
+            if ro_soon:
+                for e in sorted(ro_soon, key=lambda x: str(x.get("rolloff_date") or "")):
+                    name = f"{e.get('last_name','')}, {e.get('first_name','')}"
+                    st.markdown(
+                        f"<div style='padding:4px 0;color:#c8dff5'>"
+                        f"{_html_inline(name)} "
+                        f"<span style='color:#6b8cba'>— {fmt_date(e.get('rolloff_date'))}</span> "
+                        f"{pt_badge(e.get('point_total'))}</div>",
+                        unsafe_allow_html=True,
+                    )
+            else:
+                st.caption("None due in the next 30 days.")
+        with col_pa:
+            section_header("Perfect Attendance Due in 30 Days")
+            if pa_soon:
+                for e in sorted(pa_soon, key=lambda x: str(x.get("perfect_attendance") or "")):
+                    name = f"{e.get('last_name','')}, {e.get('first_name','')}"
+                    st.markdown(
+                        f"<div style='padding:4px 0;color:#c8dff5'>"
+                        f"{_html_inline(name)} "
+                        f"<span style='color:#6b8cba'>— {fmt_date(e.get('perfect_attendance'))}</span></div>",
+                        unsafe_allow_html=True,
+                    )
+            else:
+                st.caption("None due in the next 30 days.")
+
+    # ── PTO section ───────────────────────────────────────────────────────────
+    pto_df_full = st.session_state.get("pto_df")
+    if pto_df_full is not None and not pto_df_full.empty:
+        team_pto = pto_df_full[pto_df_full["employee_id"].isin(team_ids)].copy()
+
+        if not team_pto.empty:
+            divider()
+            section_header("PTO Usage")
+
+            # Optional date filter
+            pto_min = team_pto["start_date"].min()
+            pto_max = team_pto["start_date"].max()
+            if pd.notna(pto_min) and pd.notna(pto_max):
+                _default_from = max(pto_min.date(), today - timedelta(days=90))
+                fc1, fc2 = st.columns(2)
+                with fc1:
+                    pto_from = st.date_input(
+                        "From", value=_default_from,
+                        min_value=pto_min.date(), max_value=pto_max.date(),
+                        key="mgr_pto_from",
+                    )
+                with fc2:
+                    pto_to = st.date_input(
+                        "To", value=pto_max.date(),
+                        min_value=pto_min.date(), max_value=pto_max.date(),
+                        key="mgr_pto_to",
+                    )
+                team_pto = team_pto[
+                    (team_pto["start_date"].dt.date >= pto_from) &
+                    (team_pto["start_date"].dt.date <= pto_to)
+                ]
+
+            if team_pto.empty:
+                info_box("No PTO records for this team in the selected date range.")
+            else:
+                # Planned vs Unplanned classification
+                _PROTECTED_TYPES = {"jury duty", "bereavement", "fmla", "long term sick leave"}
+
+                def _classify_row_mgr(row) -> str:
+                    tl = str(row["pto_type"]).strip().lower()
+                    if tl in _PROTECTED_TYPES:
+                        return "Protected"
+                    rd = row.get("request_date")
+                    sd = row.get("start_date")
+                    if pd.notna(rd) and pd.notna(sd):
+                        return "Pre-Planned" if rd < sd else "Unplanned"
+                    return "Pre-Planned" if tl in {"vacation", "personal"} else "Unplanned"
+
+                team_pto["_class"] = team_pto.apply(_classify_row_mgr, axis=1)
+
+                # Metrics row
+                total_hrs = team_pto["hours"].sum()
+                planned_hrs = team_pto[team_pto["_class"] == "Pre-Planned"]["hours"].sum()
+                unplanned_hrs = team_pto[team_pto["_class"] == "Unplanned"]["hours"].sum()
+                protected_hrs = team_pto[team_pto["_class"] == "Protected"]["hours"].sum()
+
+                pm1, pm2, pm3, pm4 = st.columns(4)
+                with pm1:
+                    _pto_metric("Total Hours", f"{total_hrs:.0f}", f"{total_hrs/8:.1f} days")
+                with pm2:
+                    _pto_metric("Pre-Planned", f"{planned_hrs:.0f}", f"{planned_hrs/8:.1f} days")
+                with pm3:
+                    _pto_metric("Unplanned", f"{unplanned_hrs:.0f}", f"{unplanned_hrs/8:.1f} days")
+                with pm4:
+                    _pto_metric("Protected", f"{protected_hrs:.0f}", f"{protected_hrs/8:.1f} days")
+
+                st.markdown("<div style='height:.6rem'></div>", unsafe_allow_html=True)
+
+                # Hours by type chart
+                by_type = (
+                    team_pto.groupby("pto_type")["hours"]
+                    .sum()
+                    .reset_index()
+                    .sort_values("hours", ascending=False)
+                )
+                type_colors = {t: _PTO_TYPE_COLORS.get(t, _PTO_PALETTE[i % len(_PTO_PALETTE)])
+                               for i, t in enumerate(by_type["pto_type"])}
+                import plotly.graph_objects as go
+                bar_fig = go.Figure()
+                for _, row in by_type.iterrows():
+                    bar_fig.add_trace(go.Bar(
+                        x=[row["pto_type"]],
+                        y=[row["hours"]],
+                        name=row["pto_type"],
+                        marker_color=type_colors.get(row["pto_type"], "#00d4ff"),
+                        hovertemplate=f"<b>{row['pto_type']}</b>: %{{y:.0f}} hrs<extra></extra>",
+                    ))
+                bar_fig.update_layout(
+                    showlegend=False,
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    margin=dict(l=0, r=0, t=20, b=0),
+                    height=260,
+                    yaxis=dict(
+                        gridcolor="rgba(255,255,255,0.06)",
+                        color="#7899c8",
+                        title="Hours",
+                    ),
+                    xaxis=dict(color="#7899c8"),
+                    font=dict(color="#c8dff5"),
+                    bargap=0.35,
+                )
+                st.plotly_chart(bar_fig, use_container_width=True, key="mgr_pto_bar")
+
+                # Top PTO users table
+                section_header("Top PTO Users")
+                top_users = (
+                    team_pto.groupby("employee")["hours"]
+                    .sum()
+                    .reset_index()
+                    .rename(columns={"employee": "Employee", "hours": "Total Hours"})
+                    .sort_values("Total Hours", ascending=False)
+                    .head(15)
+                )
+                top_users["Days"] = (top_users["Total Hours"] / 8).round(1)
+                top_users["Total Hours"] = top_users["Total Hours"].round(1)
+                st.dataframe(top_users, use_container_width=True, hide_index=True)
+
+    else:
+        divider()
+        info_box(
+            "No PTO data loaded. Upload PTO records on the PTO Usage Analytics page "
+            "to see department-level leave breakdowns here."
+        )
+
+    # ── Download PDF ──────────────────────────────────────────────────────────
+    divider()
+    section_header("Download Report")
+    if st.button("Generate PDF Report", key="mgr_pdf_btn", use_container_width=False):
+        with st.spinner("Building PDF…"):
+            pto_for_pdf = st.session_state.get("pto_df")
+            pdf_bytes = build_manager_report_pdf(selected_mgr, team, pto_for_pdf)
+        safe_mgr = selected_mgr.replace(" ", "_").replace(",", "")
+        st.download_button(
+            "Download Manager Report PDF",
+            data=pdf_bytes,
+            file_name=f"Manager_Report_{safe_mgr}_{today}.pdf",
+            mime="application/pdf",
+            use_container_width=False,
+            key=f"mgr_pdf_dl_{safe_mgr}",
+        )
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main() -> None:
     apply_theme()
@@ -6414,7 +6951,7 @@ def main() -> None:
         st.markdown("<span class='sidebar-nav-label'>Navigation</span>", unsafe_allow_html=True)
         page = st.radio(
             "",
-            ["Dashboard", "PTO Usage Analytics", "Points Ledger", "Corrective Action", "Manage Employees", "Exports & Forecasts", "Maintenance", "Run Operations"],
+            ["Dashboard", "PTO Usage Analytics", "Manager Report", "Points Ledger", "Corrective Action", "Manage Employees", "Exports & Forecasts", "Maintenance", "Run Operations"],
             key="page",
             label_visibility="collapsed",
         )
@@ -6434,6 +6971,8 @@ def main() -> None:
         dashboard_page(conn, building)
     elif page == "PTO Usage Analytics":
         pto_page(conn, building)
+    elif page == "Manager Report":
+        manager_report_page(conn)
     elif page == "Points Ledger":
         points_ledger_page(conn, building)
     elif page == "Corrective Action":
