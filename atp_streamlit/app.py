@@ -6995,7 +6995,8 @@ def manager_report_page(conn) -> None:
     section_header("Download Report")
     if st.button("Generate PDF Report", key="mgr_pdf_btn", use_container_width=False):
         with st.spinner("Building PDF…"):
-            pto_for_pdf = st.session_state.get("_mgr_pto_filtered") or st.session_state.get("pto_df")
+            _filtered = st.session_state.get("_mgr_pto_filtered")
+            pto_for_pdf = _filtered if (_filtered is not None and not _filtered.empty) else st.session_state.get("pto_df")
             if pto_for_pdf is not None and not pto_for_pdf.empty:
                 pto_for_pdf = pto_for_pdf[pto_for_pdf["employee_id"].isin(team_ids)].copy()
             pdf_bytes = build_manager_report_pdf(
