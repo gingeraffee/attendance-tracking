@@ -6528,8 +6528,9 @@ def build_manager_report_pdf(
     else:
         ev_header = [
             Paragraph("EMPLOYEE", hdr_s),
+            Paragraph("TOTAL PTS", hdr_s),
             Paragraph("DATE", hdr_s),
-            Paragraph("PTS", hdr_s),
+            Paragraph("EVENT PTS", hdr_s),
             Paragraph("REASON", hdr_s),
             Paragraph("NOTE", hdr_s),
         ]
@@ -6537,12 +6538,13 @@ def build_manager_report_pdf(
         for i, ev in enumerate(point_events):
             ev_rows.append([
                 Paragraph(str(ev.get("name") or ""), cell_s),
+                Paragraph(f"{float(ev.get('point_total') or 0):.1f}", bold_s),
                 Paragraph(fmt_date(ev.get("point_date")), cell_s),
-                Paragraph(f"{float(ev.get('points') or 0):.1f}", bold_s),
+                Paragraph(f"{float(ev.get('points') or 0):.1f}", cell_s),
                 Paragraph(str(ev.get("reason") or "—"), cell_s),
                 Paragraph(str(ev.get("note") or ""), cell_s),
             ])
-        ev_cw = [CW * 0.24, CW * 0.11, CW * 0.07, CW * 0.30, CW * 0.28]
+        ev_cw = [CW * 0.21, CW * 0.09, CW * 0.10, CW * 0.08, CW * 0.27, CW * 0.25]
         ev_t = Table(ev_rows, colWidths=ev_cw, repeatRows=1)
         ev_style = [
             ("BACKGROUND",    (0, 0), (-1, 0),  C_NAVY),
@@ -6557,6 +6559,34 @@ def build_manager_report_pdf(
             ev_style.append(("BACKGROUND", (0, i), (-1, i), bg))
         ev_t.setStyle(TableStyle(ev_style))
         story.append(ev_t)
+
+        # Day-of-week breakdown (Mon–Fri)
+        _DOW_ORDER_PDF = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+        dow_pts_pdf   = {}
+        dow_count_pdf = {}
+        for ev in point_events:
+            d = ev.get("day_of_week", "")
+            if d in _DOW_ORDER_PDF:
+                dow_pts_pdf[d]   = dow_pts_pdf.get(d, 0.0) + float(ev.get("points") or 0)
+                dow_count_pdf[d] = dow_count_pdf.get(d, 0) + 1
+
+        story.append(Spacer(1, 0.12 * inch))
+        story.append(Paragraph("POINT EVENTS BY DAY OF WEEK", sec_s))
+
+        dow_hdr = [Paragraph(d[:3].upper(), hdr_s) for d in _DOW_ORDER_PDF]
+        dow_pts_row   = [Paragraph(f"{dow_pts_pdf.get(d, 0):.1f} pts", bold_s) for d in _DOW_ORDER_PDF]
+        dow_count_row = [Paragraph(f"({dow_count_pdf.get(d, 0)} events)", cell_s) for d in _DOW_ORDER_PDF]
+        dow_cw = [CW / 5] * 5
+        dow_t = Table([dow_hdr, dow_pts_row, dow_count_row], colWidths=dow_cw)
+        dow_t.setStyle(TableStyle([
+            ("BACKGROUND",    (0, 0), (-1, 0), C_NAVY),
+            ("ALIGN",         (0, 0), (-1, -1), "CENTER"),
+            ("TOPPADDING",    (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("GRID",          (0, 0), (-1, -1), 0.25, C_DIVIDER),
+            ("BACKGROUND",    (0, 1), (-1, -1), colors.HexColor("#F8FAFC")),
+        ]))
+        story.append(dow_t)
 
     # ── PTO section ──────────────────────────────────────────────────────────
     if pto_df is not None and not pto_df.empty:
@@ -6795,19 +6825,26 @@ def manager_report_page(conn) -> None:
         (*team_ids, pts_from.isoformat(), pts_to.isoformat()),
     )
 
-    # Build name lookup
-    _name_map = {int(e["employee_id"]): f"{e['last_name']}, {e['first_name']}" for e in team}
-    point_events = [
-        {
+    # Build name + point total lookup
+    _name_map  = {int(e["employee_id"]): f"{e['last_name']}, {e['first_name']}" for e in team}
+    _total_map = {int(e["employee_id"]): float(e.get("point_total") or 0) for e in team}
+    _DOW_ORDER = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+    point_events = []
+    for r in ev_rows:
+        try:
+            _dow = pd.to_datetime(str(r["point_date"])).day_name()
+        except Exception:
+            _dow = "Unknown"
+        point_events.append({
             "employee_id": int(r["employee_id"]),
             "name":        _name_map.get(int(r["employee_id"]), ""),
+            "point_total": _total_map.get(int(r["employee_id"]), 0.0),
             "point_date":  r["point_date"],
+            "day_of_week": _dow,
             "points":      float(r["points"] or 0),
             "reason":      r.get("reason") or "—",
             "note":        r.get("note") or "",
-        }
-        for r in ev_rows
-    ]
+        })
     # Sort by name then date
     point_events.sort(key=lambda x: (x["name"].lower(), str(x["point_date"])))
 
@@ -6817,13 +6854,49 @@ def manager_report_page(conn) -> None:
         affected = len({ev["employee_id"] for ev in point_events})
         st.caption(f"{len(point_events)} event{'s' if len(point_events) != 1 else ''} — {affected} employee{'s' if affected != 1 else ''} affected")
         ev_df = pd.DataFrame([{
-            "Employee":   ev["name"],
-            "Date":       fmt_date(ev["point_date"]),
-            "Points":     ev["points"],
-            "Reason":     ev["reason"],
-            "Note":       ev["note"],
+            "Employee":    ev["name"],
+            "Point Total": ev["point_total"],
+            "Date":        fmt_date(ev["point_date"]),
+            "Day":         ev["day_of_week"],
+            "Points":      ev["points"],
+            "Reason":      ev["reason"],
+            "Note":        ev["note"],
         } for ev in point_events])
         st.dataframe(ev_df, use_container_width=True, hide_index=True)
+
+        # Day-of-week breakdown (Mon–Fri only)
+        import plotly.graph_objects as go
+        dow_data = {}
+        for ev in point_events:
+            d = ev["day_of_week"]
+            if d in _DOW_ORDER:
+                dow_data[d] = dow_data.get(d, 0.0) + ev["points"]
+        dow_pts   = [dow_data.get(d, 0.0) for d in _DOW_ORDER]
+        dow_count = {}
+        for ev in point_events:
+            d = ev["day_of_week"]
+            if d in _DOW_ORDER:
+                dow_count[d] = dow_count.get(d, 0) + 1
+        dow_fig = go.Figure(go.Bar(
+            x=_DOW_ORDER,
+            y=dow_pts,
+            marker_color=["#00d4ff", "#7b61ff", "#00e5a0", "#ffa94d", "#ff6b6b"],
+            text=[f"{p:.1f} pts<br>({dow_count.get(d,0)} events)" for d, p in zip(_DOW_ORDER, dow_pts)],
+            textposition="outside",
+            hovertemplate="%{x}: %{y:.1f} pts<extra></extra>",
+        ))
+        dow_fig.update_layout(
+            title=dict(text="Points by Day of Week", font=dict(color="#c8dff5", size=13), x=0),
+            plot_bgcolor="rgba(0,0,0,0)",
+            paper_bgcolor="rgba(0,0,0,0)",
+            margin=dict(l=0, r=0, t=40, b=0),
+            height=240,
+            yaxis=dict(gridcolor="rgba(255,255,255,0.06)", color="#7899c8", title="Total Points"),
+            xaxis=dict(color="#7899c8"),
+            font=dict(color="#c8dff5"),
+            bargap=0.35,
+        )
+        st.plotly_chart(dow_fig, use_container_width=True, key="mgr_dow_bar")
 
     # ── Upcoming events ───────────────────────────────────────────────────────
     ro_soon = [e for e in team if (d := _safe_date(e.get("rolloff_date")))
