@@ -3610,7 +3610,18 @@ def pto_page(conn, building: str) -> None:
 
     # ── PTO type toggle chips ────────────────────────────────────────────────
     def _tkey(t: str) -> str:
-        return "pto_toggle_" + _re.sub(r"[^a-z0-9]", "_", t.lower())
+        return _tkey_map[t]
+
+    _tkey_map: dict[str, str] = {}
+    _base_counts: dict[str, int] = {}
+    for _t in all_types:
+        _base = "pto_toggle_" + _re.sub(r"[^a-z0-9]", "_", _t.lower())
+        if _base not in _base_counts:
+            _base_counts[_base] = 0
+            _tkey_map[_t] = _base
+        else:
+            _base_counts[_base] += 1
+            _tkey_map[_t] = f"{_base}_{_base_counts[_base]}"
 
     # Reset toggle state if the type list has changed (new CSV loaded)
     if set(st.session_state.get("pto_type_toggles", {}).keys()) != set(all_types):
